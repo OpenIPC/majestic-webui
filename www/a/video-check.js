@@ -159,6 +159,18 @@
 		// finding here that names a thing the owner can simply switch on.
 		if (get(cfg, 'video0.enabled') === false &&
 			get(cfg, 'video1.enabled') === false) {
+			// With the microphone on there is still something to hear, and
+			// the Live page plays it: the same fact,
+			// said as a note rather than a reason to leave the page.
+			if (get(cfg, 'audio.enabled') === true) {
+				return {
+					code: 'off', where: 'config', conclusive: false,
+					title: 'Sound only',
+					detail: 'No video channel is turned on, so there is no ' +
+						'picture; the camera offers its sound alone.',
+					act: { href: 'camera.cgi?tab=video0', label: 'Open Video settings' },
+				};
+			}
 			return {
 				code: 'off', where: 'config', conclusive: true,
 				title: 'No video channel is turned on',

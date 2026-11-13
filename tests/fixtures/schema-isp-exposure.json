@@ -1,0 +1,232 @@
+{
+  "aeMode": {
+    "enum": [
+      "auto",
+      "manual"
+    ],
+    "type": "string",
+    "title": "Exposure mode",
+    "default": "auto",
+    "hint": "Automatic follows the light within the limits below; manual holds what you set.",
+    "help": "In automatic mode the exposure and gains below are limits auto-exposure works inside. In manual they are the values themselves, and only what is set is held: an exposure or gain left empty goes on following the light. The reaction settings wait for automatic mode.",
+    "x-enum-titles": {
+      "auto": "Automatic",
+      "manual": "Manual"
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "exposure": {
+    "type": "number",
+    "title": "Longest exposure",
+    "minimum": 0.0,
+    "maximum": 10000.0,
+    "x-title-when": [
+      {
+        "field": "aeMode",
+        "equals": "manual",
+        "title": "Exposure time"
+      }
+    ],
+    "x-unit": "ms",
+    "hint": "Empty is automatic. The longer you allow, the lower the frame rate can fall in the dark: 100 ms is at most 10 frames a second.",
+    "help": "In automatic mode this is the longest auto-exposure may use. In manual it is the exposure itself, still bounded by the frame period. Fractional: 0.5 is half a millisecond.",
+    "x-metric": {
+      "now": "isp_exptime",
+      "inForce": "isp_exptime_max",
+      "scale": 0.001
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "aGain": {
+    "type": "number",
+    "title": "Highest analog gain",
+    "minimum": 0.0,
+    "maximum": 1024.0,
+    "x-title-when": [
+      {
+        "field": "aeMode",
+        "equals": "manual",
+        "title": "Analog gain"
+      }
+    ],
+    "x-unit": "×",
+    "hint": "1x adds no gain; 2x doubles the signal and its noise. Empty is automatic.",
+    "help": "In automatic mode this is the highest auto-exposure may use; in manual it is the gain itself. Tenths are fine: 1.5 is one and a half times.",
+    "x-metric": {
+      "now": "isp_again",
+      "inForce": "isp_again_max",
+      "scale": 0.0009765625
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "dGain": {
+    "type": "number",
+    "title": "Highest sensor digital gain",
+    "minimum": 0.0,
+    "maximum": 1024.0,
+    "x-unit": "×",
+    "hint": "Empty is automatic: 1x while slow shutter is on, and the sensor's own limit with it off, which can be over 100x. In manual mode it does nothing.",
+    "help": "Unlike the other two gains this one is a ceiling and never a value. These sensors carry a single combined gain register, so there is no separate digital gain to hold at a figure; measured, a manual setting here leaves the picture and the raw data untouched. Use the analog gain when the exposure mode is manual.",
+    "x-metric": {
+      "now": "isp_dgain",
+      "inForce": "isp_dgain_max",
+      "scale": 0.0009765625
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "ispGain": {
+    "type": "number",
+    "title": "Highest ISP gain",
+    "minimum": 0.0,
+    "maximum": 256.0,
+    "x-title-when": [
+      {
+        "field": "aeMode",
+        "equals": "manual",
+        "title": "ISP gain"
+      }
+    ],
+    "x-unit": "×",
+    "hint": "Applied after the raw data is read, so it brightens the picture and not a RAW snapshot. Empty is automatic.",
+    "help": "In automatic mode this is the highest auto-exposure may use; in manual it is the gain itself.",
+    "x-metric": {
+      "now": "isp_ispdgain",
+      "inForce": "isp_ispdgain_max",
+      "scale": 0.0009765625
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "aeStrategy": {
+    "enum": [
+      "default",
+      "highlight",
+      "lowlight"
+    ],
+    "type": "string",
+    "title": "Metering priority",
+    "default": "default",
+    "x-enum-titles": {
+      "default": "Camera's choice",
+      "highlight": "Protect highlights",
+      "lowlight": "Protect shadows"
+    },
+    "hint": "Which end of the picture keeps its detail when both cannot, such as a lit number plate at night.",
+    "help": "Protect highlights holds the bright end down, for a scene whose subject is the brightest thing in it; protect shadows favours the dark end. The camera's choice restores what the image pipeline picked on its own.",
+    "x-reload": "live",
+    "x-live": true
+  },
+  "aeSpeed": {
+    "minimum": 0,
+    "maximum": 255,
+    "type": "integer",
+    "title": "Reaction speed",
+    "hint": "A step with no unit, 1 to 255: higher chases a change in light sooner and can visibly pump. Empty keeps the image profile's.",
+    "help": "Empty, or 0, keeps whatever the camera's image profile asked for, which is what most cameras should run. Raise it for a doorway or a gateway where the light changes as something passes; lower it for a scene with moving highlights, where a fast reaction shows up as the whole picture breathing.",
+    "x-metric": {
+      "inForce": "isp_ae_speed",
+      "scale": 1.0
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "aeTolerance": {
+    "minimum": 0,
+    "maximum": 255,
+    "type": "integer",
+    "title": "Tolerance",
+    "x-unit": "levels",
+    "hint": "How far brightness may drift from its target, in levels out of 255, before exposure moves. Empty keeps the image profile's.",
+    "help": "Empty, or 0, keeps the image profile's value. Raising it stops small changes in the scene from moving the picture; raise it far enough and the camera stops correcting for real changes too.",
+    "x-metric": {
+      "inForce": "isp_ae_tolerance",
+      "scale": 1.0
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "aeBlackDelay": {
+    "minimum": 0,
+    "maximum": 65535,
+    "type": "integer",
+    "title": "Darkening delay",
+    "x-unit": "frames",
+    "hint": "Frames to wait before reacting to the picture getting darker. Empty keeps the image profile's.",
+    "help": "Empty, or 0, keeps the image profile's value. Useful where something briefly blocks the view — a lorry, a bird, a hand over the lens — and you would rather the camera sat still than opened up and closed again.",
+    "x-metric": {
+      "inForce": "isp_ae_black_delay",
+      "scale": 1.0
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "aeWhiteDelay": {
+    "minimum": 0,
+    "maximum": 65535,
+    "type": "integer",
+    "title": "Brightening delay",
+    "x-unit": "frames",
+    "hint": "Frames to wait before reacting to the picture getting brighter. Empty keeps the image profile's.",
+    "help": "Empty, or 0, keeps the image profile's value. The counterpart to the darkening delay, for a scene where headlights or a torch sweep through and the picture should not dive after them.",
+    "x-metric": {
+      "inForce": "isp_ae_white_delay",
+      "scale": 1.0
+    },
+    "x-reload": "live",
+    "x-live": true
+  },
+  "slowShutter": {
+    "enum": [
+      "disabled",
+      "low",
+      "medium",
+      "high"
+    ],
+    "type": "string",
+    "title": "Slow shutter",
+    "default": "medium",
+    "x-enum-titles": {
+      "disabled": "Off · keep the frame rate",
+      "low": "Low · up to 2 frames",
+      "medium": "Medium · up to 2.5 frames",
+      "high": "High · up to 3.3 frames"
+    },
+    "hint": "In the dark, lets one exposure last longer than a frame: a brighter, less noisy picture at a lower frame rate, and more blur on anything moving.",
+    "help": "At 25 fps, low goes down to 12.5 fps, medium to 10 and high to 7.5. A longest exposure set below takes its place. Off keeps the frame rate and brightens with gain alone. It also sets the gain limits used while those are empty: 32x analog, 1x sensor digital and 4x ISP with slow shutter on, the sensor's own limits with it off.",
+    "x-reload": "live",
+    "x-live": true
+  },
+  "dehaze": {
+    "type": "integer",
+    "title": "Dehaze strength",
+    "default": 125,
+    "minimum": -1,
+    "maximum": 255,
+    "hint": "Lifts contrast through haze and fog. 0 turns it off; -1 lets the camera's image profile vary it with the light.",
+    "help": "It is a contrast stretch: helpful in haze, and a night scene it was not asked for loses shadow detail to it. -1 hands the block to the IQ profile instead, which is the only way its [dynamic_dehaze] curve can run — any strength at all forces the manual mode the curve is ignored in. The default is unchanged at 125, so no camera moves without being told to.",
+    "x-reload": "live",
+    "x-live": true
+  },
+  "externalTuner": {
+    "type": "boolean",
+    "title": "Hand the picture to a tuning tool",
+    "default": false,
+    "hint": "Stops the camera re-applying its own image settings, so a tool like PQTools can change them. For a tuning session only.",
+    "help": "The profile's ISO ladders are pushed every ten seconds and automatic tuning moves contrast and dehaze every couple of seconds, so a value written from outside is overwritten before anyone can look at it. While this is on, none of those run and a day/night change does not re-read the profile. Turn it off and the camera takes the picture back on the next tick — nothing is saved, so read the result out with GET /api/v1/isp/profile.ini before you do.",
+    "x-reload": "live",
+    "x-live": true
+  },
+  "meterRect": {
+    "type": "array",
+    "title": "Metering area",
+    "default": [],
+    "hint": "The part of the picture exposure is judged on. Draw one around a subject much brighter or darker than the rest; empty uses the whole picture.",
+    "help": "Use it when the subject is much brighter or darker than its surroundings — a lit number plate clips at the exposure the rest of a night scene needs. The camera's metering window is at least 256x120, so a smaller rectangle is grown around its own centre. Written as XxYxWxH.",
+    "x-reload": "live",
+    "x-live": true
+  }
+}

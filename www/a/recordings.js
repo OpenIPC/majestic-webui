@@ -29,6 +29,12 @@
 	let zoom = 2;                     // index into ZOOMS -> one hour
 
 	const state = {
+		// The camera's answer for the day on screen, or null for UNKNOWN —
+		// no answer yet, an older camera, a card that could not be read. Not
+		// the same as an answer of "nothing moved", and the lane draws them
+		// differently for that reason.
+		motion: null,
+		motionWhy: '',
 		cfg: {}, prefix: '', split: 1200, enabled: false, card: null,
 		recorder: null, onMotion: false, droppedAt: null,
 		offsetMs: 0, offsetKnown: false, zone: null, nowSec: null, today: '',
@@ -317,6 +323,91 @@
 			.catch(function () { state.days = []; });
 	}
 
+	// The camera's own record of when it saw movement, for this day.
+	//
+	// Guarded by the same token as the day listing: switching days fast enough
+	// leaves two requests in flight and they can land out of order, and a lane
+	// painted from the day nobody is looking at any more is worse than an
+	// empty one.
+	//
+	// Every failure leaves state.motion null, which the lane draws as UNKNOWN
+	// rather than as "nothing moved". A 404 is the commonest and is not an
+	// error at all: it is a camera too old to have the endpoint, which is
+	// exactly the case worth telling a reader about rather than hiding.
+	function loadMotion(name, token) {
+		state.motion = null;
+		// Set BEFORE the request, not left empty: until the camera answers,
+		// what this lane knows is nothing, and the fallback caption states a
+		// fact about the camera ("keeps no index") that no answer supports
+		// yet. Every branch below replaces it with what actually happened.
+		state.motionWhy = 'Motion — asking the camera';
+
+		// The '.' day is a records.path with no date in it, so every clip
+		// lands in one directory and the camera's index is keyed by real date.
+		// Ask for today, and only if the page knows what today is.
+		const date = name === '.' ? state.today : name;
+		if (!date) {
+			state.motionWhy = 'Motion — this camera does not say what day it is';
+			return;
+		}
+
+		apiFetch('/api/v1/analytics/day?d=' + encodeURIComponent(date),
+			{ credentials: 'same-origin' })
+			.then(function (r) {
+				if (r.status === 404) {
+					state.motionWhy =
+						'Motion — this camera is too old to keep an index';
+					return null;
+				}
+				// A refusal or a fault is NOT evidence that the camera keeps
+				// no index — 403 says this account may not read it and 500
+				// says the camera broke. Only the 404 above is a statement
+				// about what the firmware has.
+				if (!r.ok) {
+					state.motionWhy = 'Motion — the camera refused (HTTP ' +
+						r.status + ')';
+					return null;
+				}
+				return r.json();
+			})
+			.then(function (j) {
+				if (token !== dayToken) return;
+				if (!j || j.source === 'unreadable') {
+					if (j) state.motionWhy = 'Motion — the card could not be read';
+					renderMotion();
+					return;
+				}
+				// The shape is checked rather than coerced. `spans || []`
+				// turns a truncated or half-written answer into "nothing
+				// moved", which is a claim about the premises; a malformed
+				// answer is an unknown, and unknown is what the hatched lane
+				// is for.
+				if (!Array.isArray(j.spans) || !Array.isArray(j.watched)) {
+					state.motionWhy = 'Motion — the camera answered with nonsense';
+					renderMotion();
+					return;
+				}
+				const num = function (v) {
+					return typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0;
+				};
+				state.motion = {
+					spans: j.spans,
+					watched: j.watched,
+					events: num(j.events),
+					seconds: num(j.seconds),
+					merged: num(j.merged),
+					capped: !!j.capped,
+					torn: !!j.torn,
+				};
+				renderMotion();
+			})
+			.catch(function () {
+				if (token !== dayToken) return;
+				state.motionWhy = 'Motion — the camera did not answer';
+				renderMotion();
+			});
+	}
+
 	function loadDay(name) {
 		state.dayName = name;
 		// Switching days fast enough leaves two requests in flight, and they can
@@ -324,6 +415,7 @@
 		// more would overwrite the newer model, while clip paths keep being built
 		// from the newer dayName — a listing of one day fetched from another.
 		const token = ++dayToken;
+		loadMotion(name, token);
 		return api('day=' + encodeURIComponent(name))
 			.then(function (j) {
 				if (token !== dayToken) return;
@@ -444,8 +536,24 @@
 		let xform = null;
 
 		function through(what, bytes) {
-			if (!xform || !xform[what]) return bytes;
-			return xform[what](bytes);
+			const out = (xform && xform[what]) ? xform[what](bytes) : bytes;
+			// And the camera's analytics metadata track comes back out, on
+			// every clip, whether or not it is sealed.
+			//
+			// The camera can store detection boxes in the recording as an ISO
+			// 14496-12 timed metadata track. Safari 26.6 refuses such a file
+			// alongside H.264 — MEDIA_ERR_DECODE at t=0, measured on macOS 15
+			// against the same recording without the track — while accepting
+			// it alongside H.265, and macOS 14 accepts both. majestic records
+			// H.264 by default, so that is most cameras, not a corner.
+			//
+			// Unconditional because the cost of asking is one walk of the box
+			// list: a clip without the track is handed straight back, the
+			// same object, uncopied. After the decryption transform, not
+			// before, so there is one order to reason about rather than two.
+			const META = window.MajesticMp4Meta;
+			if (!META) return out;
+			return what === 'init' ? META.stripInit(out) : META.stripFragment(out);
 		}
 
 		function fill() {
@@ -788,7 +896,10 @@
 			}
 
 			const codec = codecFromHeader(clearHead);
-			const mime = 'video/mp4; codecs="' + (codec || 'avc1.42E01E') + '"';
+			const audioOnly = codec ? null : audioFromHeader(clearHead);
+			const mime = audioOnly
+				? 'audio/mp4; codecs="' + audioOnly + '"'
+				: 'video/mp4; codecs="' + (codec || 'avc1.42E01E') + '"';
 
 			// An unplayable codec does not raise `error` on a <video>: H.265
 			// parses, reports a duration and then sits at videoWidth 0 forever.
@@ -1005,7 +1116,7 @@
 	function cardTrouble() {
 		const lost = droppedSeconds();
 		const v = SV.of(state.card, state.recorder,
-			lost > 0 ? TL.duration(lost) : '', state.prefix);
+			lost > 0 ? SV.duration(lost) : '', state.prefix);
 		return v ? v.detail : '';
 	}
 
@@ -1033,15 +1144,11 @@
 			'<pre class="x-small mb-0" style="white-space:pre-wrap">' + esc(d.fsErrors.join('\n')) + '</pre></div>';
 	}
 
-	// The reserved motion lane's caption. Empty in both modes — no camera
-	// records where the movement was inside a clip — but the reason differs,
-	// and so does what the band above already tells you.
+	// The motion lane's caption. It used to say the lane would light up "once
+	// the camera records detection events", because none did; it does now, so
+	// this repaints the lane instead and motionNote() supplies the words.
 	function renderMotionNote() {
-		const el = $id('rec-motion-note');
-		if (!el) return;
-		el.textContent = state.onMotion
-			? 'Motion — each clip above is one event, with the seconds before it'
-			: 'Motion — lights up once the camera records detection events';
+		renderMotion();
 	}
 
 	function renderHealth() {
@@ -1084,10 +1191,47 @@
 		// footage actually costs per second.
 		const day = state.day.clips.reduce(function (a, c) { return a + c.dur; }, 0);
 		const bytes = state.day.clips.reduce(function (a, c) { return a + c.size; }, 0);
+		// Room before the OLDEST CLIPS START GOING, which is not the free
+		// space — see MajesticStorageVerdict.headroom for why, and for what
+		// reading the free space here was measured to promise.
+		const head = SV.headroom(total, used, mjGet(state.cfg, 'records.maxUsage'));
+		const room = head.room, capped = head.capped;
 		// A projection of how long the card will last is a promise about future
 		// writes, so it is only offered while future writes are possible.
-		const left = (d.health === 'ok' && day > 0 && bytes > 0)
-			? ' · about ' + TL.duration(free / (bytes / day)) + ' of footage left' : '';
+		//
+		// Past the threshold there is no such promise to make: the archive is a
+		// rolling window, and a duration there would be answering "how much
+		// more" with a number when the answer is "no more — it is trading the
+		// oldest for the newest now". That is the state a full camera sits in
+		// for the rest of its life, so it is the sentence most people will see.
+		const rate = (day > 0 && bytes > 0) ? bytes / day : 0;
+		// head.known is the gate, and it is not optional. A card response that
+		// arrived without its usage, or a configuration fetch that failed and
+		// resolved to {}, both reach here looking like ordinary numbers — and
+		// both would produce a confident duration out of a reading nobody took.
+		// Is anything actually being written? Both halves of the line below are
+		// present-tense claims about a running recorder, and neither survives
+		// one that is off: nothing is being deleted to make room when nothing
+		// needs room, and there is no "footage left" to count down when no
+		// footage is arriving. A camera switched off at the threshold, or one
+		// whose recorder has failed, sits in exactly that state — with a full
+		// card and a healthy filesystem, which is what carried it past the
+		// checks above.
+		//
+		// `enabled` is safe to require as a reading here: a configuration fetch
+		// that failed takes the threshold with it, so head.known is already
+		// false and nothing is claimed at all.
+		const rs = SV.state(state.recorder);
+		const writing = mjGet(state.cfg, 'records.enabled') === true &&
+			(rs === null || rs === 0 || rs === 1);
+		const left = (d.health !== 'ok' || !rate || !head.known) ? ''
+			: (capped && room <= 0)
+				? (writing
+					? ' · the oldest clips are being deleted to make room for new ones'
+					: ' · at the point where the oldest clips start being deleted')
+				: !writing ? ''
+					: ' · about ' + TL.duration(room / rate) + ' of footage left' +
+						(capped ? ' before the oldest is deleted' : '');
 
 		card.hidden = false;
 		el.innerHTML =
@@ -1217,6 +1361,21 @@
 		return null;
 	}
 
+	// The audio track's codec, for a clip that has no video at all: one
+	// recorded with every video channel off. Asked only
+	// when codecFromHeader() found nothing, so a clip with a picture is
+	// described exactly as before.
+	function audioFromHeader(u8) {
+		const moov = IDX.findBox(u8, 0, u8.length, 'moov');
+		if (!moov) return null;
+		for (let i = moov[0] + 8; i < moov[1] - 4; i++) {
+			const t = fourcc(u8, i);
+			if (t === 'Opus') return 'opus';
+			if (t === 'mp4a') return 'mp4a.40.2';
+		}
+		return null;
+	}
+
 	// ---- rendering -------------------------------------------------------
 
 	function pct(sec, view) { return ((sec - view.from) / view.width * 100); }
@@ -1263,6 +1422,7 @@
 		}
 		band.innerHTML = b;
 
+		renderMotion();
 		renderTicks();
 		renderSelection();
 		const lbl = $id('rec-view-label');
@@ -1275,6 +1435,86 @@
 		const view = state.view, out = [];
 		for (let i = 0; i <= 4; i++) out.push(hhmm(view.from + view.width * i / 4));
 		el.innerHTML = out.map(function (t) { return '<span>' + t + '</span>'; }).join('');
+	}
+
+	// What the camera saw, under the band it is aligned to.
+	//
+	// Presence only: the camera reports WHEN it saw movement and never where
+	// in frame. The geometry lives inside the clip, sealed with the media when
+	// the recording is encrypted, and a lane that showed it would hand back
+	// what that encryption withholds.
+	//
+	// Drawn with the band's own pct(), deliberately, and not with arithmetic
+	// of its own. A lane a pixel out of step with the coverage above it is
+	// read as the camera being wrong about the time.
+	function renderMotion() {
+		const el = $id('rec-motion');
+		if (!el) return;
+		const note = $id('rec-motion-note');
+		const view = state.view;
+
+		// null is UNKNOWN — no answer yet, an older camera, a card that could
+		// not be read. It is not the same as an answer of "nothing moved", and
+		// a lane that drew them alike would show a reassuring empty day for a
+		// camera that had gone blind.
+		if (!state.motion) {
+			el.className = 'rec-motion unknown';
+			el.innerHTML = '';
+			// motionWhy is always set by loadMotion before it asks, so the
+			// fallback is only reached before any day has been selected.
+			if (note) note.textContent = state.motionWhy || 'Motion';
+			return;
+		}
+		el.className = 'rec-motion';
+
+		const width = el.clientWidth || 800;
+		const secPerPx = view.width / width;
+		let h = '';
+
+		// The parts of the view nobody was watching, hatched. A day recorded
+		// before the camera kept an index at all is entirely hatched; a day on
+		// which the detector was switched on at noon is hatched until noon.
+		TL.motionCoverage(state.motion.watched, view).forEach(function (u) {
+			const a = Math.max(u.from, view.from), z = Math.min(u.to, view.to);
+			if (z <= a) return;
+			h += '<div class="unwatched" style="left:' + pct(a, view).toFixed(3) +
+				'%;width:' + ((z - a) / view.width * 100).toFixed(3) + '%"></div>';
+		});
+
+		TL.motionLane(state.motion.spans, view, secPerPx).forEach(function (b) {
+			const a = Math.max(b.from, view.from), z = Math.min(b.to, view.to);
+			if (z <= a) return;
+			const at = b.members[0];
+			h += '<div class="blip" data-at="' + at.from + '" title="' +
+				esc(hhmm(at.from) + '–' + hhmm(at.to) + ' · ' + b.events +
+					(b.events === 1 ? ' detection' : ' detections')) +
+				'" style="left:' + pct(a, view).toFixed(3) + '%;width:' +
+				((z - a) / view.width * 100).toFixed(3) + '%"></div>';
+		});
+		el.innerHTML = h;
+
+		if (note) note.textContent = motionNote();
+	}
+
+	// Four states, and they are deliberately not three: "nothing moved" and
+	// "the camera keeps no record of this day" look identical on an empty lane
+	// and mean opposite things.
+	function motionNote() {
+		const m = state.motion;
+		if (!m) return state.motionWhy || 'Motion — this camera keeps no index';
+		if (!m.spans.length) {
+			return m.watched && m.watched.length
+				? 'Motion — nothing moved while the camera was watching'
+				: 'Motion — the camera was not watching this day';
+		}
+		const extra = [];
+		if (state.onMotion) extra.push('each clip above is one of them');
+		if (m.merged) extra.push('some events merged');
+		if (m.capped) extra.push('more than the index holds');
+		if (m.torn) extra.push('part of the index was unreadable');
+		return 'Motion — ' + m.events +
+			(m.events === 1 ? ' event, ' : ' events, ') + TL.duration(m.seconds) +
+			' in total' + (extra.length ? ' · ' + extra.join(' · ') : '');
 	}
 
 	// The whole-day axis under the ribbon. Unshifted it is the 00…24 the page
@@ -1792,6 +2032,27 @@
 		};
 		band.addEventListener('mousedown', bandDown);
 		band.addEventListener('touchstart', bandDown, { passive: false });
+
+		// A press on the motion lane goes to the event under it, not to the
+		// second pressed: at the whole-day zoom a blip stands for something
+		// several minutes wide, and landing in the middle of the drawn
+		// rectangle would land between two events as often as on one.
+		const lane = $id('rec-motion');
+		if (lane) lane.addEventListener('click', function (e) {
+			if (!state.motion) return;
+			const r = lane.getBoundingClientRect();
+			if (!r.width) return;
+			const at = state.view.from +
+				(e.clientX - r.left) / r.width * state.view.width;
+			const hit = TL.motionAt(state.motion.spans, at,
+				state.view.width / (lane.clientWidth || 800));
+            if (!hit) return;
+			// A little before it, because the interesting part of a detection
+			// is what led to it — and in records.mode: motion the run-up is
+			// already inside the clip, so landing on the trigger second would
+			// skip the approach the operator asked to keep.
+			goTo(Math.max(0, hit.from - (state.onMotion ? 5 : 2)));
+		});
 		document.addEventListener('mousemove', bandMove);
 		document.addEventListener('touchmove', bandMove, { passive: false });
 		document.addEventListener('mouseup', function () { mode = null; });

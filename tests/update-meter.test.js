@@ -130,7 +130,10 @@ function start(opts) {
 	for (const f of ['fw-changes.js', 'update.js']) {
 		vm.runInContext(fs.readFileSync(A(f), 'utf8'), ctx);
 	}
-	els['fw-install-github']._on.click[0]({ preventDefault() {} });
+	// Install is delegated from #fw-controls, because the hero it sits in is
+	// replaced once the build check answers; the click arrives there.
+	els['fw-controls']._on.click[0]({ target: { closest: () => els['fw-install-github'] },
+		preventDefault() {} });
 	ws.onopen(ws);
 
 	const r = { els: els, ws: ws };

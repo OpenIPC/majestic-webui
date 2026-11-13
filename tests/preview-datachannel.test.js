@@ -240,9 +240,17 @@ const ANSWER_DECLINED = 'v=0\r\nm=application 0 UDP/DTLS/SCTP webrtc-datachannel
 		env.now += 5000;
 		dc.onmessage({ data: header(3, 0x03, 0, 1, 9, 0, bytes('moof9')) });
 		check('a hole the camera flagged asks nothing either', f.stats().seqGaps === 3 && f.stats().camGaps === 2 && env.sock().sent.filter((s) => s.req === 'idr').length === asked);
+		// Seqs 1 2 4 6 7 9 arrived; 3, 5 and 8 did not. Counted in frames,
+		// not holes, so the Live stats grade a share rather than an event —
+		// and 8 was the camera's own drop (9 carries its flag), which says
+		// nothing about the link the stats panel is grading.
+		check('frames are counted in, and only the link\'s holes as missing', f.stats().frames === 6 && f.stats().framesMissed === 2, JSON.stringify([f.stats().frames, f.stats().framesMissed]));
 		// Late: an older seq after a newer one is dropped.
 		const before = got.length;
 		dc.onmessage({ data: header(3, 0x00, 0, 1, 5, 0, bytes('moof5')) });
+		// The channel is unordered: a hole can be filled late. Too late for
+		// the picture, but the link delivered it, so it is not a loss.
+		check('a frame that arrives late gives its hole back', f.stats().framesMissed === 1, String(f.stats().framesMissed));
 		check('a late frame is dropped', got.length === before && f.stats().late === 1);
 		const st = f.stats();
 		check('stats carry the feed, the served reply, the camera line and its clock', st.feed === 'datachannel' && st.served && st.served.transport === 'data' && st.cam.dc === 'up' && st.clock && st.clock.wallMs === 1788954000000);

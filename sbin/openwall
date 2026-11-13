@@ -1,7 +1,8 @@
 #!/bin/sh
-[ -e "/etc/webui/openwall.conf" ] && source /etc/webui/openwall.conf
+[ -e "/etc/webui/openwall.conf" ] && . /etc/webui/openwall.conf
 
-flash_size=$(awk '{sum+=sprintf("0x%s", $2);} END{print sum/1048576;}' /proc/mtd)
+. /var/www/cgi-bin/p/flash.sh
+flash_size=$(flash_bytes | awk '{print $1/1048576}')
 fw_variant=$(grep "BUILD_OPTION" /etc/os-release | cut -d= -f2 | tr -d '"')
 fw_version=$(grep "OPENIPC_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
 
@@ -25,18 +26,41 @@ if [ "$openwall_enabled" != "true" ]; then
 	exit 1
 fi
 
-if [ "$openwall_heif" = "true" ]; then
-	snapshot=/tmp/snapshot.heif
-	content_type="image/heif"
-	wget -q -T1 localhost/image.heif -O "$snapshot"
-else
-	snapshot=/tmp/snapshot.jpg
-	content_type="image/jpeg"
-	wget -q -T1 localhost/image.jpg -O "$snapshot"
-fi
+# The picture is the camera's own keyframe in HEIF, never a JPEG. The wall
+# stores what it is sent byte for byte and hands visitors that same keyframe to
+# decode, so what goes up here is exactly what gets shown: at the same size it
+# is about half the bytes of the JPEG the encoder would make of the same frame.
+#
+# The second picture is the substream's keyframe, which the wall's grid shows
+# in place of scaling the main one down in every visitor's browser. It is not
+# asked for while the substream is known to be off: asked of a stream that is
+# off, the camera holds the request open instead of refusing it. When the
+# setting cannot be read at all, that is not the same as "off", so the picture
+# is asked for anyway -- -T bounds what a wrong guess costs -- and the upload
+# goes ahead with or without it.
+#
+# Each run works in a directory of its own, so a run that starts before the
+# previous one has finished cannot remove the files that one is uploading.
+workdir=$(mktemp -d /tmp/openwall.XXXXXX) || exit 1
+snapshot="$workdir/main.heif"
+thumb="$workdir/thumb.heif"
+trap 'rm -f "$snapshot" "$thumb"; rmdir "$workdir"' EXIT
 
-if [ ! -e "$snapshot" ]; then
-	echo "Snapshot file not found"
+wget -q -T 10 localhost/image.heif -O "$snapshot"
+
+. /var/www/cgi-bin/p/majestic.sh
+substream=$(mj_cfg video1.enabled)
+case $? in
+	0) [ "$substream" = "true" ] && want_thumb=1 ;;
+	1) ;; # no such setting: no substream
+	*) echo "Could not read whether the substream is on; asking for its picture anyway"
+	   want_thumb=1 ;;
+esac
+[ -n "$want_thumb" ] && wget -q -T 10 "localhost/image.heif?stream=1" -O "$thumb"
+
+# -s, not -e: a wget that fails still leaves the file it opened, empty.
+if [ ! -s "$snapshot" ]; then
+	echo "Snapshot could not be taken"
 	exit 1
 fi
 
@@ -45,30 +69,57 @@ if [ -z "$network_macaddr" ]; then
 	exit 1
 fi
 
-command="curl --verbose"
-command="${command} --connect-timeout 100"
-command="${command} --max-time 100"
+# An argument list, not a command line handed to eval.
+#
+# Almost everything below is read off the device or out of a form, and several
+# of them can hold a space or a quote: the caption is free prose an operator
+# typed, the camera's own name is whatever `hostname` returns, and the proxy
+# credentials come from the proxy page. The lines this replaced wrapped each
+# value in single quotes and escaped nothing inside them, so an apostrophe in
+# any one of them -- a caption reading `Ivan's yard` -- ended the quoting early
+# and handed the remainder of the upload to the shell, while the proxy user and
+# password were pasted in with no quoting at all. Passed as "$@" the values need
+# no quoting rules: each one reaches curl whole (#547).
+#
+# --location follows a redirect, and --post301/--post302 keep it a POST with
+# the same form: without them curl turns a redirected POST into a GET and the
+# picture is lost on the way. openipc.org sends the networks that cannot reach
+# it intact to a mirror with a 301 -- in Russia the TSPU freezes an upload to
+# it after the first 20-odd kilobytes -- and decides which networks and which
+# mirror itself, so no mirror is named here.
+set -- curl --verbose --connect-timeout 100 --max-time 100 \
+	--location --max-redirs 3 --post301 --post302
 
 if [ "$openwall_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
-	source /etc/webui/proxy.conf
-	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
-	command="${command} --proxy-user ${socks5_username}:${socks5_password}"
+	. /etc/webui/proxy.conf
+	set -- "$@" --socks5-hostname "${socks5_host}:${socks5_port}"
+	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
 fi
 
-command="${command} --url https://openipc.org/snapshots"
-command="${command} -F 'mac_address=${network_macaddr}'"
-command="${command} -F 'firmware=${fw_version}-${fw_variant:-lite}'"
-command="${command} -F 'flash_size=${flash_size}'"
-command="${command} -F 'hostname=${network_hostname}'"
-command="${command} -F 'caption=${openwall_caption}'"
-command="${command} -F 'sensor=${sensor}'"
-command="${command} -F 'soc=${soc}'"
-command="${command} -F 'soc_temperature=${temperature}'"
-command="${command} -F 'streamer=${streamer}'"
-command="${command} -F 'uptime=${uptime}'"
-command="${command} -F 'file=@${snapshot};type=${content_type}'"
+# The text parts go as --form-string, which takes a value as it stands. Under
+# -F a value that starts with @ or < names a file for curl to read instead, so
+# a caption typed as `@/etc/shadow` would have uploaded that file in its place.
+set -- "$@" --url https://openipc.org/snapshots
+set -- "$@" --form-string "mac_address=${network_macaddr}"
+set -- "$@" --form-string "firmware=${fw_version}-${fw_variant:-lite}"
+set -- "$@" --form-string "flash_size=${flash_size}"
+set -- "$@" --form-string "hostname=${network_hostname}"
+set -- "$@" --form-string "caption=${openwall_caption}"
+# The code from openipc.org/club that links this camera to a club account.
+# Optional on both sides: sent only when there is one, and the site answers an
+# upload the same with or without it.
+[ -n "$openwall_club" ] && set -- "$@" --form-string "club=${openwall_club}"
+set -- "$@" --form-string "sensor=${sensor}"
+set -- "$@" --form-string "soc=${soc}"
+set -- "$@" --form-string "soc_temperature=${temperature}"
+set -- "$@" --form-string "streamer=${streamer}"
+set -- "$@" --form-string "uptime=${uptime}"
+set -- "$@" -F "file=@${snapshot};type=image/heif"
+[ -s "$thumb" ] && set -- "$@" -F "thumb=@${thumb};type=image/heif"
 
-echo "$command"
-eval "$command"
+# The command line is not echoed. It carries --proxy-user, and this runs from
+# cron, so the credential went wherever that camera sends its cron output. The
+# two notification senders each dropped the same echo for the same reason.
+"$@"
 
 exit 0

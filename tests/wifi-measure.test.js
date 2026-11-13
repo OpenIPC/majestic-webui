@@ -44,15 +44,15 @@ function lift(re, what) {
 	return m[0];
 }
 const src = lift(/\n\tconst WIFI_SCALE = \{[\s\S]*?\n\t\};\n/, 'WIFI_SCALE') +
-	lift(/\n\tconst WIFI_LAPSE = \d+;\n/, 'WIFI_LAPSE') +
+	lift(/\n\tconst WIFI_LAPSE_MS = \d+;\n/, 'WIFI_LAPSE_MS') +
 	lift(/\n\tfunction wifiMeasure\(v, cur, lapsed\) \{[\s\S]*?\n\t\}\n/, 'wifiMeasure()') +
 	lift(/\n\tfunction wifiGrade\(v, unit\) \{[\s\S]*?\n\t\}\n/, 'wifiGrade()');
 const lifted = vm.runInNewContext(
 	'(function(){' + src +
-	'return {S: WIFI_SCALE, LAPSE: WIFI_LAPSE, measure: wifiMeasure, ' +
+	'return {S: WIFI_SCALE, LAPSE_MS: WIFI_LAPSE_MS, measure: wifiMeasure, ' +
 	'grade: wifiGrade}})()', {});
 const S = lifted.S, measure = lifted.measure, grade = lifted.grade;
-const LAPSE = lifted.LAPSE;
+const LAPSE_S = lifted.LAPSE_MS / 1000;
 
 // The parser is main.js's; reuse it so the fixtures are read exactly as the
 // browser reads them.
@@ -143,9 +143,10 @@ check('a lapse with nothing else to offer changes nothing',
 	measure({ wifi_bitrate_mbps: 72.2 }, 'dbm', true) === null,
 	saw(measure({ wifi_bitrate_mbps: 72.2 }, 'dbm', true)));
 // The window has to be longer than a re-association and shorter than sitting
-// watching the page: at the 2s heartbeat, between half a minute and five.
+// watching the page: between half a minute and five. A duration, so it holds
+// at a share guest's 10 s heartbeat as at the 2 s one.
 check('the lapse window is measured in tens of seconds, not polls or hours',
-	LAPSE * 2 >= 30 && LAPSE * 2 <= 300, saw(LAPSE * 2 + ' s'));
+	LAPSE_S >= 30 && LAPSE_S <= 300, saw(LAPSE_S + ' s'));
 
 group('the grade words and the plot bands are one judgement');
 // Each scale's grade edges must lie inside its own plot, or a band is drawn

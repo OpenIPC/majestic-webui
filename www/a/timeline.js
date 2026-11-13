@@ -198,8 +198,120 @@ window.MajesticTimeline = (function () {
 		return n + ' B';
 	}
 
+	// ---- the motion lane -------------------------------------------------
+	//
+	// What the camera reports on /api/v1/analytics/day is presence: when it
+	// saw movement, never where in frame. The geometry lives inside the clip,
+	// sealed with the media when the recording is encrypted, and a lane that
+	// showed it would hand back what that encryption withholds.
+	//
+	// Every function here is arithmetic over [from, to] seconds of the day.
+	// The DOM half lives in recordings.js; what is here is what a test can
+	// reach, which matters because the zoom behaviour is where this fails
+	// invisibly — at the whole-day zoom a ten-second event is a ninth of a
+	// pixel and simply is not drawn.
+
+	// A blip must be wide enough to see and to hit. Three pixels at the
+	// current scale: below that the lane shows movement it cannot be clicked
+	// on, which is worse than showing none.
+	const MIN_BLIP_PX = 3;
+	// And two blips closer than this are one, or the lane draws a hairline
+	// gap nobody can aim between.
+	const MERGE_GAP_PX = 2;
+
+	// Spans as the camera sends them — [from, to, events] — into the shape
+	// the lane draws, clipped to `view` and widened for legibility.
+	//
+	// `members` keeps what a widened or merged blip stands for, so a click on
+	// one resolves to a real event rather than to the middle of a rectangle
+	// that was never a detection.
+	function motionLane(spans, view, secPerPx) {
+		if (!Array.isArray(spans) || !view || !(secPerPx > 0)) return [];
+		const min = MIN_BLIP_PX * secPerPx;
+		const gap = MERGE_GAP_PX * secPerPx;
+		const out = [];
+
+		for (const s of spans) {
+			if (!Array.isArray(s) || s.length < 2) continue;
+			const a = +s[0], b = +s[1];
+			if (!isFinite(a) || !isFinite(b) || b < a) continue;
+			if (b < view.from || a > view.from + view.width) continue;
+
+			// Widened about its own centre, so a blip does not drift away
+			// from the moment it reports.
+			let from = a, to = b;
+			if (to - from < min) {
+				const mid = (from + to) / 2;
+				from = mid - min / 2;
+				to = mid + min / 2;
+			}
+			const member = { from: a, to: b, events: +s[2] || 1 };
+
+			const last = out[out.length - 1];
+			if (last && from - last.to <= gap) {
+				last.to = Math.max(last.to, to);
+				last.events += member.events;
+				last.members.push(member);
+				continue;
+			}
+			out.push({ from: from, to: to, events: member.events,
+				members: [member] });
+		}
+		return out;
+	}
+
+	// The event nearest `sec`, out of a lane's members rather than its drawn
+	// rectangles — clicking a merged blip at the whole-day zoom has to land
+	// on one of the things it stands for.
+	function motionAt(spans, sec, secPerPx) {
+		if (!Array.isArray(spans)) return null;
+		let best = null, bestD = Infinity;
+		for (const s of spans) {
+			if (!Array.isArray(s) || s.length < 2) continue;
+			const a = +s[0], b = +s[1];
+			const d = sec < a ? a - sec : (sec > b ? sec - b : 0);
+			if (d < bestD) { bestD = d; best = { from: a, to: b, events: +s[2] || 1 }; }
+		}
+		// Nothing within a few pixels of the press is nothing the reader was
+		// aiming at.
+		if (!best || bestD > MIN_BLIP_PX * 4 * (secPerPx || 1)) return null;
+		return best;
+	}
+
+	// The parts of `view` the camera was NOT watching, which the lane hatches.
+	//
+	// This is the difference between "nothing moved" and "nobody was looking",
+	// and they are indistinguishable on a plain empty lane. A day recorded
+	// before the camera kept an index at all is entirely unwatched; a day on
+	// which the detector was switched on at noon is unwatched until noon.
+	function motionCoverage(watched, view) {
+		if (!view) return [];
+		const from = view.from, to = view.from + view.width;
+		const w = (Array.isArray(watched) ? watched : [])
+			.filter((x) => Array.isArray(x) && x.length >= 2)
+			.map((x) => ({ from: +x[0], to: +x[1] }))
+			.filter((x) => isFinite(x.from) && isFinite(x.to) && x.to >= x.from)
+			.sort((a, b) => a.from - b.from);
+
+		const out = [];
+		let at = from;
+		for (const x of w) {
+			if (x.to < at) continue;
+			if (x.from > at) out.push({ from: at, to: Math.min(x.from, to) });
+			at = Math.max(at, x.to);
+			if (at >= to) break;
+		}
+		if (at < to) out.push({ from: at, to: to });
+		return out.filter((r) => r.to > r.from);
+	}
+
 	return {
 		DAY: DAY,
+		MIN_BLIP_PX: MIN_BLIP_PX,
+		MERGE_GAP_PX: MERGE_GAP_PX,
+		motionLane: motionLane,
+		motionAt: motionAt,
+		motionCoverage: motionCoverage,
 		JOIN_TOLERANCE: JOIN_TOLERANCE,
 		startOfName: startOfName,
 		cameraOfName: cameraOfName,

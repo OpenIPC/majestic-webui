@@ -31,6 +31,53 @@ Use POST to move the camera."
 	exit 1
 fi
 
+# POST alone was never enough, and the comment above says why in the GET case:
+# this must not be the deputy that launders somebody else's request into a
+# camera command. A cross-site HTML form POSTs with no preflight and no custom
+# header, so `enctype=multipart/form-data` on a page the operator merely visits
+# reaches this script. The session cookie is SameSite=Strict and does not ride
+# -- but a browser holding cached HTTP Basic credentials attaches those, and
+# that is the ordinary state of a WebUI session.
+#
+# The camera's own /ptz answers this by asking the browser where the request
+# came from, and the header it reads is not among the few this script is given.
+# So two tests, and the ORDER of trust matters: the second is the one that
+# actually holds.
+#
+# 1. A Referer naming another origin is refused. Cheap, and it catches the
+#    ordinary case -- but an attacker sets `Referrer-Policy: no-referrer` and
+#    sends none at all, so its absence can prove nothing and must be allowed
+#    (that is also every command-line caller).
+#
+# 2. A form's Content-Type is refused outright. This is the half that cannot be
+#    sidestepped: a cross-site POST that carries no preflight is exactly a POST
+#    a plain HTML form could have made, and a form can only send these three
+#    types. Anything wanting another type needs a preflight, which this endpoint
+#    never answers, so the browser stops it before it arrives.
+#
+# What still gets through is what should: this page's own fetch, which sends its
+# arguments in the query string and so carries no body and no Content-Type at
+# all, and a command-line POST, which carries none either.
+cross_site=""
+if [ -n "$HTTP_REFERER" ]; then
+	ref_origin="${HTTP_REFERER#*://}"
+	ref_origin="${ref_origin%%/*}"
+	[ "$ref_origin" = "$HTTP_HOST" ] || cross_site=1
+fi
+case "$CONTENT_TYPE" in
+	application/x-www-form-urlencoded*|multipart/form-data*|text/plain*)
+		cross_site=1
+		;;
+esac
+if [ -n "$cross_site" ]; then
+	echo "HTTP/1.1 400 Bad Request
+Content-type: text/plain; charset=UTF-8
+Cache-Control: no-store
+
+Cross-site PTZ refused."
+	exit 1
+fi
+
 echo "HTTP/1.1 200 OK
 Content-type: text/plain; charset=UTF-8
 Cache-Control: no-store
@@ -125,11 +172,14 @@ gpio_ok=0
 motor_ok=0
 profile=""
 case "$ptz_control" in
-	# Two Pelco-shaped serial protocols, one verb set, one driver: the camera
-	# holds the port and the WebUI asks it for a verb. This used to exec
-	# /usr/bin/btzoom or /usr/bin/btzoom-xm, which opened the same tty the
-	# camera was already driving for autofocus and raced it for every press.
-	pelco-d|pelco-xm|motorsd|anjoy)
+	# Lenses majestic itself drives: the camera holds the wire and the WebUI asks
+	# it for a verb (mj_ptz). Two are Pelco-shaped serial protocols; ms41908 is the
+	# Panasonic MS41908M SPI stepper on the Hi3516A V100 boards, driven off the ISP
+	# by the majestic-af plugin -- no tty, but the same mj_ptz relationship, so the
+	# same action path serves it. gpiostep is a pan/tilt head of GPIO steppers
+	# that majestic-af drives through the gpiostep kernel module, likewise. This used to exec /usr/bin/btzoom(-xm), which
+	# opened the tty the camera was already driving for autofocus and raced it.
+	pelco-d|pelco-xm|ms41908|gpiostep|motorsd|anjoy)
 		mj_ptz > /dev/null 2>&1
 		case $? in
 			0) pelco_ok=1 ;;
@@ -166,6 +216,8 @@ for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
 		pan|tilt|zoom|focus|iris) ptz_caps="$ptz_caps $cap" ;;
 	esac
 done
+# The same default update_caminfo applies: a gpiostep head is pan and tilt.
+[ -z "$ptz_caps" ] && [ "$ptz_control" = gpiostep ] && ptz_caps=" pan tilt"
 
 has_cap() {
 	[ -z "$ptz_caps" ] && return 0
@@ -189,7 +241,7 @@ has_cap() {
 # attempt report its own failure; only a camera that answered and said no
 # withdraws it.
 af_configured() {
-	_af=$(mj_cfg isp.autofocus.enabled)
+	_af=$(mj_cfg ptz.enabled)
 	case $? in
 		0) [ "$_af" = "true" ] ;;
 		1) return 1 ;;
@@ -220,7 +272,13 @@ if [ -n "$ACTION" ]; then
 		fi
 		r=$(curl -s -m 2 "http://127.0.0.1/autofocus")
 		case "$r" in
-			started|busy) ;;
+			# `restarted` is what the engine answers when this trigger
+			# preempted a pass that was already running and re-armed it —
+			# a second press, which is a legitimate "the scene changed, go
+			# again". It was missing here, so the one case where autofocus
+			# had most obviously just started was reported as a camera that
+			# never answered.
+			started|restarted|busy) ;;
 			*)
 				# A transport failure is not a pass: say so and fail, or the
 				# pad reads a dead engine as instant success.

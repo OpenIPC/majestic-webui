@@ -83,7 +83,7 @@ function makeEnv(o) {
 	const clock = makeClock();
 	const env = { clock, notes: [], status: makeStatusEl(), replaced: null, pings: 0, metricsReads: 0 };
 
-	// The run.cgi stream: chunks the test pushes, then a read that never settles
+	// The factory-reset.cgi POST stream: chunks the test pushes, then a read that never settles
 	// unless the test says otherwise.
 	env.queue = [];
 	let pendingRead = null;
@@ -102,7 +102,7 @@ function makeEnv(o) {
 		return flush();
 	};
 
-	const out = { dataset: { cmd: '/usr/sbin/sysupgrade -n --web' } };
+	const out = {};
 
 	const ctx = {
 		$: (sel) => (sel === '#output' ? out : sel === '#fw-reset-status' ? env.status : null),
@@ -116,7 +116,7 @@ function makeEnv(o) {
 			note: (s) => env.notes.push(s),
 		}),
 		rawFetch: (url) => {
-			if (String(url).indexOf('run.cgi') !== -1)
+			if (String(url).indexOf('factory-reset.cgi') !== -1)
 				return Promise.resolve({ ok: !o.notOk, status: o.notOk ? 401 : 200, body: { getReader: () => reader } });
 			// The uptime read, before the ping counter: it is not a ping, and
 			// counting it would shift every downFor: n the cases below are pinned on.
@@ -137,7 +137,9 @@ function makeEnv(o) {
 			env.pings++;                           // the ping() in pollBack
 			return o.cameraDown && env.pings <= (o.downFor || 0)
 				? Promise.reject(new Error('down'))
-				: Promise.resolve({ ok: true });
+				: Promise.resolve(o.follower && env.pings <= o.follower
+					? { ok: true, status: 200, headers: { get: () => 'text/plain; charset=utf-8' } }
+					: { ok: true, status: 200, headers: { get: () => 'text/html; charset=UTF-8' } });
 		},
 		TextDecoder: function () { this.decode = (b) => Buffer.from(b).toString('utf8'); },
 		btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
@@ -311,6 +313,21 @@ async function cleanEndBeforeFlashReportsIt() {
 		'status was ' + JSON.stringify(env.status.textContent));
 }
 
+// A UBI wipe hands PID 1 off too, and the updater's log follower then answers
+// every path on port 80. Taken for the camera, that navigates to a page which
+// is a plain-text log of the wipe still running.
+async function theLogFollowerIsNotTheCamera() {
+	group('the RAM root\'s log follower does not count as the camera being back');
+	const env = makeEnv({ cameraDown: true, downFor: 2, follower: 6 });
+	await env.push(PROTECTED);
+	await env.push('\nUnconditional reboot\n');
+	await env.clock.advance(14000);
+	check('answers on port 80 while the follower holds it', env.pings > 3, 'pings=' + env.pings);
+	check('and nothing has navigated', env.replaced === null, 'replaced=' + env.replaced);
+	await env.clock.advance(20000);
+	check('the real camera answering is what ends it', env.replaced !== null, 'replaced=' + env.replaced);
+}
+
 (async () => {
 	await quietAfterFlashStartsTheWatch();
 	await handsBackWhenTheRebootWasMissedEntirely();
@@ -322,5 +339,6 @@ async function cleanEndBeforeFlashReportsIt() {
 	await quietBeforeFlashIsIgnored();
 	await timerStopsOnceWatching();
 	await handsBackOnceTheCameraReturns();
+	await theLogFollowerIsNotTheCamera();
 	done();
 })();

@@ -136,6 +136,36 @@ function load(active) {
 		r.termWrites.join('').indexOf('Do not power off') !== -1,
 		r.termWrites.join(''));
 
+	const refusal = 'ERROR: invalid upgrade parameters\r\n';
+	r.ws.onmessage({ data: refusal });
+	check('a text-frame refusal reaches the transcript unchanged',
+		r.termWrites.join('').indexOf(refusal) !== -1,
+		r.termWrites.join(''));
+
+	// Changing frame type terminates the preceding binary byte stream. Flush a
+	// partial character before the text frame, then prove later binary UTF-8 is
+	// decoded independently instead of inheriting the stale prefix.
+	r = load('1');
+	r.ws.onopen();
+	r.ws.onmessage({ data: Uint8Array.from([0xe2, 0x82]) });
+	r.ws.onmessage({ data: 'NOTICE\r\n' });
+	r.ws.onmessage({ data: Uint8Array.from([0xe2, 0x82, 0xac]) });
+	check('a text frame flushes pending binary UTF-8 in frame order',
+		r.termWrites.join('') === '\ufffdNOTICE\r\n\u20ac',
+		JSON.stringify(r.termWrites));
+
+	// The other end of the same boundary. A frame carries however much of the log
+	// a read returned, so the last one need not end on a character — and what the
+	// decoder is still holding is bytes the camera sent. They belong in the pane,
+	// as the one character left of them, rather than disappearing with the socket.
+	r = load('1');
+	r.ws.onopen();
+	r.ws.onmessage({ data: Uint8Array.from([0x6f, 0x6b, 0xe2, 0x82]) });
+	r.ws.onclose();
+	check('a partial character left over at the close still reaches the transcript',
+		r.termWrites.join('') === 'ok\ufffd',
+		JSON.stringify(r.termWrites));
+
 	group('an older firmware that refuses the second connection keeps the warning');
 
 	// The marker said an upgrade is in progress, but the socket will not open —

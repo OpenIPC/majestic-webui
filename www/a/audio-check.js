@@ -203,15 +203,21 @@
 					'The speaker is switched off, so the camera cannot play the test ' +
 					'sound.',
 			};
+		// Not "the speaker can still be tested on its own", which is what this
+		// said and what the camera does not allow: audio output is brought up
+		// with the capture side, so a camera with its microphone switched off
+		// has no speaker either, whatever the speaker's own switch says. The
+		// test that reasoning kept available was one that could never pass — it
+		// played into an amplifier that was never powered and then reported
+		// that only the room could say whether anything came out, which is the
+		// sentence most likely to send somebody checking speaker wiring.
 		if (!mic)
 			return {
 				blocked: true,
 				why:
-					'The microphone is switched off, so nothing can measure what the ' +
-					'speaker plays. The speaker can still be tested on its own.',
-				// The speaker half does not need the microphone, and refusing
-				// both would hide a test that would have worked.
-				speakerOnly: true,
+					'The microphone is switched off, and the speaker goes off with ' +
+					'it — the camera brings the two up together, so there is nothing ' +
+					'to play the test sound through either. Switch the microphone on.',
 			};
 
 		return null;

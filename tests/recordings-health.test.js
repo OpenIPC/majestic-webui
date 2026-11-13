@@ -86,7 +86,17 @@ function makeEl(id) {
 
 // `cardHealth` is what the SD-card endpoint reports; `metrics` is the body
 // /metrics/records answers with, or null for a majestic too old to have it.
-function load(cardHealth, metrics, mode) {
+/* `dayIndex` is what /api/v1/analytics/day answers: an object, null for a
+ * camera too old to have the endpoint, or 'refused' for one that could not be
+ * reached. The default is an empty but WATCHED day — the camera answered and
+ * saw nothing — because that is the ordinary case every other assertion here
+ * runs against. */
+function load(cardHealth, metrics, mode, dayIndex) {
+	if (dayIndex === undefined) {
+		dayIndex = { day: '2026-09-14', source: 'memory', spans: [],
+			watched: [], events: 0, seconds: 0, merged: 0, capped: false,
+			torn: false };
+	}
 	const els = {};
 	const $ = (id) => (els[id] = els[id] || makeEl(id));
 	// The card poll is a 30-second setInterval. Captured rather than waited on,
@@ -126,6 +136,16 @@ function load(cardHealth, metrics, mode) {
 		if (url.indexOf('/api/v1/config.json') === 0) {
 			return json({ records: { enabled: true, path: '/rec/%F', split: 2,
 				mode: mode || 'continuous' } });
+		}
+		if (url.indexOf('/api/v1/analytics/day') === 0) {
+			// The camera's motion index. `dayIndex` lets a case choose what it
+			// answered: an object, null for a camera too old to have the
+			// endpoint, or 'refused' for one that could not be reached — and
+			// the lane has to tell those apart, because two of them mean
+			// "nothing is known" and none of them means "nothing moved".
+			if (dayIndex === null) return Promise.resolve({ ok: false, status: 404 });
+			if (dayIndex === 'refused') return Promise.reject(new Error('refused'));
+			return json(dayIndex);
 		}
 		if (url.indexOf('/cgi-bin/j/pulse.cgi') === 0) {
 			return json({ utc_offset: '+0000', timezone: 'UTC', time_now: 0 });
@@ -346,17 +366,47 @@ async function main() {
 		const env = load('ok', metricsWith(0, 0), 'continuous');
 		const ok = await waitFor(() => env.$('rec-clips').innerHTML.indexOf('rec-clip') >= 0);
 		check('recording continuously, the clip list is drawn', ok);
-		check('and the motion lane says it has nothing to draw yet',
-			env.$('rec-motion-note').textContent.indexOf('once the camera records') >= 0,
+		// The lane used to promise it would "light up once the camera records
+		// detection events". It does now, so what it has to say instead is
+		// which of the three silences this is.
+		check('and the motion lane says the camera was not watching',
+			env.$('rec-motion-note').textContent.indexOf('not watching') >= 0,
 			env.$('rec-motion-note').textContent);
 	}
 
 	{
-		const env = load('ok', metricsWith(0, 0), 'motion');
-		await waitFor(() => env.$('rec-motion-note').textContent.indexOf('each clip') >= 0);
-		check('recording on motion, the lane says the clips ARE the events',
-			env.$('rec-motion-note').textContent.indexOf('each clip above is one event') >= 0,
+		const env = load('ok', metricsWith(0, 0), 'motion', {
+			day: '2026-09-14', source: 'memory',
+			// Spanning the day so the assertion does not depend on which
+			// fifteen minutes the page happens to have zoomed to.
+			spans: [[0, 86400, 2]], watched: [[0, 86400]],
+			events: 2, seconds: 30, merged: 0, capped: false, torn: false,
+		});
+		await waitFor(() => env.$('rec-motion-note').textContent.indexOf('event') >= 0);
+		check('recording on motion, the lane still says the clips ARE the events',
+			env.$('rec-motion-note').textContent.indexOf('each clip above is one of them') >= 0,
 			env.$('rec-motion-note').textContent);
+		check('and it draws what the camera reported',
+			env.$('rec-motion').innerHTML.indexOf('blip') >= 0);
+	}
+
+	{
+		// The distinction the whole lane rests on. A camera that could not be
+		// asked has told us NOTHING, and a lane that drew that as an empty day
+		// would report a blind camera as a quiet one.
+		const env = load('ok', metricsWith(0, 0), 'continuous', 'refused');
+		await waitFor(() => env.$('rec-motion-note').textContent.indexOf('did not answer') >= 0);
+		check('a camera that did not answer is not a quiet one',
+			env.$('rec-motion').className.indexOf('unknown') >= 0,
+			env.$('rec-motion').className);
+	}
+
+	{
+		const env = load('ok', metricsWith(0, 0), 'continuous', null);
+		await waitFor(() => env.$('rec-motion-note').textContent.indexOf('too old') >= 0);
+		check('and neither is one too old to have the endpoint',
+			env.$('rec-motion').className.indexOf('unknown') >= 0,
+			env.$('rec-motion').className);
 	}
 
 	group('the card still speaks for itself');

@@ -38,19 +38,51 @@ has_cap() {
 	case " $ptz_caps " in *" $1 "*) return 0 ;; esac
 	return 1
 }
+
+# Near and Far are only "manual" focus in contrast to something automatic, so
+# the caption starts plain and preview-ptz.js promotes it once the camera has
+# answered that an engine is there. Server-side this cannot be known without
+# asking majestic on every page load, and the cached answer that used to be
+# here went stale the moment anybody saved the setting (see p/common.cgi).
+focus_label="Focus"
 %>
 <% if [ "$ptz_backend" = "pelco" ]; then %>
+<!-- Why the pads will not move anything. Set when the camera declares a
+     motorized lens (ptz_control) but majestic has no motor driver to serve
+     it, which is one install away and worth saying: the alternative is a
+     camera that looks like it never had PTZ at all.
+
+     A sentence, so it belongs outside the pads and not in one. Both are CSS
+     grids with no width of their own: prose put inside either is a grid item
+     and sizes the track it lands in, which is how this line once took a
+     quarter of the picture. preview-ptz.js moves it into #mj-toasts instead,
+     where the standing explanations already live -- the served-channel
+     message is the same shape, true for the whole session with nothing to
+     time out -- and that stack bounds its own width.
+
+     Emitted for the pelco backend as a whole rather than inside the
+     zoom/focus group, so a camera whose ptz_caps names only pan/tilt gets
+     the explanation too. Pressing a button says the same thing -- j/ptz.cgi
+     answers with this text -- so nothing is lost if the relocation never
+     happens. -->
+<% if [ -n "$ptz_reason" ]; then %>
+<p id="mj-ptz-why" class="mj-adapt-toast mj-ptz-why small" role="status" hidden><%= $ptz_reason %></p>
+<% fi %>
+<!-- What the autofocus is doing, when it is doing something. Empty and hidden
+     at render: this says nothing until this page has itself started or booked a
+     pass, because /autofocus/status is STICKY -- `preempted` and `failed:` stand
+     until the next pass overwrites them, so a freshly loaded page reading the
+     status out loud would announce an interruption from last week as news.
+
+     It joins the toast stack rather than the pad for the same reason
+     #mj-ptz-why does: preview-hero.js measures the pad to place the control bar
+     (--mj-ptz-h, .mj-ptz-beside), so a line appearing and disappearing inside
+     it would re-flow the bar mid-pass, under the operator's finger. -->
+<% if has_cap focus; then %>
+<p id="mj-af-say" class="mj-adapt-toast mj-ptz-why small" role="status" aria-live="polite" hidden></p>
+<% fi %>
 <% if has_cap zoom || has_cap focus || has_cap iris; then %>
 <div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom, focus and iris" hidden>
-	<!-- Why the buttons below will not move anything. Set when the camera
-	     declares a motorized lens (ptz_control) but majestic has no motor
-	     driver to serve it, which is one install away and worth saying: the
-	     alternative is a camera that looks like it never had PTZ at all.
-	     `small` only — a class the stylesheet already carries, so the pad
-	     gains no new CSS. -->
-	<% if [ -n "$ptz_reason" ]; then %>
-	<p class="small" role="status"><%= $ptz_reason %></p>
-	<% fi %>
 	<% if has_cap zoom; then %>
 	<span id="mj-ptz-zoom-label" class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">
@@ -67,7 +99,7 @@ has_cap() {
 	</button>
 	<% fi %>
 	<% if has_cap focus; then %>
-	<span id="mj-ptz-focus-label" class="mj-ptz-group">Focus</span>
+	<span class="mj-ptz-group" id="mj-focus-cap"><%= $focus_label %></span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="near" aria-label="Focus near" title="Pull focus nearer">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
@@ -87,13 +119,29 @@ has_cap() {
 	<!-- One-shot contrast autofocus: majestic's engine drives the same
 	     focus motor off the ISP's focus statistic. The icon is the focus
 	     bracket family with a filled subject: the camera choosing the
-	     distance itself. af_support already implies the focus axis. -->
-	<button type="button" class="mj-ptz-fnbtn" data-act="af" aria-label="Autofocus" title="Autofocus (one shot)">
+	     distance itself.
+
+	     Drawn on the focus axis alone -- a U-Boot fact that does not change
+	     under anybody's feet -- and WITHDRAWN at runtime by preview-ptz.js if
+	     majestic answers 404 to the status probe, which is what a camera with
+	     the engine switched off says. The gate used to be a cached
+	     `af_support` that mixed this permanent fact with a config key, and
+	     nothing invalidated it when the key changed.
+
+	     It gets a caption and a row of its own, spanning both columns,
+	     because it is not a fifth direction. Wide, Tele, Near and Far are
+	     movements the operator owns; this is a procedure that drives the
+	     same motor for up to three minutes, is cancelled by touching any of
+	     them, and runs by itself after every zoom. Sharing their grid cell
+	     said it was their sibling, and that is what the pad was read as.
+	     The button can spell the word out at this width. -->
+	<span class="mj-ptz-group" id="mj-af-cap">Autofocus</span>
+	<button type="button" class="mj-ptz-fnbtn mj-ptz-af" data-act="af" aria-label="Autofocus" title="Focus the camera once, now. Trim with Near and Far AFTER it finishes: a manual move first makes the next autofocus search the whole range.">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<path d="M3.2 7V3.6h3.4M16.8 7V3.6h-3.4M3.2 13v3.4h3.4M16.8 13v3.4h-3.4"></path>
 			<circle cx="10" cy="10" r="2.2" fill="currentColor" stroke="none"></circle>
 		</svg>
-		<span>AF</span>
+		<span>Autofocus</span>
 	</button>
 	<% fi %>
 	<% case " $ptz_caps " in *" iris "*) %>
@@ -151,6 +199,31 @@ has_cap() {
 	<span class="mj-ptz-void"></span>
 	<% fi %>
 	<span class="mj-ptz-void"></span>
+</div>
+<!-- Follow (ptz.track): the head turns toward what the object detector
+     sees, of the classes chosen on the PTZ settings tab. Revealed by
+     preview-ptz.js only when GET /ptz says " steps=" (a motor that counts)
+     and " follow=" (something to follow with; ptz-follow.js); anywhere else
+     it would switch a setting that does nothing. A press on the pad pauses
+     following on the camera for ptz.trackResumeSec. -->
+<div id="mj-ptz-follow" class="mj-ptz-speed mj-ptz-follow" hidden>
+	<div class="form-check form-switch m-0">
+		<input class="form-check-input" type="checkbox" role="switch" id="mj-ptz-follow-in">
+		<label class="form-check-label" for="mj-ptz-follow-in">Follow</label>
+	</div>
+</div>
+<!-- Presets: the head's stored positions. Revealed by
+     preview-ptz.js only when GET /ptz says " presets=1-N" (ptz-presets.js):
+     a head without stored positions has nothing to go to. The list is the
+     camera's rows of names; Home is preset 1, the position the head returns
+     to by itself. Its buttons are single presses, never held moves. -->
+<div id="mj-ptz-presets" class="mj-ptz-speed mj-ptz-presets" role="group" aria-label="Presets" hidden>
+	<select id="mj-ptz-preset-sel" class="mj-ptz-preset-sel" aria-label="Preset"></select>
+	<div class="mj-ptz-preset-row">
+		<button type="button" class="mj-ptz-fnbtn mj-ptz-preset-btn" data-preset="go" title="Go to this preset">Go</button>
+		<button type="button" class="mj-ptz-fnbtn mj-ptz-preset-btn" data-preset="set" title="Store where the head is now, as this preset or as a new one">Save</button>
+		<button type="button" class="mj-ptz-fnbtn mj-ptz-preset-btn" data-preset="clear" title="Forget this preset">Delete</button>
+	</div>
 </div>
 <% fi %>
 <% else %>
@@ -219,6 +292,16 @@ has_cap() {
 </div>
 <% fi %>
 <% fi %>
+<!-- Before the pad: preview-ptz.js reads window.MajesticAfState at mount. It
+     degrades rather than breaks if this one is missing — the pad still drives
+     the lens, it just stops narrating the autofocus. -->
+<script src="/a/af-state.js"></script>
+<script src="/a/ptz-speed.js"></script>
+<script src="/a/ptz-stick.js"></script>
+<script src="/a/ptz-orient.js"></script>
+<script src="/a/ptz-centre.js"></script>
+<script src="/a/ptz-follow.js"></script>
+<script src="/a/ptz-presets.js"></script>
 <script src="/a/preview-ptz.js"></script>
 <script src="/a/preview-af-peaks.js"></script>
 <script src="/a/preview-ptz-presets.js"></script>

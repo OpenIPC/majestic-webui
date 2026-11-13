@@ -32,6 +32,23 @@ json_str() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"
 json_log() { printf '%s' "$1" | tr -d '\000-\010\013-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk 'BEGIN{ORS=""}{print (NR>1?"\\n":"") $0}'; }
 sysf() { cat "$SYS/device/$1" 2>/dev/null; }
 
+# One identity field, emitted ONLY where the kernel actually exports it.
+#
+# An attribute that is not there and an attribute that is there and empty are
+# different facts about different things -- the first is this kernel, the second
+# is the card -- and `cat` renders both as the empty string. Collapsing them let
+# the page tell an owner their card reports no product name when what really
+# happened is that this kernel does not publish one, which is a data-collection
+# gap being read out as a fault of the hardware.
+#
+# An absent key is how the rest of this endpoint says "not measured" (scan_frag
+# omits its key for the same reason), and every consumer already renders a
+# missing model exactly as it renders an empty one.
+sysf_kv() {
+	[ -e "$SYS/device/$1" ] || return 0
+	printf '"%s":"%s",' "$2" "$(json_str "$(sysf "$1")")"
+}
+
 # Append one line to the op log shown in the browser. `L="${L}x\n"` does not
 # interpret the escape in POSIX sh, so what reached the page was a literal
 # backslash-n between every line; the newline has to be a real one for
@@ -44,6 +61,18 @@ logln() { L="$L$1
 # returns plausible-looking garbage — so nothing but a cold read-back catches
 # it, and no amount of reformatting will fix it.
 UNSTORED="the card did not keep what was written to it, so it cannot be formatted here. The card (or the slot) is failing and needs replacing."
+
+# Said when the span probe found the other lie: the card takes every write and
+# then folds the high addresses back onto the low ones, so it holds a fraction
+# of what it claims and quietly eats the oldest footage to make room for itself.
+# Formatting cannot fix that either, and the card is not what it was sold as.
+set_span_err() {
+	if [ "$span_state" = wrapped ]; then
+		err="this card is not the size it reports: something written at byte $span_from came back at byte $span_at, so its storage repeats. It holds a fraction of the space it claims and will overwrite the oldest recordings with the newest. Formatting cannot change that."
+	else
+		err="$UNSTORED"
+	fi
+}
 
 # Make the next read come from the card rather than the page cache. This is
 # defence in depth, not the whole defence: the kernel invalidates a block
@@ -145,6 +174,274 @@ probe_card() {
 	return 2
 }
 
+# The offsets probe_span stamps, low to high, one per line.
+#
+# A POWER-OF-TWO LADDER, and that is the whole reason this catches anything. A
+# counterfeit card is a small real die -- 4, 8, 16 GB, always a power of two --
+# presented as a large one, and it folds every address past the real end back
+# onto the start by masking off the high bits. So if the real size is 8 GB, the
+# addresses 8 GB, 16 GB and 32 GB are all the same storage as address 0, and
+# stamping them makes the collision happen where it can be seen.
+#
+# An evenly spread ladder does NOT do this, and the difference is not subtle: a
+# 32 GB claim over 8 GB of flash puts thirty-two evenly spread points at
+# addresses that alias onto thirty-two DIFFERENT places, every one of them free,
+# so every point reads its own stamp back and the card passes. That was the
+# first version of this function and a test of a simulated counterfeit is what
+# caught it.
+#
+# Zero and a point just below the top are added to the ladder: zero because it
+# is what everything above folds onto, and the top because that megabyte is
+# where a card that is merely short, rather than wrapping, fails first.
+span_offsets() {
+	so_span=$1
+	echo 0
+	so_off=1048576
+	so_last=0
+	while [ "$so_off" -lt "$so_span" ]; do
+		echo "$so_off"
+		so_last=$so_off
+		so_off=$((so_off * 2))
+	done
+	# The near-the-end point, and it must not land on a rung already emitted.
+	# Where the span is exactly a power of two plus one MiB it does, and the
+	# duplicate is not harmless: the write pass stamps the same sector twice,
+	# the read pass then finds the later point's stamp where the earlier one's
+	# was expected, and that is the signature probe_span convicts a card on.
+	# A healthy card would be reported as folding one address onto another.
+	so_top=$(((so_span - 1048576) / 512 * 512))
+	[ "$so_top" -gt "$so_last" ] && echo "$so_top"
+}
+
+# Does this card keep what it is given ACROSS ITS WHOLE SIZE?
+#
+# probe_card above stamps one sector and reads it back, which catches a card
+# that has stopped taking writes at all. It cannot catch the other common lie: a
+# card that reports 64 GB, holds 8, and folds every address past the real end
+# back onto the start. Each individual write to such a card is accepted and
+# reads back correctly at the moment it is made -- which is why this writes
+# EVERY point first and only then reads them all back. A write-then-read-each
+# loop passes on a wrapping card at every single point, because the overwrite
+# that destroys the earlier stamp has not happened yet when that point is
+# checked. That property is pinned by a test, because it is the kind of thing a
+# later simplification removes without noticing.
+#
+# Each stamp carries its own index and offset, so a point that comes back
+# holding a DIFFERENT point's stamp does not merely fail -- it names the address
+# the card really wrote to. That is the difference between "this card is broken"
+# and "this card is smaller than it says it is", and only the second one tells
+# the buyer what to do.
+#
+# Sets, for the caller:
+#   span_state  ok | wrapped | unstored | unknown
+#   span_kept   points that held their own stamp
+#   span_seen   points that could be read back at all
+#   span_total  points tried
+#   span_at     lowest offset that did not hold its own stamp, or -1
+#   span_from   where the stamp found at span_at had been written, or -1
+#
+# It deliberately does NOT report a real capacity. Working one out from a sparse
+# ladder needs the binary search f3probe does, and the obvious shortcut -- the
+# highest rung that held its own stamp -- is wrong on exactly the cards this is
+# for: the top rung's alias target is usually free, so it reads back correctly
+# on a card that holds a quarter of what it claims. `span_from` is the fact that
+# stands on its own, and a stamp written at 16 GB coming back at 0 says enough.
+#
+# DESTRUCTIVE. Every caller must first have established that there is nothing
+# on this card worth keeping.
+probe_span() {
+	sn_dev=$1
+	sn_span=$2
+	span_state=unknown; span_kept=0; span_seen=0; span_total=0
+	span_at=-1; span_from=-1
+
+	case "$sn_span" in ''|*[!0-9]*) sn_span=0;; esac
+	[ "$sn_span" -gt 2097152 ] || return 0
+
+	# One nonce for the whole run, for probe_new's reason: a fixed string could
+	# be found on a card this run never wrote to, and an earlier aborted run is
+	# exactly what leaves one behind.
+	sn_run=$(dd if=/dev/urandom bs=6 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+	[ -n "$sn_run" ] || sn_run="$$-$(date +%s 2>/dev/null)"
+
+	mkdir -p /tmp/webui 2>/dev/null
+	sn_tmp=/tmp/webui/sdspan.$$
+	sn_list=$(span_offsets "$sn_span")
+
+	# Ascending, so that on a wrapping card the highest address is the one left
+	# sitting at the bottom -- which is what makes span_from the biggest lie the
+	# card told rather than an arbitrary one of them.
+	sn_i=0
+	for sn_off in $sn_list; do
+		printf 'MJ-SPAN %s %s %s\n' "$sn_run" "$sn_i" "$sn_off" |
+			dd of="$sn_dev" bs=512 seek=$((sn_off / 512)) count=1 conv=notrunc 2>/dev/null
+		sn_i=$((sn_i + 1))
+	done
+	span_total=$sn_i
+
+	# Flushed and dropped ONCE, between the two passes. Per point would be
+	# slower and no colder: all that matters is that no read below is answered
+	# out of what a write above left in memory.
+	uncache
+
+	sn_i=0
+	for sn_off in $sn_list; do
+		# Read the whole sector and take the front of it, rather than asking dd
+		# for the stamp's length at a byte offset. Both seek, but the
+		# byte-addressed form costs one device read per byte of stamp -- 310 ms
+		# against a single read here, measured on an hi3516av300.
+		#
+		# Through a FILE, and its length is what says whether the look happened.
+		# A command substitution cannot tell a read that delivered nothing from
+		# one that delivered 512 zero bytes: the shell strips NULs and both
+		# arrive as the empty string. Those are opposite answers. The first is
+		# the device having gone away under us, which is never evidence against
+		# the card (probe_card learnt that the hard way); the second is the card
+		# handing back zeros where a stamp was written, which is the card
+		# failing.
+		sn_try=0; sn_len=0; sn_got=""
+		while [ "$sn_try" -lt 3 ]; do
+			# Truncated rather than removed, so the length below is always a
+			# length: a read that never happened leaves no file at all, and
+			# the shell reports THAT as an error of its own before wc runs.
+			: > "$sn_tmp" 2>/dev/null
+			dd if="$sn_dev" bs=512 skip=$((sn_off / 512)) count=1 \
+				of="$sn_tmp" 2>/dev/null
+			sn_len=$(wc -c < "$sn_tmp" 2>/dev/null)
+			case "$sn_len" in ''|*[!0-9]*) sn_len=0;; esac
+			[ "$sn_len" -gt 0 ] && break
+			sn_try=$((sn_try + 1))
+			sleep 1
+		done
+		if [ "$sn_len" -gt 0 ]; then
+			span_seen=$((span_seen + 1))
+			# A fixed generous length and then the first line, rather than the
+			# expected stamp's length: a stamp from a HIGHER point is longer
+			# than the one expected here, and cutting it to the expected length
+			# lost the very field -- the offset it was written to -- that makes
+			# a wrap nameable. The trailing newline written above is what keeps
+			# that field from running into whatever was in the sector before.
+			sn_got=$(head -c 64 < "$sn_tmp" 2>/dev/null | head -n 1)
+			set -- $sn_got
+			if [ "$1" = "MJ-SPAN" ] && [ "$2" = "$sn_run" ] && [ "$3" = "$sn_i" ]; then
+				span_kept=$((span_kept + 1))
+			else
+				[ "$span_at" -lt 0 ] && span_at=$sn_off
+				# Did THIS run write that stamp somewhere else? Then the card
+				# folded one address onto another, and we can say which.
+				if [ "$1" = "MJ-SPAN" ] && [ "$2" = "$sn_run" ]; then
+					if [ "$span_state" != wrapped ]; then
+						span_state=wrapped
+						span_at=$sn_off
+						span_from=$4
+						case "$span_from" in ''|*[!0-9]*) span_from=-1;; esac
+					fi
+				else
+					[ "$span_state" = wrapped ] || span_state=unstored
+				fi
+			fi
+		fi
+		sn_i=$((sn_i + 1))
+	done
+
+	rm -f "$sn_tmp" 2>/dev/null
+
+	# A card is never convicted on a look that did not happen, and never
+	# acquitted on one either. Only a full set of readable points, every one
+	# holding its own stamp, is a pass.
+	if [ "$span_state" = wrapped ] || [ "$span_state" = unstored ]; then
+		:
+	elif [ "$span_seen" -lt "$span_total" ]; then
+		span_state=unknown
+	elif [ "$span_kept" -eq "$span_total" ]; then
+		span_state=ok
+	else
+		span_state=unstored
+	fi
+}
+
+# The last span probe, kept so the page can say what was found without having
+# to have been open when it ran. /tmp and not /etc: it describes a card that may
+# not even be in the slot any more, and a stale claim about a card is worse than
+# no claim. Temp + rename, because the page polls this file every five seconds
+# and a reader landing inside a truncate-then-fill gets a half-written answer
+# with a fresh mtime on it.
+SCAN_DIR=/tmp/webui/sdscan
+PROBE_FILE=$SCAN_DIR/probe.json
+
+# One destructive operation at a time, camera-wide.
+#
+# Format and the standalone capacity check both write raw markers across the
+# whole device, and format additionally repartitions and makes a filesystem.
+# Interleaved, they read back each other's markers and reach verdicts about a
+# card neither of them was alone with -- and one can be writing sector zero
+# while the other is mounting what it just made. Each guards mount state on its
+# own way in, but that check is a moment and these run for many seconds.
+WIPE_LOCK=/tmp/webui/sdwipe.lock
+WIPE_LOCK_STALE=300
+
+wipe_guard() {
+	mkdir -p /tmp/webui 2>/dev/null
+	if mkdir "$WIPE_LOCK" 2>/dev/null; then
+		printf '%s' "$(date +%s 2>/dev/null || echo 0)" > "$WIPE_LOCK/at" 2>/dev/null
+		return 0
+	fi
+	wg_at=$(cat "$WIPE_LOCK/at" 2>/dev/null)
+	case "$wg_at" in ''|*[!0-9]*) wg_at=0;; esac
+	wg_now=$(date +%s 2>/dev/null)
+	case "$wg_now" in ''|*[!0-9]*) wg_now=0;; esac
+	if [ "$wg_at" -gt 0 ] && [ "$wg_now" -gt 0 ] &&
+		[ $((wg_now - wg_at)) -lt "$WIPE_LOCK_STALE" ]; then
+		err="the card is already being formatted or checked on this camera"
+		return 1
+	fi
+	# Whatever held this is gone. rm -r, never rmdir: the lock carries its own
+	# timestamp inside it, and rmdir fails silently on a directory that is not
+	# empty, which is how the speed-test lock leaked one per run.
+	rm -rf "$WIPE_LOCK" 2>/dev/null
+	mkdir "$WIPE_LOCK" 2>/dev/null || { err="the card could not be reserved for this"; return 1; }
+	printf '%s' "$wg_now" > "$WIPE_LOCK/at" 2>/dev/null
+	return 0
+}
+
+# Turn what probe_span measured into the log and the stored record. One place,
+# so the format path and the standalone check cannot come to word it differently
+# -- the drift p/pages.cgi exists to prevent, in a smaller place.
+span_report() {
+	case "$span_state" in
+	ok)
+		logln "# checked $span_kept points across the whole card; every one held what was written to it"
+		;;
+	wrapped)
+		logln "# the card is not the size it reports: a marker written at byte $span_from came back at byte $span_at"
+		;;
+	unstored)
+		logln "# $span_kept of $span_total points held what was written to them; the first that did not is at byte $span_at"
+		;;
+	*)
+		logln "# note: only $span_seen of $span_total points could be read back, so the card was not checked"
+		;;
+	esac
+	mkdir -p "$SCAN_DIR" 2>/dev/null
+	if printf '{"state":"%s","kept":%s,"seen":%s,"total":%s,"at":%s,"from":%s,"span":%s,"card":"%s","at_s":%s}' \
+		"$span_state" "$span_kept" "$span_seen" "$span_total" "$span_at" "$span_from" \
+		"${sn_span:-0}" "$(json_str "$(card_id)")" "$(date +%s 2>/dev/null || echo 0)" \
+		> "$PROBE_FILE.$$" 2>/dev/null
+	then
+		mv -f "$PROBE_FILE.$$" "$PROBE_FILE" 2>/dev/null || rm -f "$PROBE_FILE.$$" 2>/dev/null
+	else
+		rm -f "$PROBE_FILE.$$" 2>/dev/null
+	fi
+}
+
+# The card's whole claimed size, in bytes. 0 when it cannot be read, which
+# probe_span treats as "could not look" rather than as a tiny card.
+dev_span() {
+	ds_n=$(cat "$SYS/size" 2>/dev/null)
+	case "$ds_n" in ''|*[!0-9]*) ds_n=0;; esac
+	echo $((ds_n * 512))
+}
+
 # Kernel complaints about this card, newest last. Corroborating detail only:
 # the ring buffer is small and chatty (on hi3516av300 the CMA allocator alone
 # pushes a card error out of it within minutes), so finding nothing here proves
@@ -165,6 +462,71 @@ json_errs() {
 		i=1
 		printf '"%s"' "$(json_str "$ln")"
 	done
+}
+
+# Centisecond monotonic clock. busybox `date` here has no %N, and the `time`
+# keyword writes a format that has to be parsed back out of a temp file;
+# /proc/uptime is two decimals of a clock nothing can step, which is finer than
+# any figure this endpoint quotes.
+now_cs() {
+	set -- $(cat /proc/uptime 2>/dev/null)
+	case "$1" in *.*) printf '%s%s' "${1%.*}" "${1#*.}";; *) return 1;; esac
+}
+
+# Byte n of the 64-byte SD Status register, as a decimal number.
+ssr_byte() {
+	r_b=$(printf '%s' "$1" | cut -c$((2 * $2 + 1))-$((2 * $2 + 2)))
+	case "$r_b" in [0-9a-fA-F][0-9a-fA-F]) echo $((0x$r_b));; *) return 1;; esac
+}
+
+# What the card says it is, from the SD Status register the kernel already read
+# when it probed the slot. This is the only thing about a card's SPEED that can
+# be known without writing to it, and it is the distinction that decides
+# whether recording survives: the sequential classes (C10, U1, U3, V-) are
+# measured on one long streaming write, while A1/A2 is the only one that
+# promises anything about random I/O — which is what a filesystem does while a
+# recorder is deleting old clips underneath it. Until this, nothing the camera
+# could show its owner separated the two, so "use a faster card" was advice
+# nobody could act on (OpenIPC/firmware#1747).
+#
+# Answers in two ways, and the difference is the whole point of the second one:
+# `rating` when the register decoded, `ratingWhy` when it did not. WHY it did
+# not is not a detail — the sysfs attribute does not exist at all on some
+# platforms (absent on Ingenic T31's 3.10 kernel, present on HiSilicon's 4.9),
+# and saying "this card does not report its speed ratings" there blames a card
+# that reports them perfectly well for something its camera cannot read.
+#
+#   platform    the kernel here has no such attribute — nothing to do with
+#               this card, and another camera would read it
+#   unreadable  the attribute is there and did not decode
+#   notsd       an SD structure asked of something that is not an SD card
+#
+# Every field is checked against the set the spec defines, and the WHOLE
+# register is dropped if any one of them falls outside it. A rating decoded
+# wrongly and printed as fact is worse than no rating at all, and a kernel that
+# filled this register in differently is exactly what an unexpected value looks
+# like.
+card_rating() {
+	[ "$(sysf type)" = "SD" ] || { printf '"ratingWhy":"notsd",'; return; }
+	[ -e "$SYS/device/ssr" ] || { printf '"ratingWhy":"platform",'; return; }
+	r_s=$(sysf ssr | tr -d ' \n')
+	[ ${#r_s} -eq 128 ] || { printf '"ratingWhy":"unreadable",'; return; }
+	{
+		r_sc=$(ssr_byte "$r_s" 8)  &&
+		r_ug=$(ssr_byte "$r_s" 14) &&
+		r_vc=$(ssr_byte "$r_s" 15) &&
+		r_ac=$(ssr_byte "$r_s" 21)
+	} || { printf '"ratingWhy":"unreadable",'; return; }
+	# UHS grade is the high nibble of its byte, app class the low nibble of its.
+	r_ug=$((r_ug / 16)); r_ac=$((r_ac % 16))
+	# Speed class is an enum, not the number printed on the card.
+	case "$r_sc" in 0) r_sc=0;; 1) r_sc=2;; 2) r_sc=4;; 3) r_sc=6;; 4) r_sc=10;;
+		*) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_ug" in 0|1|3) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_vc" in 0|6|10|30|60|90) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
+	case "$r_ac" in 0|1|2) ;; *) printf '"ratingWhy":"unreadable",'; return;; esac
+	printf '"rating":{"speedClass":%s,"uhsGrade":%s,"videoClass":%s,"appClass":%s},' \
+		"$r_sc" "$r_ug" "$r_vc" "$r_ac"
 }
 
 # the active target partition/device and its conventional mount point
@@ -223,9 +585,9 @@ get_info() {
 	fi
 	printf '{"present":true,"device":"%s","target":"%s","mountpoint":"%s","mounted":%s,"partitioned":%s,' \
 		"$DEV" "$t" "$(json_str "${mp:-/mnt/$base}")" "$mounted" "$partd"
-	printf '"model":"%s","cardtype":"%s","manfid":"%s","oemid":"%s","date":"%s","serial":"%s",' \
-		"$(json_str "$(sysf name)")" "$(json_str "$(sysf type)")" "$(json_str "$(sysf manfid)")" \
-		"$(json_str "$(sysf oemid)")" "$(json_str "$(sysf date)")" "$(json_str "$(sysf serial)")"
+	printf '%s' "$(card_rating)"
+	sysf_kv name model; sysf_kv type cardtype; sysf_kv manfid manfid
+	sysf_kv oemid oemid; sysf_kv date date; sysf_kv serial serial
 	canfsck=false; command -v "fsck.$fs" >/dev/null 2>&1 && canfsck=true
 	if [ "$ro" = true ]; then health=readonly
 	elif [ "$mounted" = true ]; then health=ok
@@ -240,6 +602,14 @@ get_info() {
 	case "$health" in readonly|unreadable) errs=$(json_errs);; esac
 	printf '"sizeBytes":%s,"fs":"%s","totalKb":%s,"usedKb":%s,"availKb":%s,"recBytes":%s,"canFsck":%s,' \
 		"$size" "$(json_str "$fs")" "$total" "$used" "$avail" "$rec" "$canfsck"
+	# Present only when something has actually run. A key that is always there
+	# carrying "nothing measured" reads as a measurement, and this document is
+	# polled on every page by the site-wide storage banner -- so it stays small
+	# and says nothing rather than saying nothing at length.
+	printf '%s' "$(scan_frag "$STATE_FILE" scan)"
+	printf '%s' "$(scan_frag "$PROBE_FILE" probe)"
+	printf '"scanRunning":%s,' "$([ -n "$(scan_pid)" ] && echo true || echo false)"
+	printf '"canScan":%s,' "$([ -n "$(sdscan_bin)" ] && echo true || echo false)"
 	printf '"health":"%s","fsErrors":[%s],"mkfs":[%s]}' "$health" "$errs" "$(mkfs_list)"
 }
 
@@ -307,6 +677,8 @@ ensure_node() {
 }
 
 do_format() {
+	wipe_guard || return
+	trap 'rm -rf "$WIPE_LOCK" 2>/dev/null' EXIT INT TERM HUP
 	fs="${POST_fs:-vfat}"
 	case "$fs" in vfat|ext4|exfat) ;; *) err="unsupported filesystem"; return;; esac
 	command -v "mkfs.$fs" >/dev/null 2>&1 || { err="mkfs.$fs not installed"; return; }
@@ -324,6 +696,24 @@ do_format() {
 	# a kernel holding an mmcblk0p1 from an earlier boot over a card whose
 	# sector 0 no longer has the table it came from — without having to
 	# recognise it first.
+	# Across the WHOLE device and before the table is written, because this is
+	# the one moment the card is known to be forfeit and because the lie a
+	# counterfeit tells is about the size of the device rather than of any
+	# partition on it. Before fdisk also means before the mdev remove/add pair
+	# that partitioning sets off, which is the churn probe_card below needs all
+	# its retries for.
+	#
+	# It does not stop the format. A wrapping card still formats, still mounts,
+	# and still records until it laps itself -- what it must not do is format
+	# with nobody having said so, which is what happened before this.
+	probe_span "$DEV" "$(dev_span)"
+	span_report
+	case "$span_state" in
+		wrapped) set_span_err;;
+		unstored) set_span_err;;
+	esac
+	[ -n "$err" ] && return
+
 	logln "# partition ${DEV}"
 	logln "$(printf 'o\nn\np\n1\n\n\nw\n' | fdisk "$DEV" 2>&1)"
 	partprobe "$DEV" 2>/dev/null
@@ -449,20 +839,63 @@ mount_after_format() {
 # worth reporting verbatim rather than flattening to "mount failed".
 first_line() { printf '%s' "$1" | sed -n '1p'; }
 
+# What a camera's card actually is, in the order it is worth trying, and the
+# same list /lib/mdev/automount.sh uses -- the WebUI mounting a card by a
+# different route than the hotplug rules do is its own hazard.
+#
+# Naming them is not tidiness. An unqualified mount is `-t auto`, which walks
+# /proc/filesystems in the order the kernel lists it, and on a camera that
+# reads squashfs, yaffs, yaffs2, vfat -- so a FAT card is offered to yaffs2
+# first. yaffs2 accepts a block device rather than refusing one, and the
+# kernel log of a camera mounted this way is a run of
+#
+#   yaffs: Attempting MTD mount of 179.1,"mmcblk0p1"
+#
+# before the card lands on vfat at all. Nothing here noticed, because it did
+# land eventually.
+MOUNT_FSTYPES="vfat exfat ext4 ext3 ext2 f2fs msdos ntfs iso9660 udf"
+
+# mount_card <device> <dir> [known-fstype]
+#
+# Sets mt_err to the refusal worth reporting, or empty on success. The first
+# refusal is the diagnosis and not the last: the list is in the order a
+# camera's card is likely to be, so vfat's "invalid argument" means a damaged
+# filesystem, where the tail of the list only ever reports the drivers this
+# kernel was not built with.
+mount_card() {
+	mt_err=""
+	mt_first=""
+	mt_o=""
+	for mt_fs in ${3:-$MOUNT_FSTYPES}; do
+		mt_o=$(mount -t "$mt_fs" "$1" "$2" 2>&1) && { mt_first=""; break; }
+		[ -n "$mt_first" ] || mt_first="$mt_o"
+	done
+	[ -n "$mt_o" ] && logln "$mt_o"
+	mountpoint -q "$2" || mt_err="${mt_first:-${mt_o:-mount failed}}"
+}
+
 do_mount() {
+	swap_guard || return
 	ensure_node
 	t=$(target); base=${t##*/}; mkdir -p "/mnt/$base"
 	logln "# mount $t /mnt/$base"
-	o=$(mount "$t" "/mnt/$base" 2>&1)
-	[ -n "$o" ] && logln "$o"
-	mountpoint -q "/mnt/$base" || err="$(first_line "${o:-mount failed}")"
+	mount_card "$t" "/mnt/$base"
+	[ -n "$mt_err" ] && err="$(first_line "$mt_err")"
+	# The card is back. Whatever this swap was owning, it is finished with.
+	if [ -z "$err" ]; then swap_release; fi
 }
 
 do_unmount() {
+	swap_guard || return
+	# Taken before the card is released rather than after: the gap between the
+	# two is precisely the window a second browser would have to slip into.
+	swap_take
 	t=$(target)
 	logln "# umount $t"
 	o=$(umount "$t" 2>&1) || err="$(first_line "${o:-unmount failed (in use?)}")"
 	[ -n "$o" ] && logln "$o"
+	# Nothing was released, so nothing is owed an owner.
+	if [ -n "$err" ]; then swap_release; fi
 }
 
 do_fsck() {
@@ -486,29 +919,503 @@ do_fsck() {
 	logln "$o"
 	if [ -n "$was" ]; then
 		logln "# mount $t $was"
-		m=$(mount "$t" "$was" 2>&1)
-		[ -n "$m" ] && logln "$m"
-		mountpoint -q "$was" || { err="checked, but the card would not mount again"; return; }
+		# The type it was mounted as is already known here, so say it. An
+		# unqualified mount is `-t auto`, which walks /proc/filesystems -- and
+		# on a camera that reads squashfs, yaffs, yaffs2, vfat, a FAT card is
+		# offered to yaffs2 before vfat.
+		mount_card "$t" "$was" "$fs"
+		[ -n "$mt_err" ] && { err="checked, but the card would not mount again"; return; }
 	fi
 	[ "$rc" -le 1 ] || err="fsck reported errors"
 }
 
+# Measure what the card actually does, for a camera that is not recording yet.
+#
+# The counters majestic publishes answer this for a camera that IS recording —
+# they are the achieved rate and the worst flush, measured on the real
+# workload — but they say nothing at all before recording has ever worked,
+# which is the state somebody is in when they come looking. A camera whose card
+# takes a fraction of what the vendor firmware managed is the report this is
+# for, and it went a year and a half without a single number attached to it
+# because nothing on the camera would produce one.
+#
+# Bounded three ways, and each bound is a failure somebody would otherwise
+# wait through: SPEED_CHUNKS caps the work, SPEED_BUDGET_CS stops a slow card
+# between chunks, and SPEED_CHUNK_SECS stops a wedged one INSIDE a chunk —
+# without that last one the budget is only consulted after a flush returns, so
+# a card that stops answering blocks the request for as long as the kernel
+# waits on it. A card that cannot take 2 MB in ten seconds has answered the
+# question.
+#
+# conv=fsync on every chunk, because the flush is where an SD card stalls. A
+# write that only reaches the page cache measures the page cache.
+SPEED_CHUNK=2097152
+SPEED_CHUNKS=16
+SPEED_BUDGET_CS=2000
+SPEED_CHUNK_SECS=10
+SPEED_LOCK=/tmp/webui/sdspeed.lock
+# How long a lock may stand before it is assumed to belong to a run that died.
+# Longer than any measurement can legitimately take: the budget is 20 s, plus
+# the read-back and one chunk's grace.
+SPEED_LOCK_STALE=120
+
+SWAP_LOCK=/tmp/webui/sdswap.lock
+# A swap spans many requests with a person in the middle of it, so unlike the
+# speed-test lock this one cannot be bounded by how long one request may take.
+# It is refreshed by the status poll the wizard is already making once a second,
+# so a browser that dies stops refreshing and the lock is reclaimable a minute
+# and a half later -- rather than leaving the card unmounted and unmountable for
+# as long as the whole flow is allowed to take.
+SWAP_LOCK_STALE=90
+
+# Who holds the swap, if anyone still does. Prints the token; prints nothing if
+# the lock is free or has gone stale.
+swap_holder() {
+	sw_at=$(cat "$SWAP_LOCK/at" 2>/dev/null)
+	case "$sw_at" in ''|*[!0-9]*) sw_at=0;; esac
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	[ "$sw_at" -gt 0 ] && [ "$sw_now" -gt 0 ] &&
+		[ $((sw_now - sw_at)) -lt "$SWAP_LOCK_STALE" ] || return 0
+	cat "$SWAP_LOCK/who" 2>/dev/null
+}
+
+# One swap at a time, camera-wide and with an owner.
+#
+# Two browsers can each be sure they are the only one, and the page's own check
+# of the stand-down gauge narrows that to a heartbeat's width rather than
+# closing it. What is left is the arrangement that costs a filesystem: the
+# second browser to reach the unmount finds the card already gone, calls that a
+# failure, mounts it back and resumes -- while the first is still displaying
+# SAFE TO REMOVE over a card the camera has started writing to.
+#
+# mkdir is the atomic part. Anything that changes what is mounted asks this
+# first, including the manual Mount and Unmount buttons: an operator pressing
+# those during somebody else's swap is the same hazard as a second wizard.
+swap_guard() {
+	mkdir -p /tmp/webui 2>/dev/null
+	sw_who=$(swap_holder)
+	[ -n "$sw_who" ] || return 0
+	[ "$sw_who" = "$POST_swap" ] && return 0
+	err="a card change is in progress on this camera; finish or stop that one first"
+	return 1
+}
+
+# Take or refresh the lock for this swap. Called by the unmount, which is the
+# step that makes the card removable and so the step worth owning.
+swap_take() {
+	[ -n "$POST_swap" ] || return 0
+	mkdir -p /tmp/webui 2>/dev/null
+	mkdir "$SWAP_LOCK" 2>/dev/null
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	printf '%s' "$POST_swap" > "$SWAP_LOCK/who" 2>/dev/null
+	printf '%s' "$sw_now" > "$SWAP_LOCK/at" 2>/dev/null
+}
+
+# Give it up. Only the holder may, so a request arriving late from an abandoned
+# run cannot unlock somebody else's swap. rm -r, not rmdir: the lock directory
+# holds its own bookkeeping, and rmdir fails silently on a non-empty directory
+# -- which is how the speed-test lock leaked one per run until it was noticed on
+# a camera rather than in a test.
+swap_release() {
+	sw_who=$(swap_holder)
+	[ -z "$sw_who" ] || [ "$sw_who" = "$POST_swap" ] || return 0
+	rm -rf "$SWAP_LOCK" 2>/dev/null
+}
+
+do_swaprelease() {
+	[ -n "$POST_swap" ] || { err="no swap to release"; return; }
+	swap_release
+}
+
+do_speedtest() {
+	t=$(target)
+	mp=$(awk -v d="$t" '$1==d{print $2; exit}' /proc/mounts)
+	[ -n "$mp" ] || { err="the card is not mounted, so there is nothing to measure"; return; }
+	case ",$(awk -v d="$t" '$1==d{print $4; exit}' /proc/mounts)," in
+		*,ro,*) err="the card is mounted read-only, so nothing can be written to it"; return;;
+	esac
+	# Enough room that the test cannot be what fills the card. majestic deletes
+	# the oldest clip when the card reaches records.maxUsage, and a test that
+	# triggers that has destroyed footage to measure a disk.
+	avail=$(df -k "$mp" 2>/dev/null | awk 'NR==2{print $4}')
+	case "$avail" in ''|*[!0-9]*) avail=0;; esac
+	[ "$avail" -ge 65536 ] ||
+		{ err="under 64 MB is free on the card — too little to measure a write speed without deleting recordings to make room"; return; }
+
+	# One at a time, camera-wide: two of these at once measure each other.
+	#
+	# A lock that only a completed run removes is a lock that disables the
+	# feature for good the first time a request is cancelled mid-flush — the
+	# client hangs up, the CGI is killed inside a blocking dd, and every later
+	# test is refused as "already running" with nothing to clear it. So the
+	# lock carries the time it was taken and is reclaimed once that is older
+	# than any measurement could be.
+	mkdir -p /tmp/webui 2>/dev/null
+	sp_now=$(date +%s 2>/dev/null)
+	case "$sp_now" in ''|*[!0-9]*) sp_now=0;; esac
+	if ! mkdir "$SPEED_LOCK" 2>/dev/null; then
+		sp_at=$(cat "$SPEED_LOCK/at" 2>/dev/null)
+		case "$sp_at" in ''|*[!0-9]*) sp_at=0;; esac
+		if [ "$sp_at" -gt 0 ] && [ "$sp_now" -gt 0 ] &&
+			[ $((sp_now - sp_at)) -lt "$SPEED_LOCK_STALE" ]; then
+			err="a speed test is already running on this camera"
+			return
+		fi
+		# Whatever held this is gone. Take the lock over, and sweep the scratch
+		# file its run left on the card.
+		rm -f "$mp"/.openipc-speedtest.* 2>/dev/null
+	fi
+	printf '%s' "$sp_now" > "$SPEED_LOCK/at" 2>/dev/null
+
+	# Named per run, so a file an operator happens to keep on the card is never
+	# what gets deleted, and so a reclaimed lock's leftovers are distinguishable
+	# from this run's.
+	f="$mp/.openipc-speedtest.$$"
+	# Released on EVERY exit, not only the tidy one. This is the half that makes
+	# the lock safe to take at all.
+	# rm -r, not rmdir: the lock is a directory with the timestamp inside it,
+	# and rmdir refuses a directory that is not empty. It failed silently on
+	# every successful run, so the lock leaked every time and the next test
+	# within the stale window was refused as "already running".
+	trap 'rm -f "$f" 2>/dev/null; rm -rf "$SPEED_LOCK" 2>/dev/null' EXIT INT TERM HUP
+	rm -f "$f" 2>/dev/null
+
+	# A measurement with no clock behind it is not a measurement. now_cs only
+	# fails on a /proc/uptime this cannot parse, but a figure derived from an
+	# unread clock is one this endpoint invented.
+	sp_t0=$(now_cs) || { err="the camera's clock could not be read, so nothing here could be timed"; return; }
+
+	logln "# write $((SPEED_CHUNK / 1048576)) MB chunks to $f, flushing each"
+	wrote=0; worst=0; sp_i=0; sp_stalled=false; sp_wfail=false
+	while [ "$sp_i" -lt "$SPEED_CHUNKS" ]; do
+		sp_c0=$(now_cs) || break
+		timeout "$SPEED_CHUNK_SECS" dd if=/dev/zero of="$f" bs="$SPEED_CHUNK" \
+			count=1 seek="$sp_i" conv=fsync,notrunc 2>/dev/null
+		sp_rc=$?
+		if [ "$sp_rc" -ne 0 ]; then
+			# 124 is GNU timeout's, 143 is busybox's SIGTERM. Either way the
+			# card did not finish a 2 MB flush in ten seconds, which is a
+			# different answer from "slow" and is worth saying as one.
+			case "$sp_rc" in 124|143) sp_stalled=true;; *) sp_wfail=true;; esac
+			break
+		fi
+		sp_c1=$(now_cs) || break
+		sp_d=$((sp_c1 - sp_c0))
+		[ "$sp_d" -gt "$worst" ] && worst=$sp_d
+		wrote=$((wrote + SPEED_CHUNK))
+		sp_i=$((sp_i + 1))
+		[ $((sp_c1 - sp_t0)) -ge "$SPEED_BUDGET_CS" ] && break
+	done
+
+	if [ "$sp_stalled" = true ]; then
+		err="the card stopped accepting data part-way through the test — it did not finish a $((SPEED_CHUNK / 1048576)) MB write in ${SPEED_CHUNK_SECS} seconds"
+		return
+	fi
+	if [ "$sp_wfail" = true ]; then
+		err="a write to the card failed part-way through the test"
+		return
+	fi
+	[ "$wrote" -gt 0 ] || { err="the card accepted no data at all"; return; }
+
+	# The clock at both ends, or no figure. Fabricating the second read from
+	# the first is what turns an unreadable clock into a zero duration, and a
+	# zero duration into an infinite speed on the page.
+	sp_t1=$(now_cs) || { err="the camera's clock could not be read back, so the write could not be timed"; return; }
+	wms=$(( (sp_t1 - sp_t0) * 10 ))
+	[ "$wms" -gt 0 ] || { err="the write completed too quickly to time on this camera's clock"; return; }
+
+	# Read it back cold, or the figure is the page cache's. Reported only when
+	# the read actually finished AND both ends of it were read: dd's status is
+	# checked here because a read that failed half way would otherwise be
+	# divided into the full byte count and published as a throughput.
+	uncache
+	rms=-1
+	if sp_r0=$(now_cs); then
+		if timeout $((SPEED_CHUNK_SECS * SPEED_CHUNKS)) dd if="$f" of=/dev/null \
+			bs="$SPEED_CHUNK" 2>/dev/null; then
+			sp_r1=$(now_cs) && [ $((sp_r1 - sp_r0)) -gt 0 ] &&
+				rms=$(( (sp_r1 - sp_r0) * 10 ))
+		fi
+	fi
+
+	logln "# wrote $((wrote / 1048576)) MB in ${wms} ms, read back in ${rms} ms"
+	EXTRA=$(printf '"speed":{"bytes":%s,"writeMs":%s,"worstMs":%s,"readMs":%s},' \
+		"$wrote" "$wms" "$((worst * 10))" "$rms")
+}
+
+# Check a card that has nothing on it to lose.
+#
+# The same measurement do_format makes, offered on its own so somebody holding a
+# suspect card can find out without having to format it first -- and refused
+# outright anywhere that would cost footage. Two gates, and they are not the
+# same gate: nothing may be MOUNTED, because writing under a live filesystem
+# corrupts it, and the card must already have no filesystem the page can read,
+# because an unmounted card with a filesystem on it is somebody's archive
+# waiting to be mounted.
+#
+# The page does not render the button in any other state, so this is the second
+# lock rather than the first -- a POST is not a button, and a card can be
+# mounted between the render and the press.
+do_cardcheck() {
+	swap_guard || return
+	wipe_guard || return
+	trap 'rm -rf "$WIPE_LOCK" 2>/dev/null' EXIT INT TERM HUP
+	cc_mounted=$(awk '$1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts)
+	[ -z "$cc_mounted" ] ||
+		{ err="the card is mounted; this erases it, so unmount it first"; return; }
+	[ -b "$DEV" ] || { err="there is no card in the slot"; return; }
+
+	cc_t=$(target)
+	if [ -n "$(blkid "$cc_t" 2>/dev/null)" ]; then
+		err="there is a filesystem on this card. Checking it erases it, so mount it and copy anything you want to keep, or use Format, which runs the same check."
+		return
+	fi
+
+	cc_span=$(dev_span)
+	logln "# check ${DEV} across $cc_span bytes"
+	probe_span "$DEV" "$cc_span"
+	span_report
+	case "$span_state" in
+		wrapped|unstored) set_span_err; return;;
+	esac
+	EXTRA=$(printf '"probe":{"state":"%s","kept":%s,"seen":%s,"total":%s,"at":%s,"from":%s,"span":%s},' \
+		"$span_state" "$span_kept" "$span_seen" "$span_total" "$span_at" "$span_from" "$cc_span")
+}
+
+# ------------------------------------------------------------- the read pass --
+#
+# The long one. sbin/sdscan does the work; everything here is starting it,
+# stopping it, and handing its journal to the page. It runs for minutes to
+# hours, so it cannot be a request -- what it is instead is a detached process
+# and a file the ordinary five-second status poll already reads.
+STATE_FILE=$SCAN_DIR/state.json
+STOP_FILE=$SCAN_DIR/stop
+SCAN_LOCK=/tmp/webui/sdscan.lock
+
+# Is one running? The pid in the lock, tested with kill -0. Prints it, or
+# nothing -- swap_holder's convention, and for the same reason: "free" and
+# "left behind by something that died" are not answers a caller acts on
+# differently.
+scan_pid() {
+	sp_p=$(cat "$SCAN_LOCK/pid" 2>/dev/null)
+	case "$sp_p" in ''|*[!0-9]*) return 0;; esac
+	kill -0 "$sp_p" 2>/dev/null || return 0
+	# The same identity check the worker's own lock makes, and for the same
+	# reason: `kill -0` answers for whatever holds that number NOW. Pids are
+	# recycled, so a scan killed at some pid leaves a lock an unrelated
+	# long-lived process inherits -- and this test decides both whether the page
+	# says a scan is running and whether a stop request may be written, so
+	# without it a stop can be aimed at a run whose ownership was never
+	# established, and every later scan is refused for as long as that process
+	# lives. The start time from /proc/<pid>/stat is the moment that process
+	# began, so a recycled pid reads a different one.
+	sp_s=$(cat "$SCAN_LOCK/start" 2>/dev/null)
+	sp_now=$(awk '{print $22}' /proc/"$sp_p"/stat 2>/dev/null)
+	# A lock from before this carries no start. Trusting the pid alone there is
+	# the conservative way to be wrong: it costs a refused scan rather than two
+	# reading one card at once.
+	[ -z "$sp_s" ] || [ "$sp_s" = "$sp_now" ] || return 0
+	printf '%s' "$sp_p"
+}
+
+# Where the worker is. /usr/sbin is where sbin/updatewebui installs it; PATH is
+# the fallback so a copy dropped somewhere by hand during development is found
+# rather than silently ignored.
+sdscan_bin() {
+	if [ -x /usr/sbin/sdscan ]; then printf '/usr/sbin/sdscan'
+	else command -v sdscan 2>/dev/null
+	fi
+}
+
+do_scanstart() {
+	swap_guard || return
+	[ -z "$(scan_pid)" ] || { err="a check of this card is already running"; return; }
+
+	sc_t=$(target)
+	sc_mp=$(awk -v d="$sc_t" '$1==d{print $2; exit}' /proc/mounts)
+	[ -n "$sc_mp" ] || { err="the card is not mounted, so there are no recordings to read back"; return; }
+
+	sc_bin=$(sdscan_bin)
+	[ -n "$sc_bin" ] || { err="this camera does not have the card checker installed"; return; }
+
+	# Nothing is cleared here, deliberately. Two requests can both get past the
+	# check above -- it is a moment, and the worker's own lock is what actually
+	# decides -- and a loser that had already removed these files would have
+	# taken the winner's stop flag and its fresh journal with it. The worker
+	# clears them once it owns the lock, which is the only point at which it is
+	# known who they belong to.
+	# Detached, with ALL THREE descriptors closed. This is not tidiness: the
+	# background job inherits the pipe the web server reads this CGI's output
+	# from, and while it holds that pipe open the HTTP response is never
+	# finished -- so the browser would hang for the length of the scan. The same
+	# trap p/common.cgi:majestic_reload documents, and it costs hours here
+	# rather than seconds.
+	#
+	# setsid as well where there is one, so an httpd restart does not take the
+	# scan down with it. The subshell alone is what the rest of this tree uses
+	# and is the fallback.
+	if command -v setsid >/dev/null 2>&1; then
+		( setsid "$sc_bin" "$sc_mp" "$DEV" ) </dev/null >/dev/null 2>&1 &
+	else
+		( "$sc_bin" "$sc_mp" "$DEV" ) </dev/null >/dev/null 2>&1 &
+	fi
+	logln "# started a read-back check of $sc_mp"
+}
+
+do_scanstop() {
+	[ -n "$(scan_pid)" ] || { err="no check is running"; return; }
+	mkdir -p "$SCAN_DIR" 2>/dev/null
+	# A flag rather than a kill, because the worker has a partial result worth
+	# keeping and only it can write one. It looks between chunks, so this takes
+	# effect within a chunk rather than instantly.
+	: > "$STOP_FILE" 2>/dev/null || { err="the check could not be asked to stop"; return; }
+	logln "# asked the check to stop"
+}
+
+# One of these files as a JSON fragment, or nothing.
+#
+# Checked for shape before it is spliced in, the way j/fw-latest.cgi checks its
+# cache: these are written by another process and a reader can land on one mid
+# rename on a filesystem that does not give us the atomic swap we asked for. A
+# half-written object would be spliced into this document and break the parse
+# for every client, including the banner on every page.
+# The card in the slot right now, by its own CID register. Empty when there is
+# none, or when the kernel does not expose it.
+card_id() { cat "$SYS/device/cid" 2>/dev/null; }
+
+scan_frag() {
+	sf_body=$(cat "$1" 2>/dev/null)
+	case "$sf_body" in
+		'{'*'}') ;;
+		*) return 0;;
+	esac
+	# Does this journal describe the card that is in the slot NOW?
+	#
+	# Neither file is removed when a card is taken out -- nothing is watching
+	# the slot -- so without this a completed scan or capacity check is served
+	# as a verdict about whatever card follows it. On a page whose whole premise
+	# is never claiming what has not been established, handing a fresh card the
+	# previous one's "every point held what was written to it" is the worst
+	# thing it could say.
+	#
+	# A journal written before this carried no card at all. It is dropped rather
+	# than shown, for the same reason: it cannot be matched, so it cannot be
+	# vouched for.
+	sf_now=$(card_id)
+	sf_was=$(printf '%s' "$sf_body" | sed -n 's/.*"card":"\([^"]*\)".*/\1/p')
+	[ -n "$sf_now" ] && [ "$sf_was" = "$sf_now" ] || return 0
+	printf '"%s":%s,' "$2" "$sf_body"
+}
+
+# Make the controller look for a card again.
+#
+# A slot whose card-detect line is not wired raises no event when a card is
+# pushed in, so the kernel never learns there is one and nothing here can see
+# it. There is no rescan knob for MMC in sysfs on these kernels; unbinding the
+# platform driver and binding it again re-probes the controller, which is the
+# only thing left that finds a card inserted after boot.
+#
+# The controller and its driver are derived rather than named, because the
+# driver differs by family -- himci on some HiSilicon parts, sdhci-hisi on
+# others -- and the device id has the peripheral's base address in it. Walking
+# up from the mmc host to the first node with a driver gets there on all of
+# them, and works with an empty slot, which is exactly when this is needed.
+#
+# Refused while anything is mounted: re-probing pulls the controller out from
+# under a live filesystem, and a card that is already visible is not the
+# problem this solves.
+do_reprobe() {
+	swap_guard || return
+	rp_mounted() { awk '$1 ~ /^\/dev\/mmcblk/ {print $1; exit}' /proc/mounts; }
+
+	[ -z "$(rp_mounted)" ] ||
+		{ err="a card is already mounted; nothing needs re-detecting"; return; }
+
+	rp_dev=$(readlink -f /sys/class/mmc_host/mmc0/device 2>/dev/null)
+	[ -n "$rp_dev" ] || { err="this camera has no SD host controller to re-detect with"; return; }
+	while [ -n "$rp_dev" ] && [ "$rp_dev" != / ] && [ ! -e "$rp_dev/driver" ]; do
+		rp_dev=$(dirname "$rp_dev")
+	done
+	rp_drv=$(readlink -f "$rp_dev/driver" 2>/dev/null)
+	[ -n "$rp_drv" ] && [ -w "$rp_drv/unbind" ] && [ -w "$rp_drv/bind" ] ||
+		{ err="the SD host driver here cannot be asked to look again"; return; }
+
+	rp_id=$(basename "$rp_dev")
+
+	# Asked again, immediately before the unbind rather than only at the top.
+	# Finding the controller walks sysfs and the hotplug helper mounts a card
+	# asynchronously, so a card pushed in during those few milliseconds can be
+	# mounted by the time we get here -- and detaching the host under a live
+	# filesystem is how a card gets corrupted by the tool that was meant to
+	# find it.
+	[ -z "$(rp_mounted)" ] ||
+		{ err="a card appeared while looking; nothing needs re-detecting"; return; }
+
+	logln "# re-probe $rp_id via $(basename "$rp_drv")"
+	if ! printf '%s' "$rp_id" > "$rp_drv/unbind" 2>/dev/null; then
+		# Nothing was detached, so there is nothing to put back.
+		err="the SD host controller would not let go to be re-probed"
+		return
+	fi
+
+	# Past this point the controller is DETACHED, and every exit has to put it
+	# back. One bind attempt whose result nobody checked would leave a camera
+	# with no SD slot at all until it was rebooted -- worse than the missing
+	# card this is trying to find, and in the same way: silently.
+	rp_i=0
+	while [ "$rp_i" -lt 5 ]; do
+		printf '%s' "$rp_id" > "$rp_drv/bind" 2>/dev/null
+		# The write can report success and the probe still fail, so the driver
+		# link coming back is what is actually checked.
+		[ -e "$rp_dev/driver" ] && break
+		sleep 1
+		rp_i=$((rp_i + 1))
+	done
+	if [ ! -e "$rp_dev/driver" ]; then
+		err="the SD host controller did not come back after being re-probed; rebooting the camera will restore it"
+		logln "# WARNING: $rp_id is left unbound"
+		return
+	fi
+
+	# The kernel enumerates a card asynchronously after the bind, and the
+	# hotplug rules mount it. Give that a moment so the caller's next look is
+	# of a settled slot rather than of the gap.
+	sleep 3
+}
+
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	json_hdr
-	L=""; err=""
+	L=""; err=""; EXTRA=""
 	case "$POST_op" in
 		format) do_format;;
 		mount) do_mount;;
 		unmount) do_unmount;;
 		fsck) do_fsck;;
+		speedtest) do_speedtest;;
+		cardcheck) do_cardcheck;;
+		scanstart) do_scanstart;;
+		scanstop) do_scanstop;;
+		reprobe) do_reprobe;;
+		swaprelease) do_swaprelease;;
 		*) err="unknown op";;
 	esac
 	if [ -z "$err" ]; then
-		printf '{"ok":true,"log":"%s"}' "$(json_log "$L")"
+		printf '{"ok":true,%s"log":"%s"}' "$EXTRA" "$(json_log "$L")"
 	else
 		printf '{"ok":false,"error":"%s","log":"%s"}' "$(json_str "$err")" "$(json_log "$L")"
 	fi
 	exit 0
+fi
+
+# The wizard's own once-a-second status poll is what keeps its lock alive. No
+# extra request for it, and a browser that stops polling -- closed, crashed,
+# carried out of range -- stops holding the slot within SWAP_LOCK_STALE.
+if [ -n "$GET_swap" ] && [ "$(swap_holder)" = "$GET_swap" ]; then
+	sw_now=$(date +%s 2>/dev/null)
+	case "$sw_now" in ''|*[!0-9]*) sw_now=0;; esac
+	printf '%s' "$sw_now" > "$SWAP_LOCK/at" 2>/dev/null
 fi
 
 json_hdr

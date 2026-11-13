@@ -5,8 +5,10 @@
 // that, so this makes the fleet reachable from wherever they already are.
 //
 // Fed by GET /api/v1/peers, the same roster the openipc.local selector uses. It
-// is subnet-gated (404 off-link) and absent on older majestic (404), and either
-// way the switcher simply stays hidden: no new disclosure, no hard dependency.
+// is subnet-gated: off the link it answers 204, no cameras this caller may be
+// shown, and the switcher simply stays hidden. 204 rather than 404 because this
+// asks on every page load, and a 404 is a red console error each time for what
+// is an ordinary answer (#589).
 //
 // The href helpers below are copied verbatim from www/cameras.html. That page is
 // served before authentication and so cannot pull /a/*.js, which is why the two
@@ -158,8 +160,8 @@
 		// unprompted in the background, not on a user action.
 		//
 		// Bounded so a stalled reply self-terminates well before the next tick
-		// rather than piling up behind the timer. 200 on-link, 404 off it or on
-		// a majestic without the endpoint; anything else hides the switcher.
+		// rather than piling up behind the timer. 200 on-link, 204 off it;
+		// anything else hides the switcher.
 		var ctl = new AbortController();
 		var giveUp = setTimeout(function () { ctl.abort(); }, 5000);
 
@@ -169,11 +171,14 @@
 			headers: { 'Accept': 'application/json' }
 		})
 			.then(function (r) {
-				// A 404 is definitive: either this majestic has no peers
-				// endpoint (older build) or we are off its subnet. Neither
-				// changes while the page is open, so stop the timer rather than
-				// 404 every minute for the life of the tab.
-				if (r.status === 404) { stop(); return null; }
+				// 204 is definitive: we are off the camera's link, and that does
+				// not change while the page is open, so stop the timer rather
+				// than ask every minute for the life of the tab. A 404 is as
+				// final -- something between us and the camera does not have the
+				// path -- and asking again would print the same console error
+				// every minute. A 204 has no body to parse, so neither may reach
+				// r.json().
+				if (r.status === 204 || r.status === 404) { stop(); return null; }
 				return r.ok ? r.json() : null;
 			})
 			.then(function (data) { build(box, data && data.cameras); })

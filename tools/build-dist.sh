@@ -23,6 +23,33 @@ cp -r www LICENSE "$PKG"/
 [ -d sbin ] && cp -r sbin "$PKG"/ || true
 [ -d bin ]  && cp -r bin  "$PKG"/ || true
 
+# The installer does not ship. It is 48 KB whose only job is to download a tree,
+# and the rootfs is a fixed-size squashfs partition that several boards sit at
+# the very edge of -- an 8 MB gk7202v300 had 12.0 KB spare in its 5120 KB before
+# one week's work took it over, and hi3519v101_lite went with it. What a camera
+# carries is sbin/updatewebui-fetch, which downloads the installer when somebody
+# runs it, and it carries it under the name people type.
+#
+# Done here rather than in buildroot's package recipe on purpose. This is the
+# repository that decides what the payload contains, so doing it here needs no
+# change in another repo, takes effect the moment this release is rebuilt, and
+# leaves no second file list to keep in step. sbin/updatewebui stays in git --
+# that path is the URL the stub fetches, and /etc/profile has pointed at it for
+# years.
+# Mandatory, not guarded. A rename that quietly does nothing when the stub has
+# gone missing would leave the 48 KB installer sitting at that path and ship a
+# green build -- and the boards this exists for would go back over their
+# partition with nothing anywhere reporting it. That is the exact silent
+# regression the split removes, so its absence stops the build instead.
+stub_over_installer() {
+	[ -f "$PKG/sbin/updatewebui-fetch" ] || {
+		echo "build-dist: sbin/updatewebui-fetch is missing; the payload would ship the 48 KB installer" >&2
+		return 1
+	}
+	mv -f "$PKG/sbin/updatewebui-fetch" "$PKG/sbin/updatewebui"
+}
+stub_over_installer
+
 # Stamp the tree with its own version, so the Dashboard can show which WebUI is
 # deployed the way it shows majestic's -- there is otherwise nothing on the
 # camera that records it, and a reporter running an install cannot say which
@@ -119,7 +146,19 @@ done
 # of 297 KB, and on the Live page 17 KB of the 32 KB a browser is sent EVERY
 # time somebody opens it -- uncompressed, because a CGI reply comes back
 # chunked with no Content-Encoding however the request asks for one.
-node tools/strip-cgi-comments.js "$PKG/www"
+#
+# ...and out of the plain shell scripts: the j/*.cgi endpoints, p/*.sh, and
+# everything in sbin/ and bin/. Measured, 165 KB of 300 KB -- more than the
+# templates gave -- and every stripped script parses to the same syntax tree
+# as its source.
+#
+# Only the directories the copy step above actually staged: sbin/ and bin/ are
+# optional there, and a path the stripper cannot stat stops the build.
+set -- "$PKG/www"
+for d in sbin bin; do
+	if [ -d "$PKG/$d" ]; then set -- "$@" "$PKG/$d"; fi
+done
+node tools/strip-cgi-comments.js "$@"
 
 # ...and refuse to build a payload that still carries any.
 #

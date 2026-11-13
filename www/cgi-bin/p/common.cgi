@@ -16,6 +16,7 @@ IFS_ORIG=$IFS
 # block, so the parser would end the block on it and the page would fail with
 # "Missing" that same tag, several hundred lines later.)
 . ./p/majestic.sh
+. ./p/flash.sh
 
 # card_head "title" "note"
 #
@@ -127,7 +128,7 @@ ex() {
 field_hidden() {
 	local n="$1"
 	local v="$2"
-	echo "<input type=\"hidden\" name=\"${n}\" id=\"${n}\" value=\"${v}\" class=\"form-hidden\">"
+	echo "<input type=\"hidden\" name=\"${n}\" id=\"${n}\" value=\"$(attr_escape "$v")\" class=\"form-hidden\">"
 }
 
 # field_password "name" "label" "hint"
@@ -139,7 +140,7 @@ field_password() {
 	echo "<p class=\"password mj-row\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\"><span class=\"input-group\">" \
-		"<input type=\"password\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+		"<input type=\"password\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"$(attr_escape "$v")\">" \
 		"<label class=\"input-group-text\">" \
 		"<input type=\"checkbox\" class=\"form-check-input me-1\" data-for=\"${n}\"> show" \
 		"</label></span></span></span>"
@@ -190,6 +191,67 @@ esc() {
 	s=${s//>/&gt;}
 	s=${s//\"/&quot;}
 	printf '%s' "$s"
+}
+
+# Quote a value so that a shell reading it back gets the value unchanged.
+#
+# For the two kinds of file this WebUI writes and then SOURCES: the extension
+# configs under /etc/webui and the sysinfo cache in /tmp/webui. Both are read
+# with `.`, so whatever they contain is shell, and a value that arrives from a
+# form goes round the loop a second time on its way back in. Wrapped in double
+# quotes -- which is how every one of them used to be written -- a caption
+# reading `Motion at the "front door"` truncates at the second quote and hands
+# `door` to the shell as a command name, and one containing $(...) or backticks
+# runs on every page load, because a sourced file expands those inside double
+# quotes (#547).
+#
+# Single quotes are the only wrapper a shell does not look inside, so the sole
+# character needing attention is the single quote itself: close the string,
+# emit an escaped one, reopen. The result is what the value was, byte for byte,
+# including spaces, globs, backslashes and newlines.
+#
+# A sed pipeline rather than the substitution esc uses next door, even though
+# this costs a fork per key and update_caminfo writes twenty-eight of them.
+# ${s//x/y} is not POSIX: busybox ash on the camera takes it, which is why esc
+# can, but dash -- /bin/sh on most machines a developer or CI runs this on --
+# PARSES it and then fails at run time with "Bad substitution". The lint's
+# `sh -n` therefore cannot see the difference, so the one helper whose whole
+# job is to get quoting right is the last one that should depend on it.
+#
+# Streamed, with no $(...) inside it, so that conf_write below can be exact.
+# A caller is free to capture it -- `$(shq "$x")` is how the network page
+# renders its log line -- but capturing costs every trailing newline the value
+# had, so anything writing a file uses conf_write instead.
+shq() {
+	printf "'"
+	printf '%s' "$1" | sed "s/'/'\\\\''/g"
+	printf "'"
+}
+
+# conf_write "name" "value"
+#
+# One line of a file that will be sourced: `name='value'`, on stdout, for the
+# caller to redirect. This is the only thing that should write into the
+# extension configs or the sysinfo cache.
+#
+# The value never passes through command substitution, and that is the whole
+# reason this exists rather than `printf '%s\n' "name=$(shq "$v")"`. POSIX
+# command substitution strips EVERY trailing newline from what it captures, so
+# the obvious spelling silently rewrites any value that ends in one -- and it
+# would do it twice over in the config writers, which used to capture t_value
+# on the way in as well. The value is streamed instead: name, equals, opening
+# quote, escaped value, closing quote, newline.
+#
+# printf rather than echo for the same reason throughout. dash's echo acts on
+# the backslashes in its argument, so a stored `C:\cams\front` came out as
+# `name='C:` -- \c ends echo's output -- leaving a file that will not parse.
+# The camera's busybox echo leaves them alone, so this was latent on a camera
+# rather than live, but a writer that depends on which echo it got is a writer
+# waiting to lose a value.
+conf_write() {
+	printf '%s=' "$1"
+	shq "$2"
+	printf '\n'
 }
 
 # field_switch "name" "label" "value" "hint" "confirm"
@@ -260,7 +322,7 @@ field_string() {
 		echo "<p class=\"string mj-row\" id=\"${n}_wrap\">" \
 			"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 			"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">" \
-			"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+			"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"$(attr_escape "$v")\">" \
 			"</span></span>"
 	fi
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
@@ -276,7 +338,7 @@ field_text() {
 	echo "<p class=\"string mj-row\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<span class=\"mj-ctl\"><span class=\"mj-ctl-in\">" \
-		"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"${v}\">" \
+		"<input type=\"text\" id=\"${n}\" name=\"${n}\" class=\"form-control\" value=\"$(attr_escape "$v")\">" \
 		"</span></span>"
 	[ -n "$h" ] && echo "<span class=\"hint text-secondary\">${h}</span>"
 	echo "</p>"
@@ -342,6 +404,48 @@ majestic_reload() {
 	pidof majestic >/dev/null 2>&1 || return 1
 	(sleep 2; killall -1 majestic) </dev/null >/dev/null 2>&1 &
 	return 0
+}
+
+# crond_tz_sync -- make crond keep time in the zone /etc/TZ names
+#
+# crond reads the time zone once, from the environment it was started with:
+# rcS exports TZ from /etc/TZ before starting it, and nothing tells it about a
+# later change. So after the Time page saves a new zone, every crontab line
+# goes on firing by the old one until the camera reboots -- and crond
+# restarted from anywhere that did not export TZ (a shell, a service script)
+# keeps UTC. A schedule that names a time of day, like the Update page's,
+# means local time only if this holds.
+#
+# Restarted only when it disagrees, read back from crond's own environment,
+# because a restart is not free: anything due in the moment it is down is
+# skipped. The redirections are majestic_reload's: start-stop-daemon
+# backgrounds crond, and a crond still holding this CGI's output pipe would
+# hold the answer open.
+#
+# Fails when crond is not left running under /etc/TZ -- no init script, or a
+# restart that did not take -- so a page promising a local time can say it
+# could not.
+crond_tz_want=""
+crond_tz_ok() {
+	local pid have
+	pid=$(pidof crond 2>/dev/null)
+	pid=${pid%% *}
+	[ -n "$pid" ] || return 1
+	have=$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^TZ=//p')
+	[ "$have" = "$crond_tz_want" ]
+}
+crond_tz_sync() {
+	local i
+	crond_tz_want=$(cat /etc/TZ 2>/dev/null)
+	crond_tz_ok && return 0
+	[ -x /etc/init.d/S60crond ] || return 1
+	TZ="$crond_tz_want" /etc/init.d/S60crond restart </dev/null >/dev/null 2>&1
+	# start-stop-daemon -b returns before crond is necessarily up.
+	for i in 1 2 3; do
+		crond_tz_ok && return 0
+		sleep 1
+	done
+	return 1
 }
 
 log_create() {
@@ -461,6 +565,299 @@ include() {
 	[ -f "$1" ] && . "$1"
 }
 
+# The hook messages, in the language of the page that asked.
+#
+# These sentences reach a person at the one moment something did not work, so
+# a page that is Russian throughout must not answer a failed save in English.
+# The page sets notify_hooks_lang before calling notify_hooks_sync; anything
+# else, or a key with no translation, stays English.
+#
+# A case rather than one variable per sentence, for the reason pages.cgi gives:
+# a table in variables is a table something else can overwrite, and this file
+# is sourced into every page's own shell.
+hook_say() {
+	if [ "$notify_hooks_lang" = ru ]; then
+		case "$1" in
+		clip_unreadable)
+			printf '%s' "Один из файлов настроек уведомлений не читается, поэтому то, что камера запускает по окончании записи, осталось без изменений."
+			return ;;
+		clip_cannot_ask)
+			printf '%s' "Не удалось спросить камеру, что она запускает по окончании записи, поэтому настройка осталась без изменений."
+			return ;;
+		clip_refused)
+			printf '%s' "Камера не приняла настройку отправки записей."
+			return ;;
+		clip_not_kept)
+			printf '%s' "Камера не сохранила настройку отправки записей."
+			return ;;
+		clip_taken)
+			printf '%s' "По окончании записи камера уже запускает свою команду, поэтому её не трогали. Очистите её, чтобы отправлять записи отсюда."
+			return ;;
+		clip_stop_refused)
+			printf '%s' "Камера не смогла прекратить запуск отправки записей."
+			return ;;
+		motion_unreadable)
+			printf '%s' "Один из файлов настроек уведомлений не читается, поэтому то, что камера запускает при начале движения, осталось без изменений."
+			return ;;
+		motion_no_worker)
+			printf '%s' "В этой прошивке нет части, которая отправляет движение с камеры без карты памяти, поэтому отправлять можно только записи."
+			return ;;
+		motion_taken)
+			printf '%s' "При начале движения камера уже запускает свой скрипт, поэтому его не трогали. Удалите ${motion_hook_path}, чтобы отправлять движение отсюда на камере без карты памяти."
+			return ;;
+		motion_refused)
+			printf '%s' "Камера не приняла скрипт, который отправляет движение."
+			return ;;
+		esac
+	fi
+
+	case "$1" in
+	clip_unreadable)
+		printf '%s' "One of the notification settings files could not be read, so what the camera runs when a recording finishes was left alone." ;;
+	clip_cannot_ask)
+		printf '%s' "The camera could not be asked what it runs when a recording finishes, so that was left alone." ;;
+	clip_refused)
+		printf '%s' "The camera would not take the setting that sends recordings." ;;
+	clip_not_kept)
+		printf '%s' "The camera did not keep the setting that sends recordings." ;;
+	clip_taken)
+		printf '%s' "The camera already runs a command of its own when a recording finishes, so it was left alone. Clear it to send recordings from here." ;;
+	clip_stop_refused)
+		printf '%s' "The camera would not stop running the recording sender." ;;
+	motion_unreadable)
+		printf '%s' "One of the notification settings files could not be read, so what the camera runs when movement starts was left alone." ;;
+	motion_no_worker)
+		printf '%s' "This firmware does not include the part that sends movement from a camera with no memory card, so only recordings can be sent." ;;
+	motion_taken)
+		printf '%s' "The camera already runs a script of its own when movement starts, so it was left alone. Remove ${motion_hook_path} to have movement sent from here on a camera with no memory card." ;;
+	motion_refused)
+		printf '%s' "The camera would not take the script that sends movement." ;;
+	esac
+}
+
+# Whether anything installed on this camera still wants finished recordings.
+#
+# Each sender answers for itself, in its own config, and is read in a subshell
+# so that the second one cannot see what the first one set.
+#
+# The same list sbin/motion-notify.sh and sbin/record.sh carry;
+# tools/lint-templates.sh fails the build when the three disagree. A name
+# missing HERE is the expensive one: this predicate gates both hook syncs, and
+# answering "nobody wants clips" does not merely skip wiring -- it clears the
+# camera's finished-recording hook and removes the movement one. A camera with
+# only the missing sender switched on would quietly unwire itself.
+#
+# Names only, and no executable test: a sender switched on in a build that does
+# not ship it still wires the hooks, exactly as before, and record.sh passes
+# over it at the moment it would have run.
+# Three answers, not two: wanted (0), nobody wants it (1), and a config that
+# could not be read (2).
+#
+# The third exists because of what the callers do with a no. "Nobody wants
+# clips" is not a shrug here -- it is authority to clear the camera's
+# finished-recording setting and delete the movement hook. A config file that
+# will not parse must not buy that authority: it is not a sender declining, it
+# is a question that could not be asked, and answering it as a decline would
+# unwire a camera on the strength of a typo in an unrelated file. Same rule as
+# mj_cfg next door, and the same one sbin/record.sh keeps for the same read.
+#
+# A sourced file that will not parse leaves 2 behind, which is what makes the
+# three cases separable at all; a file that parses and declines leaves 1.
+clip_hook_wanted() {
+	_ch_unsure=0
+
+	for _ch_name in telegram ntfy max; do
+		[ -e "/etc/webui/${_ch_name}.conf" ] || continue
+		(
+			. "/etc/webui/${_ch_name}.conf"
+			eval "[ \"\$${_ch_name}_enabled\" = true ] &&
+				[ \"\$${_ch_name}_clips\" = true ]"
+		)
+		case $? in
+		0) return 0 ;;
+		1) ;;
+		*) _ch_unsure=1 ;;
+		esac
+	done
+
+	[ "$_ch_unsure" = 1 ] && return 2
+
+	return 1
+}
+
+# Keep the camera's own setting in step with those answers.
+#
+# The camera runs one command when a recording finishes, and it is not ours to
+# take: an operator who has pointed it at a script of their own gets to keep
+# it, and is told rather than overruled. So this only ever writes the
+# dispatcher over an EMPTY setting, and only ever clears the dispatcher --
+# never anything else that happens to be there.
+#
+# Returns non-zero when the camera was not left in the state the page asked
+# for, with the sentence to show in $clip_hook_msg. The caller decides what to
+# say, because its own redirect would otherwise overwrite anything written to
+# the flash log here.
+#
+# Called after the config file is written, because the answer is read back out
+# of it.
+clip_hook_sync() {
+	clip_hook_msg=""
+	_ch_hook=/usr/sbin/record.sh
+	_ch_now=$(mj_cfg records.onClose)
+
+	# Three answers, kept apart. Collapsing "not set" and "could not ask"
+	# would let a failed request -- a camera mid-restart, a build without the
+	# setting -- read as an empty one, and the empty branch below WRITES.
+	case $? in
+	0) ;;
+	1) _ch_now="" ;;
+	*)
+		clip_hook_msg=$(hook_say clip_cannot_ask)
+		return 1
+		;;
+	esac
+
+	clip_hook_wanted
+	_ch_want=$?
+
+	# A config that could not be read is not a decline, so nothing is torn
+	# down on the strength of it. Said out loud rather than passed over: the
+	# operator has a file the camera cannot read, and the recording sender is
+	# left exactly as it was until they fix it.
+	if [ "$_ch_want" = 2 ]; then
+		clip_hook_msg=$(hook_say clip_unreadable)
+		return 1
+	fi
+
+	if [ "$_ch_want" = 0 ]; then
+		case "$_ch_now" in
+		"$_ch_hook") ;;
+		"")
+			if ! mj_set records.onClose "$_ch_hook"; then
+				clip_hook_msg=$(hook_say clip_refused)
+				return 1
+			fi
+			# Read back rather than trusting the answer: this API can accept
+			# a write and keep nothing, and a page that reported success on
+			# the strength of the status code would say the opposite of what
+			# the camera is doing.
+			if [ "$(mj_cfg records.onClose)" != "$_ch_hook" ]; then
+				clip_hook_msg=$(hook_say clip_not_kept)
+				return 1
+			fi
+			;;
+		*)
+			clip_hook_msg=$(hook_say clip_taken)
+			return 1
+			;;
+		esac
+	elif [ "$_ch_now" = "$_ch_hook" ]; then
+		if ! mj_clear records.onClose; then
+			clip_hook_msg=$(hook_say clip_stop_refused)
+			return 1
+		fi
+	fi
+
+	return 0
+}
+
+# The other half of the answer above: what the camera runs when movement
+# STARTS, rather than when a recording finishes.
+#
+# It exists because the clip hook cannot cover a camera with no memory card.
+# With nowhere to record there is no recorder, so no clip is ever finished and
+# records.onClose never fires -- and "send me something when it moves" is
+# exactly what such a camera's owner asked for. /usr/sbin/motion-notify.sh
+# records a few seconds as it sends them, which needs no card at all, and
+# stands aside on its own whenever the recorder is set to record on movement.
+#
+# There is NO configuration key for this one. majestic runs /usr/sbin/motion.sh
+# if that file is there and executable, so wiring it means writing the file --
+# and the same rule holds as for the clip hook: an operator who has put a
+# script of their own there keeps it and is told, rather than being overruled.
+# This only ever writes a file that is absent, and only ever removes one it
+# wrote itself, which is what the marker line is for.
+#
+# It is wired whenever either page wants movement sent, including on a camera
+# that has a card today: the script decides at the moment of the event, so
+# pulling the card later leaves the setting working instead of silently
+# stopping.
+motion_hook_path=/usr/sbin/motion.sh
+motion_hook_worker=/usr/sbin/motion-notify.sh
+motion_hook_mark="# written by the OpenIPC WebUI notification pages"
+
+motion_hook_sync() {
+	motion_hook_msg=""
+
+	clip_hook_wanted
+	_mh_want=$?
+
+	# As above: a config that could not be read is not permission to remove
+	# somebody's movement hook.
+	if [ "$_mh_want" = 2 ]; then
+		motion_hook_msg=$(hook_say motion_unreadable)
+		return 1
+	fi
+
+	if [ "$_mh_want" = 0 ]; then
+		# Saying nothing here would be the page confirming a setting whose
+		# other half cannot run: on a build that ships no sender the whole
+		# card-less path is missing, and the operator would be told their
+		# settings were saved with movement quietly going nowhere.
+		if [ ! -x "$motion_hook_worker" ]; then
+			motion_hook_msg=$(hook_say motion_no_worker)
+			return 1
+		fi
+
+		if [ -e "$motion_hook_path" ]; then
+			if grep -qF "$motion_hook_mark" "$motion_hook_path" 2>/dev/null; then
+				return 0
+			fi
+			motion_hook_msg=$(hook_say motion_taken)
+			return 1
+		fi
+
+		cat > "$motion_hook_path" <<-HOOK
+			#!/bin/sh
+			${motion_hook_mark}
+			#
+			# Delete this file to stop movement being sent, or replace it with
+			# a script of your own -- nothing here will overwrite one.
+			exec ${motion_hook_worker} "\$@"
+		HOOK
+		# Written, then checked: a full flash writes a truncated file without
+		# saying so, and a hook the camera cannot execute is one it silently
+		# never runs. Both leave the operator told it worked.
+		if [ ! -s "$motion_hook_path" ] || ! chmod 0755 "$motion_hook_path" ||
+			[ ! -x "$motion_hook_path" ]; then
+			rm -f "$motion_hook_path"
+			motion_hook_msg=$(hook_say motion_refused)
+			return 1
+		fi
+		return 0
+	fi
+
+	if [ -e "$motion_hook_path" ] &&
+		grep -qF "$motion_hook_mark" "$motion_hook_path" 2>/dev/null; then
+		rm -f "$motion_hook_path"
+	fi
+
+	return 0
+}
+
+# Both hooks, and one sentence for whatever did not happen. The pages call this
+# rather than the two separately, so that a page can never report one of them
+# as the whole answer.
+notify_hooks_sync() {
+	notify_hooks_msg=""
+
+	clip_hook_sync || notify_hooks_msg="$clip_hook_msg"
+	motion_hook_sync ||
+		notify_hooks_msg="${notify_hooks_msg}${notify_hooks_msg:+ }${motion_hook_msg}"
+
+	[ -z "$notify_hooks_msg" ]
+}
+
 # pre "text" "classes" "extras"
 #
 # The <pre> twin of ex, for a text blob the camera produced rather than a
@@ -556,14 +953,21 @@ signature() {
 	cat $signature_file
 }
 
+# The value of the variable named by $1 -- how the field_* helpers read the
+# value they are about to render out of the environment.
+#
+# printf into an escaped pair of double quotes, not `echo $var`. Unquoted, the
+# expansion is word-split and globbed before echo ever sees it, so a stored
+# password of `p@ss  word` came back with one space and one of `*` came back as
+# a listing of the current directory. And echo would eat a leading -n or act on
+# a backslash. Neither can happen to a quoted printf '%s' (#547).
 t_value() {
-	eval "echo \$${1}"
+	eval "printf '%s' \"\$${1}\""
 }
 
 update_caminfo() {
 	flash_type=$(ipcinfo --flash-type)
-	mtd_size=$(grep -E "nor|nand" $(ls /sys/class/mtd/mtd*/type) | sed -E "s|type.+|size|g")
-	flash_size=$(awk '{sum+=$1} END{print sum/1024/1024}' $mtd_size)
+	flash_size=$(flash_bytes | awk '{print $1/1048576}')
 
 	sensor=$(fw_printenv -n sensor)
 	[ -z "$sensor" ] && sensor="unknown"
@@ -589,6 +993,14 @@ update_caminfo() {
 	fw_build=$(grep "GITHUB_VERSION" /etc/os-release | cut -d= -f2 | tr -d '"')
 	mj_version=$($mj_bin_file -v)
 	uboot_version=$(fw_printenv -n ver)
+	# Which majestic answered the questions below, and which RUN of it. Neither
+	# is shown anywhere — together they are what lets the next page load tell a
+	# cached answer from a stale one; see caminfo_stale. Both empty when the
+	# daemon is not running, which is its own fact and is read as one.
+	mj_pid=$(pidof majestic 2>/dev/null)
+	mj_pid=${mj_pid%% *}
+	mj_started=""
+	[ -n "$mj_pid" ] && read_starttime "$mj_pid" && mj_started=$mj_started_now
 
 	# WebUI
 	ui_password=$(grep root /etc/shadow | cut -d: -f2)
@@ -646,8 +1058,18 @@ update_caminfo() {
 				ptz_support="1"; ptz_backend="gpio"
 			fi
 			;;
-		pelco-d|pelco-xm)
-			# Ask the daemon whether it can drive this wire. Its answers are
+		pelco-d|pelco-xm|ms41908|gpiostep)
+			# All four are motors majestic itself drives -- the two XiongMai
+			# near-Pelco variants over a UART, the Panasonic MS41908M SPI
+			# stepper on the Hi3516A V100 boards, which has no UART MCU and is
+			# stepped straight off the ISP by the majestic-af plugin, and a
+			# pan/tilt head of plain GPIO steppers behind the gpiostep kernel
+			# module, which majestic-af drives the same way. The WebUI does not
+			# touch any of those wires; it asks majestic (mj_ptz) and POSTs
+			# verbs to its /ptz, so the pad is the same for all of them and the
+			# axes it renders come from ptz_caps, not the wire.
+			#
+			# Ask the daemon whether it can drive this lens. Its answers are
 			# kept apart the way af_support keeps them apart: a camera that
 			# could not be asked keeps its pad and lets a press report its
 			# own failure, and only a camera that answered "no motorized
@@ -678,6 +1100,10 @@ update_caminfo() {
 			;;
 		# "none", unset and anything unrecognised all land here: no pad.
 	esac
+	# The controls themselves ship only on an image with a motor driver; one
+	# without carries p/motor.cgi as an empty stub, and has nothing to draw a
+	# pad with whatever ptz_control says.
+	[ -s /var/www/cgi-bin/p/motor.cgi ] || { ptz_support=""; ptz_backend=""; ptz_reason=""; }
 
 	# ptz_caps declares which axes the hardware actually has, in the same
 	# declarative U-Boot family as the rest (#227): fw_setenv ptz_caps
@@ -694,25 +1120,32 @@ update_caminfo() {
 		esac
 	done
 	ptz_caps="${ptz_caps# }"
+	# A gpiostep head pans and tilts and has nothing else to drive, so its
+	# full capability is those two: an unset ptz_caps must not draw zoom and
+	# focus buttons that move nothing.
+	[ -z "$ptz_caps" ] && [ "$ptz_control" = gpiostep ] && ptz_caps="pan tilt"
 
-	# Autofocus: the engine lives in majestic (GET /autofocus, #227's board
-	# being the first) and exists only when its config enables it; the pad's
-	# AF button additionally needs a focus axis to make sense. Cached like
-	# the rest so pages don't shell out per request.
-	af_support=""
-	# A camera that could not be asked keeps the button rather than losing it:
-	# withdrawing the control would state, from a failed request, that this
-	# hardware does not have the feature. Only an answer saying it is off
-	# withdraws it.
-	_af=$(mj_cfg isp.autofocus.enabled); _afrc=$?
-	_af_on=""
-	[ "$_afrc" = 0 ] && [ "$_af" = "true" ] && _af_on=1
-	[ "$_afrc" -gt 1 ] && _af_on=1
-	if [ -n "$ptz_support" ] && [ -n "$_af_on" ]; then
-		case " ${ptz_caps:-focus} " in
-			*" focus "*) af_support="1" ;;
-		esac
-	fi
+	# Autofocus has NO cached flag here, deliberately, and this comment is the
+	# tombstone of the one that used to be.
+	#
+	# `af_support` combined two facts with very different lifetimes: whether
+	# this board has a motor and a focus axis (U-Boot, effectively permanent)
+	# and whether majestic's engine is switched on (ptz.enabled,
+	# changed from the settings page whenever anybody likes). The whole file is
+	# invalidated by caminfo_stale(), which compares majestic's pid and start
+	# time -- and saving a config key is a SIGHUP reload, not a restart, so the
+	# pid never moves. Turning "Motorized lens" on therefore did nothing
+	# visible until majestic was restarted for some unrelated reason, and there
+	# is no server-side hook that could fix it: Save goes from the browser
+	# straight to /api/v1/config with no CGI anywhere in the path.
+	#
+	# So the slow half stays cached ($ptz_support, $ptz_caps, both derived from
+	# U-Boot above) and p/motor.cgi draws the control on those. The fast half is
+	# majestic's own configuration, and the browser asks majestic for it --
+	# preview-ptz.js probes GET /autofocus/status at mount, which 404s when the
+	# engine is off. That is the standing rule stated as a fix: config comes
+	# from the daemon, and a second copy needs an invalidation rule that has a
+	# witness at the event. This one never had one.
 
 	# Network
 	network_interface=$(ip route | awk '/default/ {print $5}' | head -n1)
@@ -732,14 +1165,46 @@ update_caminfo() {
 		tz_name="Etc/GMT"; echo "$tz_name" > /etc/timezone
 	fi
 
-	local variables="flash_size flash_type fw_build fw_variant fw_version mj_version network_address
-		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		af_support ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
-	rm -f ${sysinfo_file}
+	# Whether this majestic has counting at all: a property of the binary, so
+	# it lives here, re-read whenever majestic is (caminfo_stale). Whether it
+	# is switched ON is configuration, and the Counting page asks for that
+	# itself. mj_cfg answers 1 for a key the daemon does not have, and 2 for a
+	# daemon that could not be asked -- which is not "no": that is recorded as
+	# "ask", and recheck_counting asks again later rather than the entry
+	# staying hidden until majestic restarts.
+	counting_support=""
+	counting_asked=""
+	mj_cfg counting.enabled >/dev/null
+	case $? in
+		0) counting_support="1" ;;
+		2) counting_support="ask"; counting_asked=$(date +%s) ;;
+	esac
 
-	local v
+	local variables="counting_asked counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
+		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
+		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
+	rm -f ${sysinfo_file} "$counting_file"
+
+	# Through shq, because this file is SOURCED on every request and several of
+	# these values come off the device or out of a form. The line this replaced
+	# wrapped each one in single quotes and escaped nothing in it, so a camera
+	# named with an apostrophe wrote
+	#
+	#     network_hostname='cam'apos'
+	#
+	# and every page in the WebUI answered 500 from then on -- the file no longer
+	# parsed, and common.cgi sources it before it can render anything, so there
+	# was no page left to say so and no way back but SSH. The network form used
+	# to refuse such a name by accident, its own quoting being broken in a way
+	# that rejected the apostrophe before it reached /etc/hostname; fixing that
+	# is what made this reachable (#547).
+	#
+	# The assignment is the escaped `\$${v}` form on purpose: an assignment's
+	# right-hand side is not word-split or globbed, so the value arrives whole.
+	local v val
 	for v in $variables; do
-		eval "echo ${v}=\'\$${v}\' >> ${sysinfo_file}"
+		eval "val=\$${v}"
+		conf_write "$v" "$val" >> ${sysinfo_file}
 	done
 
 	generate_signature
@@ -749,12 +1214,114 @@ mj_bin_file=/usr/bin/majestic
 log_file=/tmp/webui/logfile.txt
 signature_file=/tmp/webui/signature.txt
 sysinfo_file=/tmp/webui/sysinfo.txt
+# recheck_counting's answer, kept beside the record rather than in it, so the
+# one-key re-ask never rewrites the file a full rebuild may be writing.
+counting_file=/tmp/webui/counting.txt
 
 [ ! -d /etc/webui ] && mkdir -p /etc/webui
 [ ! -d /tmp/webui ] && mkdir -p /tmp/webui
 
-[ ! -f $sysinfo_file ] && update_caminfo
+# Some of what update_caminfo caches is not a fact about the camera but an
+# answer the daemon gave -- mj_version, and the whole PTZ/autofocus verdict,
+# which asks majestic whether it can drive the motor wire. Those are good for
+# exactly as long as the majestic instance that gave them, and nothing said so.
+#
+# The cache lives in /tmp, so a reboot cleared it, and that covered the only
+# case anyone hit -- until it didn't: install the motor driver package on a
+# running camera, restart majestic, and the Live page went on telling the
+# operator to install the package they had just installed. The answer was
+# minutes old and from a process that no longer existed. There is no hook to
+# invalidate it from either, the way a save on this page has one: what changed
+# is outside the WebUI entirely, so the cache has to notice by itself.
+#
+# It has to notice for free. Measured on an hi3516ev300, a page load reusing
+# the cache is ~100ms and one that rebuilds it is ~500ms, which is the whole
+# reason the cache exists -- so a check that forks `pidof` (10ms) would spend a
+# tenth of the saving on every page of the UI. The recorded identity turns it
+# into builtins, and the loop below runs in the noise of an empty one.
+
+# The task's start time, in jiffies since boot: field 22 of /proc/<pid>/stat.
+# This is what makes a pid an identity rather than a number -- pids are unique
+# only while their process lives, so a name alone would accept a later majestic
+# that happened to land on the same one. Monotonic, so unlike a file mtime it
+# is also indifferent to the clock being stepped.
+#
+# Sets a variable rather than echoing one: a command substitution would fork,
+# and not forking is the entire point of this path.
+read_starttime() {
+	mj_started_now=""
+	local line=""
+	# Read before the set -- below, which takes $1 away.
+	# Grouped, because ash reports an unopenable redirection itself and does it
+	# before the command's own 2> can catch it: a pid that has since exited
+	# would otherwise write "can't open" to the httpd's log on every page.
+	{ read line < "/proc/$1/stat"; } 2>/dev/null
+	[ -n "$line" ] || return 1
+	# -f for just this expansion, and restored right after: field 2 is the
+	# command name in parentheses, and a glob character in it would otherwise
+	# be matched against the working directory. Callers check the name first,
+	# so it cannot happen from here -- but the guard is one word and the next
+	# caller may not.
+	set -f
+	set -- $line
+	set +f
+	mj_started_now=${22}
+	[ -n "$mj_started_now" ]
+}
+
+caminfo_stale() {
+	# The path every page takes.
+	if [ -n "$mj_pid" ] && [ -n "$mj_started" ]; then
+		local comm=""
+		# Same grouping, same reason as above. An unreadable comm leaves it
+		# empty, which is the same answer as a wrong one. Checked before the
+		# start time because it is what makes the field split below safe.
+		{ read comm < "/proc/$mj_pid/comm"; } 2>/dev/null
+		[ "$comm" = "majestic" ] || return 0
+		read_starttime "$mj_pid" || return 0
+		[ "$mj_started_now" = "$mj_started" ] && return 1
+		return 0
+	fi
+	# Nothing recorded: a cache written before this existed, or written while
+	# majestic was down. Worth one fork to find out -- and only one, because
+	# a daemon that is still down leaves the record alone rather than paying
+	# 400ms on every page of the UI somebody is using to go and fix it.
+	pidof majestic >/dev/null 2>&1
+}
+
+# An answer majestic could not give yet (counting_support "ask") is asked
+# again: that one key, in its own file, and at most once a minute. Not the
+# whole record on every page -- a daemon that is down, or a build that answers
+# 401 to the camera itself, would otherwise cost the full rebuild and a curl
+# that can wait 2 s on each page of the UI somebody is using to fix it.
+recheck_counting() {
+	[ "$counting_support" = ask ] || return 0
+	local now age tmp
+	now=$(date +%s)
+	age=$(( now - ${counting_asked:-0} ))
+	[ "$age" -ge 0 ] && [ "$age" -lt 60 ] && return 0
+	mj_cfg counting.enabled >/dev/null
+	case $? in
+		0) counting_support="1" ;;
+		1) counting_support="" ;;
+	esac
+	counting_asked=$now
+	# Whole, then renamed into place: a reader sees the old file or the new
+	# one. update_caminfo removes it, so a rebuild's own answer stands.
+	tmp="${counting_file}.$$"
+	{
+		conf_write counting_support "$counting_support"
+		conf_write counting_asked "$counting_asked"
+	} > "$tmp" 2>/dev/null && mv -f "$tmp" "$counting_file" || rm -f "$tmp"
+}
+
 include $sysinfo_file
+if [ ! -f $sysinfo_file ] || caminfo_stale; then
+	update_caminfo
+fi
+include $sysinfo_file
+include "$counting_file"
+recheck_counting
 
 pagename=$(basename "$SCRIPT_NAME")
 pagename="${pagename%%.*}"

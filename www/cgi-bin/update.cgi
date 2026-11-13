@@ -2,26 +2,79 @@
 <%in p/common.cgi %>
 <%
 
-	# Latest build available for THIS board, via sysupgrade — the same updater the
-	# Install button drives over /ws/upgrade. It reads OpenIPC's manifest.flat
-	# (firmware or builder repo, chosen by model), and it answers a fresh flash's
-	# stale clock itself — NTP first, then the HTTP Date header — so unlike the
-	# old verifying HTTPS HEAD it is not defeated by one (issue #44/#121:
-	# BADCERT_FUTURE made curl fail while sysupgrade updated fine). It used to do
-	# that by skipping certificate verification; since sysupgrade 1.0.63 the
-	# fetch is verified and the clock is what gets fixed.
-	# `timeout` bounds it so a dead network cannot hang the page.
+	# Latest build available for THIS board, through p/firmware.sh -- the same
+	# question, asked the same way, as the notice and the scheduled install.
 	#
 	# Asked live on every draw, never from j/fw-latest.cgi's cache. That endpoint
 	# exists so the banner on every other page can be cheap; this page is where
 	# somebody has come to act, and it must not offer — or withhold — an image on
 	# the strength of an answer up to six hours old.
-	latest_build() {
-		[ -z "$network_gateway" ] && return
-		command -v sysupgrade >/dev/null 2>&1 || return
-		timeout 15 sysupgrade --list-builds 2>/dev/null \
-			| grep -Eo '[A-Za-z0-9._]+-[0-9]{8}-[0-9a-f]+' | head -1
-	}
+	#
+	# Live, but not while the page waits. The ask is a round trip to OpenIPC
+	# through sysupgrade — three seconds on a good day, and up to its 15-second
+	# bound on a camera with a route and no internet — and the page used to
+	# render nothing until it came back (#683). So the page is drawn first with
+	# the offer in a "checking" state, and update.js asks this same file again
+	# as update.cgi?part=offer, which runs the check and returns only the blocks
+	# that depend on its answer (the fw_* functions below). One file, so the
+	# words cannot drift apart between the two. Two cases still answer in place,
+	# because both are instant and a "checking" that flashes past is noise: no
+	# default route (fw_latest_build returns at once), and a flash under way (no
+	# check at all, see fw_active).
+	. ./p/firmware.sh
+
+	# The scheduled install. sbin/fw-autoupdate's header says why it is a
+	# script and not a bare sysupgrade line; this is the part that edits the
+	# schedule and reads back what the last run did.
+	#
+	# The crontab line IS the schedule -- minute, hour, weekday -- so nothing
+	# else on the camera holds a copy that could disagree with what crond runs.
+	au_job=/usr/sbin/fw-autoupdate
+	au_tab=/etc/crontabs/root
+	# Comments are skipped: crond runs nothing on a commented-out line, so it
+	# must not turn the switch on.
+	au_line=$(grep -v '^[[:space:]]*#' "$au_tab" 2>/dev/null | grep " $au_job\$" | head -1)
+	au_min=""; au_hour=""; au_day=""; au_foreign=""
+	if [ -n "$au_line" ]; then
+		au_min=$(echo "$au_line" | awk '{print $1}')
+		au_hour=$(echo "$au_line" | awk '{print $2}')
+		au_day=$(echo "$au_line" | awk '{print $5}')
+		# Only the shape this page writes is read as a schedule it can show. A
+		# hand-written line is still in force, so it is shown as it stands and
+		# not rounded to the nearest thing the form can say.
+		case "$au_min" in [0-9] | [1-5][0-9]) ;; *) au_foreign=1 ;; esac
+		case "$au_hour" in [0-9] | 1[0-9] | 2[0-3]) ;; *) au_foreign=1 ;; esac
+		case "$au_day" in '*' | [0-6]) ;; *) au_foreign=1 ;; esac
+		[ "$(echo "$au_line" | awk '{print $3 $4}')" = '**' ] || au_foreign=1
+	fi
+
+	if [ "$REQUEST_METHOD" = "POST" ] && [ "$POST_action" = "autoupdate" ]; then
+		# The form posts 0..23. "0" is midnight, so no leading zero is
+		# stripped here: ${h#0} turned it into an empty string and refused
+		# 00:00 as no hour at all (#630).
+		h=$POST_au_hour
+		case "$h" in [0-9] | 1[0-9] | 2[0-3]) ;; *)
+			redirect_to "$SCRIPT_NAME" "danger" "Choose the hour the camera should update at." ;;
+		esac
+		case "$POST_au_day" in '*' | [0-6]) ;; *)
+			redirect_to "$SCRIPT_NAME" "danger" "Choose the day the camera should update on." ;;
+		esac
+		# On the hour, because that is the time the form offers. A minute
+		# picked at random to spread the load turned "03:00" into 03:12 on one
+		# camera and something else on the next (#630); the build list and
+		# the images are served from a CDN that does not need the help.
+		m=0
+		sed -i "\\# $au_job\$#d" "$au_tab"
+		if [ "$POST_au_enabled" != "true" ]; then
+			redirect_to "$SCRIPT_NAME" "success" "Automatic updates are off."
+		fi
+		echo "$m $h * * $POST_au_day $au_job" >>"$au_tab"
+		# The hour means the camera's local time only if crond keeps it.
+		if ! crond_tz_sync; then
+			redirect_to "$SCRIPT_NAME" "warning" "Automatic updates are on, but the scheduler could not be restarted in this camera's time zone, so the hour may be off until the camera restarts."
+		fi
+		redirect_to "$SCRIPT_NAME" "success" "Automatic updates are on."
+	fi
 
 	# A date a sentence can carry. Every other date on this page is ISO because it
 	# sits in a dl.list beside a version string, where a column of them lines up;
@@ -58,7 +111,18 @@
 	# Skip the network-touching build check while a flash is under way: the page
 	# goes straight to the progress view, so there is nothing to offer, and
 	# `sysupgrade --list-builds` would only add load to a camera mid-upgrade.
-	if [ -n "$fw_active" ]; then ver=""; else ver=$(latest_build); fi
+	#
+	# fw_part is set only on the request update.js makes once the page is up.
+	fw_part=""
+	[ "$GET_part" = "offer" ] && fw_part=offer
+	fw_checking=""
+	if [ -n "$fw_active" ]; then
+		ver=""
+	elif [ -z "$fw_part" ] && fw_has_route; then
+		ver=""; fw_checking=1
+	else
+		ver=$(fw_latest_build)
+	fi
 	if [ -n "$ver" ]; then
 		# nightly-20260717-027aae1 -> 2026-07-17
 		fw_date=$(echo "$ver" | grep -Eo '[0-9]{8}' | head -1 | sed -E 's/(....)(..)(..)/\1-\2-\3/')
@@ -73,10 +137,10 @@
 	# "<branch>+<rev>, <date>", so it carries both the revision this camera was
 	# built from and the day it was built.
 	#
-	# The comparison is j/fw-latest.cgi's, deliberately down to the prefix match
-	# in both directions: two surfaces that disagree about whether this camera is
-	# current is the fault that endpoint exists to prevent, and it must not arrive
-	# by this road instead.
+	# The comparison is fw_newer's, the one j/fw-latest.cgi and the scheduled
+	# install make too: two surfaces that disagree about whether this camera is
+	# current is the fault that endpoint exists to prevent (#348), and it must
+	# not arrive by this road instead.
 	#
 	#   offline   — there is nothing to offer.
 	#   current   — both revisions known and the same.
@@ -93,40 +157,72 @@
 	#                     updater, a request that timed out, a manifest that did
 	#                     not parse. Says it could not check, and names no cause.
 	#
-	#   fw_cmp  newer   — both revisions read, and they differ.
-	#           unknown — this camera reports no revision to compare against, so
-	#                     the image is offered (which is what this page has always
-	#                     done) but not called an update. "Firmware X is ready" is
-	#                     a claim about two builds; with one of them unreadable
-	#                     there is nothing to claim.
-	inst_sha=$(echo "$fw_build" | sed -n 's/.*+\([0-9a-f]\{7,\}\).*/\1/p')
+	#   fw_cmp  newer   — both revisions read, they differ, and the build on
+	#                     offer is dated after this camera's.
+	#           unknown — the image is offered (which is what this page has
+	#                     always done) but not called an update. "Firmware X is
+	#                     ready" is a claim about two builds, and there is
+	#                     nothing to claim when this camera reports no revision
+	#                     (fw_why noid) or runs a different build that the one
+	#                     on offer is not later than (fw_why notlater).
+	inst_sha=$(fw_sha_of "$fw_build")
 	inst_date=$(echo "$fw_build" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
-	latest_sha=$(printf '%s' "$ver" | sed -n 's/.*-\([0-9a-f]\{7,\}\)$/\1/p')
+	latest_sha=$(fw_build_sha "$ver")
 	fw_why=""
 	fw_cmp=""
 	# The rule and the mark, which follow the severity and not the state: an
 	# image this camera cannot be compared against is not a warning, and a check
 	# that did not happen is not a fault.
 	fw_sev=""
-	if [ -z "$ver" ]; then
+	if [ -n "$fw_checking" ]; then
+		# Not a state of the camera's, a state of this page: the answer is on
+		# its way. update.js replaces every block that reads it.
+		fw_state="checking"
+		fw_sev="info"
+	elif [ -z "$ver" ]; then
 		fw_state="offline"
 		fw_sev="info"
 		if [ -z "$network_gateway" ]; then fw_why="noroute"; else fw_why="nocheck"; fi
-	elif [ -n "$latest_sha" ] && [ -n "$inst_sha" ] && {
-		case "$latest_sha" in "$inst_sha"*) true ;; *)
-			case "$inst_sha" in "$latest_sha"*) true ;; *) false ;; esac ;;
-		esac
-	}; then
-		fw_state="current"
-		fw_sev="ok"
 	else
-		fw_state="available"
-		if [ -n "$latest_sha" ] && [ -n "$inst_sha" ]; then
-			fw_cmp="newer"; fw_sev="warn"
+		fw_cmp=$(fw_newer "$fw_build" "$ver")
+		if [ "$fw_cmp" = false ]; then
+			fw_state="current"; fw_cmp=""
+			fw_sev="ok"
+		elif [ "$fw_cmp" = true ]; then
+			fw_state="available"; fw_cmp="newer"
+			fw_sev="warn"
 		else
-			fw_cmp="unknown"; fw_sev="info"
+			fw_state="available"; fw_cmp="unknown"
+			fw_sev="info"
+			if [ -n "$inst_sha" ] && [ -n "$latest_sha" ]; then fw_why="notlater"; else fw_why="noid"; fi
 		fi
 	fi
+
+	# What the last scheduled run did, from the record sbin/fw-autoupdate keeps
+	# in /etc so that it survives the reboot a successful run ends in. Read with
+	# sed, never sourced. "started" is only an intention -- the run cannot write
+	# down its own success -- so whether it took is decided here, by comparing
+	# the build it set out to install with the one this camera now runs.
+	au_rec=/etc/webui/fw-autoupdate.last
+	au_get() { sed -n "s/^$1=\"\(.*\)\"\$/\1/p" "$au_rec" 2>/dev/null | head -1; }
+	au_result=$(au_get au_result)
+	au_when=$(au_get au_when)
+	au_target=$(au_get au_target)
+	au_code=$(au_get au_code)
+	au_took=""
+	if [ "$au_result" = "started" ]; then
+		au_took=$(fw_newer "$fw_build" "$au_target")
+	fi
+
+	au_dayname() {
+		case "$1" in
+			'*') printf 'Every day' ;;
+			0) printf 'Every Sunday' ;;    1) printf 'Every Monday' ;;
+			2) printf 'Every Tuesday' ;;   3) printf 'Every Wednesday' ;;
+			4) printf 'Every Thursday' ;;  5) printf 'Every Friday' ;;
+			6) printf 'Every Saturday' ;;
+		esac
+	}
 
 	# The page title is rendered by this page rather than by header.cgi, the way
 	# camera.cgi does it and for the same arithmetic: the full-width band above
@@ -139,25 +235,14 @@
 	fw_kernel="true"
 	fw_rootfs="true"
 %>
-<%in p/header.cgi %>
-
-<h2 class="mj-rail-title mj-page-title"><%= $page_title %></h2>
-
-<%# Where update.js reports what a flash is doing. Above everything and outside
-    #fw-controls, because it also carries the two refusals that happen BEFORE a
-    flash starts — nothing selected to write, no file chosen — and those must not
-    land in a block that is still hidden. %>
-<div id="fw-status" role="status" aria-live="polite"></div>
-
-<%# Set when the camera is holding upgrade mode (the marker file checked above).
-    update.js reads data-active and reattaches to /ws/upgrade instead of offering
-    a fresh upgrade, so a page reloaded mid-flash shows the live transcript and
-    the "do not power off" warning again rather than a bare Update card. Always
-    present so the reader is `$('#fw-inflight')`, never a missing node. %>
-<div id="fw-inflight" hidden data-active="<% attr_escape "$fw_active" %>"></div>
-
-<div id="fw-controls">
-
+<%# Everything that depends on the build check, one function per block, so the
+    page and update.cgi?part=offer render it from the same source. Each block's
+    root carries data-fw-part, the name update.js swaps it by; a state with
+    nothing to show still renders an empty hidden root, so there is always a
+    node to replace. Nothing may stand between these tags but the one newline
+    haserl drops after each: anything else is output, and here that comes
+    before the HTTP header. %>
+<% fw_head() { %>
 	<%# The page's one decision, first on the page: what is on offer, what it is
 	    worth, and the button. Everything below it is detail for somebody who has
 	    already decided or wants to know more.
@@ -166,7 +251,7 @@
 	    and 28px mark: a banner is a thing you close, and this is the page. The
 	    data attributes are what the header's notice slot carries elsewhere —
 	    update.js needs them here because this page renders no slot. %>
-	<div id="fw-head" class="card mj-hero-card mj-sev-<% esc "$fw_sev" %>"
+	<div id="fw-head" data-fw-part="head" class="card mj-hero-card mj-sev-<% esc "$fw_sev" %>"
 	     data-mj-version="<% attr_escape "$mj_version" %>"
 	     data-soc-vendor="<% attr_escape "$soc_vendor" %>"
 	     data-fw-state="<% attr_escape "$fw_state" %>"
@@ -177,12 +262,38 @@
 					<svg class="mj-hero-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
 				<% elif [ "$fw_state" = "current" ]; then %>
 					<svg class="mj-hero-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/><path d="m8 12 2.6 2.6L16 9.5"/></svg>
+				<% elif [ "$fw_state" = "checking" ]; then %>
+					<svg class="mj-hero-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/><path d="M12 7v5l3 2"/></svg>
 				<% else %>
 					<svg class="mj-hero-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.3 8.1A5 5 0 0 1 16.6 8.9a4 4 0 0 1 2.6 6.8"/><path d="M15 18H6.5a4.5 4.5 0 0 1-1.6-8.7"/><path d="M3 3l18 18"/></svg>
 				<% fi %>
 
 				<div class="mj-hero-txt">
-					<% if [ "$fw_state" = "available" ] && [ "$fw_cmp" = "newer" ]; then %>
+					<% if [ "$fw_state" = "checking" ]; then %>
+						<%# Two texts, one shown. The second is for update.js to swap in when
+						    update.cgi?part=offer brings back no blocks: a timeout, an error
+						    status, a body that is something else. What failed is not known
+						    -- the camera may have answered with anything -- so it names no
+						    cause, only that there is no result. %>
+						<div data-fw-asking>
+							<p class="mj-hero-kick">Checking</p>
+							<h3 class="mj-hero-hl">Looking for new firmware&hellip;</h3>
+							<p class="mj-hero-sub">
+								The camera is asking OpenIPC&rsquo;s build list what has been published for
+								<% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash. This can take a few seconds,
+								and up to fifteen when the internet is out of reach.
+							</p>
+						</div>
+						<div data-fw-unasked hidden>
+							<p class="mj-hero-kick">Not checked</p>
+							<h3 class="mj-hero-hl">Couldn&rsquo;t check for new firmware</h3>
+							<p class="mj-hero-sub">
+								The check did not bring a result back to this page, so nothing here
+								says whether there is newer firmware. Try again, or install an image
+								from a file.
+							</p>
+						</div>
+					<% elif [ "$fw_state" = "available" ] && [ "$fw_cmp" = "newer" ]; then %>
 						<p class="mj-hero-kick">Update available</p>
 						<h3 class="mj-hero-hl">Firmware from <% esc "$(say_date "$fw_date")" %> is ready</h3>
 						<p class="mj-hero-sub">
@@ -191,15 +302,21 @@
 							running <span class="mj-mono"><% esc "${fw_version}-${fw_variant}" %></span><% if [ -n "$inst_date" ]; then %> since <% esc "$inst_date" %><% fi %>.
 						</p>
 					<% elif [ "$fw_state" = "available" ]; then %>
-						<%# The image is offered, but nothing here calls it an update: with no
-						    readable revision on one side there are not two builds to compare. %>
+						<%# The image is offered, but nothing here calls it an update: either
+						    there are not two revisions to compare, or the one on offer is
+						    not dated after what this camera runs. %>
 						<p class="mj-hero-kick">Build available</p>
 						<h3 class="mj-hero-hl">Firmware from <% esc "$(say_date "$fw_date")" %> is available</h3>
 						<p class="mj-hero-sub">
 							<span class="mj-mono"><% esc "$ver" %></span> &middot; built for
-							<% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash. This camera
-							reports no revision of its own, so whether that is newer than what it is
-							running cannot be established here.
+							<% esc "$soc" %> on <% esc "$(echo "$flash_type" | tr 'a-z' 'A-Z')" %> flash.
+							<% if [ "$fw_why" = "notlater" ]; then %>
+								This camera runs a different build<% if [ -n "$inst_date" ]; then %>, from <% esc "$inst_date" %><% fi %>,
+								and this one is not dated after it, so this page does not call it an update.
+							<% else %>
+								This camera reports no revision of its own, so whether that is newer than
+								what it is running cannot be established here.
+							<% fi %>
 						</p>
 					<% elif [ "$fw_state" = "current" ]; then %>
 						<p class="mj-hero-kick">Up to date</p>
@@ -254,6 +371,10 @@
 					<div class="mj-hero-act">
 						<a href="network.cgi" class="btn btn-outline-secondary">Check network settings</a>
 					</div>
+				<% elif [ "$fw_state" = "checking" ]; then %>
+					<div class="mj-hero-act">
+						<button id="fw-recheck" type="button" class="btn btn-outline-secondary" hidden>Try again</button>
+					</div>
 				<% fi %>
 			</div>
 		</div>
@@ -269,9 +390,8 @@
 			<% fi %>
 		</div>
 	</div>
-
-	<div class="row g-4 mt-0 mj-fw-cols">
-
+<% } %>
+<% fw_wide() { %>
 		<%# The wide column. With an image on offer it is the changelog, which the
 		    browser fetches; with none it is the file route, which is then the only
 		    way to update at all. Either way it is the thing a reader came to read,
@@ -281,7 +401,7 @@
 		    widens the rail when it stays that way — an empty two-thirds beside a
 		    narrow rail is the dead margin this layout exists to remove. %>
 		<% if [ "$fw_state" = "offline" ]; then %>
-			<div class="col-12 col-lg-7 mj-fw-wide">
+			<div class="col-12 col-lg-7 mj-fw-wide" data-fw-part="wide">
 				<div class="card h-100"><div class="card-body d-flex flex-column">
 					<% card_head "Install from a file" "the only route from here" %>
 					<p class="hint text-secondary">On a machine that does have internet, download the image for
@@ -300,13 +420,102 @@
 				</div></div>
 			</div>
 		<% else %>
-			<div id="fw-news" class="col-12 col-lg-7 mj-fw-wide" hidden>
+			<div id="fw-news" class="col-12 col-lg-7 mj-fw-wide" data-fw-part="wide" hidden>
 				<div class="card"><div class="card-body">
 					<% card_head "What&rsquo;s new" "since your build" %>
 					<div id="fw-news-body"></div>
 				</div></div>
 			</div>
 		<% fi %>
+<% } %>
+<% fw_ifback() { %>
+				<% if [ "$fw_state" = "available" ]; then %>
+					<%# The question somebody asks with a finger over Install. It is
+					    answered here rather than after the fact, because after the
+					    fact this page is not reachable. %>
+					<div class="col-12" data-fw-part="ifback">
+						<div class="card h-100"><div class="card-body">
+							<% card_head "If it does not come back" %>
+							<p class="hint text-secondary">The camera stops answering while it writes and returns in about
+								two minutes. If it has not returned after five, power it off and on
+								once, then reload this page.</p>
+						</div></div>
+					</div>
+				<% else %>
+					<div class="col-12" data-fw-part="ifback" hidden></div>
+				<% fi %>
+<% } %>
+<% fw_railfile() { %>
+				<% if [ "$fw_state" != "offline" ]; then %>
+					<%# From a file, at the weight it is actually used at: last in the
+					    rail, one line and a way in. It is not a second half of a pair
+					    of equal choices — almost nobody arrives here with a .tgz —
+					    and presenting it as one is what made the download route hard
+					    to find. The button stays btn-sm even once a file is chosen:
+					    size carries the hierarchy, so it can be the real action
+					    without competing with Install. %>
+					<div class="col-12" data-fw-part="railfile">
+						<div class="card h-100"><div class="card-body">
+							<% card_head "Install from a file" %>
+							<p class="hint text-secondary mb-3">Have a <code>.tgz</code> image on your computer? Use it instead of downloading.</p>
+							<p class="string mj-row mb-0">
+								<label for="fw-file" class="form-label">Image</label>
+								<span class="mj-ctl"><span class="mj-ctl-in">
+									<input id="fw-file" type="file" accept=".tgz,.gz" class="form-control form-control-sm">
+								</span></span>
+							</p>
+							<div class="mj-foot mt-3">
+								<span class="mj-foot-note">Same reboot, same caution.</span>
+								<button id="fw-install-upload" type="button" class="btn btn-sm btn-primary">Install this file</button>
+							</div>
+						</div></div>
+					</div>
+				<% else %>
+					<div class="col-12" data-fw-part="railfile" hidden></div>
+				<% fi %>
+<% } %>
+<%
+	# The answer, without the page around it. Nothing above has written a
+	# byte yet, so the header is this request's to send.
+	#
+	# A flash that started after the page was drawn ran no check, and the
+	# blocks would read that as one that came back empty -- "nothing on the
+	# camera has changed", over a camera writing its flash. So it is not drawn:
+	# the marker sends update.js back for a page, which attaches to the flash.
+	if [ -n "$fw_part" ]; then
+		printf 'Content-type: text/html; charset=UTF-8\nCache-Control: no-store\n\n'
+		if [ -n "$fw_active" ]; then
+			printf '<div data-fw-active></div>\n'
+		else
+			fw_head; fw_wide; fw_ifback; fw_railfile
+		fi
+		exit 0
+	fi
+%>
+<%in p/header.cgi %>
+
+<h2 class="mj-rail-title mj-page-title"><%= $page_title %></h2>
+
+<%# Where update.js reports what a flash is doing. Above everything and outside
+    #fw-controls, because it also carries the two refusals that happen BEFORE a
+    flash starts — nothing selected to write, no file chosen — and those must not
+    land in a block that is still hidden. %>
+<div id="fw-status" role="status" aria-live="polite"></div>
+
+<%# Set when the camera is holding upgrade mode (the marker file checked above).
+    update.js reads data-active and reattaches to /ws/upgrade instead of offering
+    a fresh upgrade, so a page reloaded mid-flash shows the live transcript and
+    the "do not power off" warning again rather than a bare Update card. Always
+    present so the reader is `$('#fw-inflight')`, never a missing node. %>
+<div id="fw-inflight" hidden data-active="<% attr_escape "$fw_active" %>"></div>
+
+<div id="fw-controls">
+
+	<% fw_head %>
+
+	<div class="row g-4 mt-0 mj-fw-cols">
+
+		<% fw_wide %>
 
 		<div class="col-12 col-lg-5 mj-fw-rail">
 			<div class="row g-4">
@@ -349,45 +558,72 @@
 					</div></div>
 				</div>
 
-				<% if [ "$fw_state" = "available" ]; then %>
-					<%# The question somebody asks with a finger over Install. It is
-					    answered here rather than after the fact, because after the
-					    fact this page is not reachable. %>
-					<div class="col-12">
-						<div class="card h-100"><div class="card-body">
-							<% card_head "If it does not come back" %>
-							<p class="hint text-secondary">The camera stops answering while it writes and returns in about
-								two minutes. If it has not returned after five, power it off and on
-								once, then reload this page.</p>
-						</div></div>
-					</div>
-				<% fi %>
-
-				<% if [ "$fw_state" != "offline" ]; then %>
-					<%# From a file, at the weight it is actually used at: last in the
-					    rail, one line and a way in. It is not a second half of a pair
-					    of equal choices — almost nobody arrives here with a .tgz —
-					    and presenting it as one is what made the download route hard
-					    to find. The button stays btn-sm even once a file is chosen:
-					    size carries the hierarchy, so it can be the real action
-					    without competing with Install. %>
-					<div class="col-12">
-						<div class="card h-100"><div class="card-body">
-							<% card_head "Install from a file" %>
-							<p class="hint text-secondary mb-3">Have a <code>.tgz</code> image on your computer? Use it instead of downloading.</p>
-							<p class="string mj-row mb-0">
-								<label for="fw-file" class="form-label">Image</label>
+				<%# The scheduled install. Its own form, because the switches in
+				    the card above are not saved anywhere -- they shape the one upgrade
+				    started from this page -- and a submit must not carry them. The
+				    scheduled run always writes both and never wipes anything, and the
+				    card says so rather than letting it look like those switches apply. %>
+				<div class="col-12">
+					<div class="card h-100"><div class="card-body">
+						<% card_head "Automatic updates" "$([ -n "$au_line" ] && echo on || echo off)" %>
+						<form action="<%= $SCRIPT_NAME %>" method="post">
+							<% field_hidden "action" "autoupdate" %>
+							<% field_switch "au_enabled" "Install new firmware on a schedule" "$([ -n "$au_line" ] && echo true || echo false)" %>
+							<p class="select mj-row">
+								<label for="au_day" class="form-label">Day</label>
 								<span class="mj-ctl"><span class="mj-ctl-in">
-									<input id="fw-file" type="file" accept=".tgz,.gz" class="form-control form-control-sm">
+									<select class="form-select" id="au_day" name="au_day">
+										<% for d in '*' 1 2 3 4 5 6 0; do %>
+											<option value="<% printf "%s" "$d" %>"<% [ "$au_day" = "$d" ] && printf ' selected' %>><% au_dayname "$d" %></option>
+										<% done %>
+									</select>
 								</span></span>
 							</p>
-							<div class="mj-foot mt-3">
-								<span class="mj-foot-note">Same reboot, same caution.</span>
-								<button id="fw-install-upload" type="button" class="btn btn-sm btn-primary">Install this file</button>
-							</div>
-						</div></div>
-					</div>
-				<% fi %>
+							<p class="select mj-row">
+								<label for="au_hour" class="form-label">Hour</label>
+								<span class="mj-ctl"><span class="mj-ctl-in">
+									<select class="form-select" id="au_hour" name="au_hour">
+										<% for h in $(seq 0 23); do %>
+											<option value="<% printf "%s" "$h" %>"<% [ "${au_hour:-3}" = "$h" ] && printf ' selected' %>><% printf '%02d:00' "$h" %></option>
+										<% done %>
+									</select>
+								</span></span>
+								<span class="hint text-secondary">In the camera&rsquo;s time zone, <% esc "$tz_name" %>, which is set on the <a href="time.cgi">Time</a> page.</span>
+							</p>
+							<p class="hint text-secondary">
+								<% if [ -n "$au_foreign" ]; then %>
+									Set by a crontab line this page did not write, <code><% esc "$au_line" %></code>. Saving replaces it.
+								<% elif [ -n "$au_line" ]; then %>
+									<% au_dayname "$au_day" %> at <% esc "$(printf '%02d:%02d' "$au_hour" "$au_min")" %> the camera checks OpenIPC&rsquo;s build list.
+								<% else %>
+									When it is on, the camera checks OpenIPC&rsquo;s build list at that time.
+								<% fi %>
+								If a newer build exists it installs the kernel and the rootfs, keeping every
+								setting; video stops and the camera reboots. If not, nothing happens.
+							</p>
+							<% if [ "$au_result" = "started" ] && [ "$au_took" = "false" ]; then %>
+								<p class="hint mb-0">Updated automatically to <span class="mj-mono"><% esc "$au_target" %></span> on <% esc "$au_when" %>.</p>
+							<% elif [ "$au_result" = "started" ] && [ "$au_took" = "true" ]; then %>
+								<p class="hint text-warning mb-0">Started installing <span class="mj-mono"><% esc "$au_target" %></span> on <% esc "$au_when" %>, and this camera is still running <span class="mj-mono"><% esc "$fw_build" %></span>.</p>
+							<% elif [ "$au_result" = "started" ]; then %>
+								<p class="hint mb-0">Started installing <span class="mj-mono"><% esc "$au_target" %></span> on <% esc "$au_when" %>.</p>
+							<% elif [ "$au_result" = "failed" ]; then %>
+								<p class="hint text-warning mb-0">On <% esc "$au_when" %> the updater stopped (exit <% esc "$au_code" %>) without installing <span class="mj-mono"><% esc "$au_target" %></span>. The camera kept its firmware.</p>
+							<% elif [ "$au_result" = "current" ]; then %>
+								<p class="hint mb-0">Last checked <% esc "$au_when" %>: already running the newest build.</p>
+							<% elif [ "$au_result" = "nocheck" ]; then %>
+								<p class="hint mb-0">Last checked <% esc "$au_when" %>, and could not tell whether a newer build exists. Nothing was installed.</p>
+							<% elif [ "$au_result" = "busy" ]; then %>
+								<p class="hint mb-0">On <% esc "$au_when" %> another upgrade was already running, so the scheduled one did not start.</p>
+							<% fi %>
+							<% button_submit "Save" %>
+						</form>
+					</div></div>
+				</div>
+
+				<% fw_ifback %>
+
+				<% fw_railfile %>
 
 			</div>
 		</div>

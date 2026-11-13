@@ -11,7 +11,7 @@
 // Both signals are already on the wire. The camera's own exposure gauges ride
 // the /metrics heartbeat main.js polls every 2s on every page, and the picture
 // is decoded in the <video> element, where mj-luma.js reads a 160x90 thumbnail
-// off a canvas -- the same trick the Live adjustments histogram uses, for the
+// off a canvas -- the same trick the Picture histogram uses, for the
 // same reason: it costs the camera nothing and there is no endpoint to add.
 // Nothing here polls anything of its own.
 //

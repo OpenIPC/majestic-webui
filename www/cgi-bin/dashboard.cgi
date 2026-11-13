@@ -6,12 +6,22 @@
 <%in p/header.cgi %>
 
 <% overlay_use=$(df -h /overlay 2>/dev/null | awk 'NR==2{print $3" of "$2" used"}') %>
-<% ovd=/overlay/root; [ -d "$ovd" ] || ovd=/overlay/upper; [ -d "$ovd" ] || ovd=/overlay %>
+<%# The upper layer is read from the root mount, as sbin/updatewebui does, not
+    guessed from a path. On the 3.10 out-of-tree "overlayfs" the upperdir is
+    /overlay itself, so /overlay/root there is root's home directory, and the
+    old probe charted that 1 KB as if it were the whole overlay. %>
+<% ovd=$(awk '$2 == "/" && ($3 == "overlay" || $3 == "overlayfs") { n = split($4, o, ","); for (i = 1; i <= n; i++) if (o[i] ~ /^upperdir=/) { print substr(o[i], 10); exit } }' /proc/mounts) %>
+<% [ -n "$ovd" ] && [ -d "$ovd" ] || ovd=/overlay %>
 <% ov_df=$(df -k /overlay 2>/dev/null | awk 'NR==2{printf "%d %d %d",$2,$3,$4}') %>
 <% ov_total=$(echo $ov_df | cut -d' ' -f1) %>
 <% ov_used=$(echo $ov_df | cut -d' ' -f2) %>
 <% ov_avail=$(echo $ov_df | cut -d' ' -f3) %>
-<% ov_cats=$(du -sk "$ovd"/* 2>/dev/null | sort -rn | awk '{n=$2; sub(/.*\//,"",n); printf "%s{\"name\":\"%s\",\"kb\":%d}",(NR>1?",":""),n,$1}') %>
+<%# A top-level name in the upper layer is whatever someone wrote to /, so it is
+    escaped for the JSON string and for the <script> block it lands in: taken
+    whole rather than as $2 (a space would split it), then \ " and < encoded
+    one character at a time, since busybox and gawk disagree on backslashes
+    in a gsub() replacement. %>
+<% ov_cats=$(du -sk "$ovd"/* 2>/dev/null | sort -rn | awk '{n=$0; sub(/^[0-9]+[ \t]+/,"",n); sub(/.*\//,"",n); e=""; for (i = 1; i <= length(n); i++) { c = substr(n, i, 1); if (c == "\\" || c == "\"") e = e "\\" c; else if (c == "<") e = e "\\u003c"; else e = e c }; printf "%s{\"name\":\"%s\",\"kb\":%d}",(NR>1?",":""),e,$1}') %>
 <% sd_rows=$(df -h 2>/dev/null | awk '/mmcblk|\/mnt\/|\/media\/|\/sdcard/{print $6"|"$3" / "$2"|"$5}') %>
 <%# One row per interface that is up and addressed — common.cgi's network_*
     variables describe only the first default route's device, which hides the
@@ -56,7 +66,7 @@ done) %>
 	     × recording "the camera has no IR-cut filter" in a file of its own,
 	     because nothing measurable separates a filter nobody wired from one
 	     that was never fitted. But majestic already stores that statement:
-	     "Drive the IR-cut filter" off is it, and with it off and no pads
+	     "IR-cut filter" set to off is it, and with it off and no pads
 	     assigned there is no finding to show in the first place. So the way to
 	     silence this is on the page the button already opens, in the camera's
 	     own configuration, where a backup carries it and the daemon agrees with
@@ -160,6 +170,15 @@ done) %>
 		<div class="x-small text-secondary" id="st-wifi-grade"></div>
 		<div id="spark-wifi" class="spark st-tile-spark"></div>
 	</div>
+	<%# The cellular modem's signal, when majestic finds one on USB. RSRP is the
+	    headline, as the level is for Wi-Fi; the grade also weighs SINR, since a
+	    strong cell drowned in interference carries little (dashboard.js). %>
+	<div class="st-panel st-tile" id="st-lte-tile" hidden>
+		<div class="mj-cap">LTE signal</div>
+		<div class="st-val"><span id="st-lte-val">&ndash;</span><span class="st-unit"> dBm</span></div>
+		<div class="x-small text-secondary" id="st-lte-grade"></div>
+		<div id="spark-lte" class="spark st-tile-spark"></div>
+	</div>
 	<div class="st-panel st-tile">
 		<div class="mj-cap">Uptime</div>
 		<div class="st-val-sm" id="st-uptime">&ndash;</div>
@@ -189,6 +208,12 @@ done) %>
 					<span class="st-now" id="st-enc-now"></span>
 				</div>
 				<div class="mj-chart" id="ch-enc"></div>
+				<%# Beside the chart rather than in the KPI tile above: a second
+				    line inside .st-tile lifts every tile in the grid with it
+				    (see .st-tile .st-sub in bootstrap.override.css), and this
+				    one is a sentence rather than a figure. Same shape and same
+				    place as #st-luma-note under Scene luminance. %>
+				<div class="x-small text-secondary" id="st-enc-note"></div>
 			</div>
 		</div>
 
@@ -215,6 +240,18 @@ done) %>
 				    coming. %>
 				<div class="x-small text-secondary" id="st-wifi-none" hidden></div>
 				<div class="x-small text-secondary" id="st-wifi-sub"></div>
+			</div>
+			<div class="st-panel st-chartbox" id="st-lte-panel" hidden>
+				<div class="st-chart-head">
+					<span class="mj-cap">LTE signal (RSRP)</span>
+					<span class="st-now" id="st-lte-now"></span>
+				</div>
+				<div class="mj-chart" id="ch-lte"></div>
+				<%# What the modem is doing with that signal: registered where, and
+				    whether the data session reaches usb0. A registered modem that
+				    has not connected its session carries nothing, and says so. %>
+				<div class="x-small" id="st-lte-state"></div>
+				<div class="x-small text-secondary" id="st-lte-sub"></div>
 			</div>
 		</div>
 
@@ -286,7 +323,9 @@ done) %>
 		<div class="st-panel">
 			<div class="mj-cap mb-2">Storage</div>
 			<dl class="small list mb-2">
-				<dt>Flash</dt><dd><% esc "$flash_size" %> MB <span class="text-secondary"><% esc "$flash_type" %></span></dd>
+				<% if [ -n "$flash_size" ]; then %>
+					<dt>Flash</dt><dd><% esc "$flash_size" %> MB <span class="text-secondary"><% esc "$flash_type" %></span></dd>
+				<% fi %>
 			</dl>
 			<div class="d-flex justify-content-between x-small mb-1">
 				<span class="fw-semibold">Overlay</span><span class="text-secondary"><% esc "${overlay_use:-n/a}" %></span>
@@ -342,6 +381,7 @@ done) %>
 <script src="/a/charts.js" defer></script>
 <script src="/a/ircut-check.js" defer></script>
 <script src="/a/video-check.js" defer></script>
+<script src="/a/rc-check.js" defer></script>
 <script src="/a/dashboard.js" defer></script>
 
 <%in p/footer.cgi %>

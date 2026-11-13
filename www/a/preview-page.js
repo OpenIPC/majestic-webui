@@ -30,6 +30,66 @@
 	const initial = $('#live-video');
 	if (!initial || !window.MajesticVideo) return;
 	const badge = $('#mj-badge'), note = $('#mj-note');
+	// Inside a share, the picture's state goes into the guest's diagnostics
+	// every five seconds: a guest who says the camera is slow is most often
+	// watching a picture that is late, and the copied report should say so
+	// without the Stats panel. How late it is at each stage -- frames waiting
+	// in the camera's queue, the capture-to-arrival lag, what the player sits
+	// on -- and what the link lost. Nothing outside a share.
+	const PICTURE_EVERY_MS = 5000;
+	let pictureAt = 0, pictureRx = null, pictureJb = null, pictureOf = '';
+	const pictureTrace = (s) => {
+		const S = window.MajesticSignal;
+		if (!s || !S || !S.shareTrace) return;
+		const now = Date.now();
+		if (now - pictureAt < PICTURE_EVERY_MS) return;
+		const dc = s.dc || null;
+		const rx = s.rxBytes != null ? s.rxBytes : (dc ? dc.rxBytes : null);
+		// A new player starts its counters over: no rate, and no jitter-buffer
+		// average, across the switch.
+		const of = (s.transport || 'webrtc') + '/' + (s.feed || '');
+		if (of !== pictureOf) { pictureOf = of; pictureRx = null; pictureJb = null; }
+		const kbps = rx != null && pictureRx != null && pictureAt && rx >= pictureRx
+			? Math.round((rx - pictureRx) * 8 / (now - pictureAt)) : (s.kbps != null ? s.kbps : null);
+		pictureAt = now;
+		pictureRx = rx;
+		// WebRTC's sample names no transport: it is the one with a jitter buffer.
+		const webrtc = !s.transport && s.jbEmitted != null;
+		const parts = [(s.transport || (webrtc ? 'webrtc' : '?')) + (s.feed ? '/' + s.feed : '')];
+		if (s.width) parts.push(s.width + 'x' + s.height + (s.fps ? ' ' + Math.round(s.fps) + ' fps' : ''));
+		if (kbps != null) parts.push(kbps + ' kbps');
+		// WebRTC's lateness at the receiver: the jitter buffer's mean wait over
+		// these five seconds, from the cumulative counters.
+		if (webrtc) {
+			const prev = pictureJb && s.jbEmitted >= pictureJb.n ? pictureJb : null;
+			pictureJb = { d: s.jbDelay, n: s.jbEmitted, lost: s.packetsLost || 0, got: s.packetsReceived || 0 };
+			if (prev && pictureJb.n > prev.n) parts.push('jitter buffer ' + Math.round((pictureJb.d - prev.d) / (pictureJb.n - prev.n) * 1000) + ' ms');
+			if (prev && pictureJb.got > prev.got) {
+				const lost = pictureJb.lost - prev.lost, got = pictureJb.got - prev.got;
+				parts.push('packets lost ' + lost + '/' + (lost + got));
+			}
+			if (s.nack) parts.push('nack ' + s.nack);
+		}
+		if (s.bufferedMs != null) parts.push('player holds ' + Math.round(s.bufferedMs) + ' ms');
+		// The buffered players measure capture to arrival; the software
+		// player, capture to paint.
+		if (s.lag && s.lag.n) parts.push((s.transport === 'wasm' ? 'capture→paint' : 'capture→arrival') +
+			' p50 ' + Math.round(s.lag.p50) + ' / p95 ' + Math.round(s.lag.p95) + ' ms');
+		if (dc && dc.queueMs) parts.push('camera queue ' + Math.round(dc.queueMs) + ' ms');
+		const rtt = s.rttMs != null ? s.rttMs : (dc ? dc.rttMs : null);
+		if (rtt != null) parts.push('rtt ' + rtt + ' ms');
+		// Missing so far, not lost: on an unordered channel a late frame can
+		// still fill its hole.
+		if (dc && dc.frames) parts.push('frames missing ' + dc.framesMissed + '/' + (dc.frames + dc.framesMissed));
+		if (s.stalls) parts.push('stalls ' + s.stalls);
+		if (s.droppedFrames) parts.push('dropped ' + s.droppedFrames + '/' + s.totalFrames);
+		if (s.framesDropped) parts.push('dropped ' + s.framesDropped + '/' + (s.framesDecoded + s.framesDropped));
+		S.shareTrace('picture', parts.join(' · '));
+	};
+	// Whether the chip is describing a playing stream or saying what is wrong.
+	// On a small stage the description travels with the control bar and the
+	// trouble stays on screen (bootstrap.override.css, .mj-chip-info).
+	const chipInfo = (on) => { if (badge && badge.classList) badge.classList.toggle('mj-chip-info', on); };
 	const tapPlay = $('#mj-tap-play');
 	const snapshot = $('#mj-snapshot');
 	// Bumped on every poster paint and on hide, so a frame that finishes reading
@@ -149,10 +209,26 @@
 	// declared further down: every callback runs at failure time, never at
 	// construction.
 	const chain = window.MajesticChain.make({
-		start: (token) => attachPlayer(token),
+		start: (token) => attachRung(token),
 		starting: () => startingRung(),
 		codecFor: () => cfgCodec[stream ? 1 : 0],
-		onExhausted: (kind, detail) => fallThrough(kind, detail),
+		onExhausted: (kind, detail) => {
+			// A walk that ran out leaves a working picture on screen, the
+			// camera's substitute, and that is not this page's floor to replace.
+			// Only while it is still working: a substitute that died during the
+			// walk is an ordinary end of the chain.
+			if (walk && swap.playing() === 'webrtc' && walk.exhausted()) return;
+			fallThrough(kind, detail);
+		},
+	});
+	// The viewer's pick that WebRTC substituted, walked down the chain for that
+	// channel instead (#713). The rule and the state are preview-served.js's.
+	const walk = window.MajesticServed && window.MajesticServed.walker({
+		asked: () => !autoOn &&
+			(userPickedStream || MajesticTransport.chosenStream('preview') !== null),
+		start: (rung) => attachRung(rung),
+		next: (kind, why) => chain.next(kind, why),
+		settle: (info) => applyServed(info),
 	});
 	// The tap-to-play invitation over a picture parked waiting for a gesture
 	// (#317). Shown on the live player's 'gesture' state and hidden on 'resumed';
@@ -162,7 +238,9 @@
 	// keeps fetching it.
 	function liveVideoTrack() {
 		try {
-			const vids = document.querySelectorAll('#mj-stage video');
+			// The page's own media only: another camera's picture, played in
+			// the stage by the peer overlay, is not this picture's poster.
+			const vids = document.querySelectorAll('#mj-stage video.mj-stage-media');
 			for (let i = 0; i < vids.length; i++) {
 				const s = vids[i].srcObject;
 				const t = s && s.getVideoTracks && s.getVideoTracks()[0];
@@ -272,6 +350,7 @@
 		fellBack = null;
 		hideStageMsg('fallback');
 		if (badge) badge.textContent = 'no signal';
+		chipInfo(false);
 	}
 	// The end of the chain: both transports are gone and what is left is the
 	// camera's JPEG channel, or nothing at all. Saying so takes more than a
@@ -355,6 +434,7 @@
 		if (noteAct) noteAct.hidden = !!mjpegStreamOf(camera) || jpegOn;
 		if (note) note.style.display = '';
 		if (badge) badge.textContent = 'unavailable';
+		chipInfo(false);
 		holdingFallback = 'note';
 		// Neither transport is carrying the picture, so neither is lit. It is
 		// also what makes the retry work: with the group cleared, pressing the
@@ -386,6 +466,7 @@
 		// of the chain and is held by the swap like any other player, so
 		// arriving here means there was no picture to keep.
 		if (badge) badge.textContent = 'retrying…';
+		chipInfo(false);
 		attachPlayer(kind === undefined ? wantWebRTC() : kind);
 	}
 
@@ -520,6 +601,14 @@
 	// Carried across a transport switch, because a new player starts from its
 	// defaults and the user's choices should outlive the machinery.
 	let stream = 0, audioOn = false, vol = 1;
+	// No video channel is turned on, and the microphone is: the camera serves
+	// its sound alone, so the players open for audio,
+	// and the control that lets it be heard is shown whatever the stage holds.
+	// From the configuration, at the same point the stream is chosen.
+	let audioOnly = false;
+	const soundOnly = cfg => mjGet(cfg, 'video0.enabled') === false &&
+		mjGet(cfg, 'video1.enabled') === false &&
+		mjGet(cfg, 'audio.enabled') === true;
 	// Which SOURCE is on screen, and what the camera said about it.
 	//
 	// `stream` above stays a subtype (0 main, 1 sub), because that is what the
@@ -560,6 +649,15 @@
 	// independently of this file and has to take its picture from the camera
 	// that is actually on screen. A getter, because that changes.
 	window.MajesticLiveCamera = () => camera;
+
+	// And which CHANNEL is on screen, for preview-roi.js: the part of the
+	// picture a viewer has zoomed into is measured in that channel's pixels,
+	// and mapping it onto the others starts from knowing which one it came
+	// from. servedStream(), not `stream`
+	// -- WebRTC's ?stream= is a preference the camera may not honour, and a
+	// region placed against the channel we ASKED for would land on the wrong
+	// part of the scene whenever it served the other one.
+	window.MajesticLiveStream = () => servedStream();
 
 	// The /api/v1/sources entry for the current source, or null before the
 	// answer arrives. The transport gate reads it: what is worth trying depends
@@ -606,7 +704,9 @@
 	function startingRung() {
 		const S = window.MajesticSources;
 		const info = curStreamInfo();
-		if (info && S && S.family(info) === 'multipart') {
+		// The sound is on the main stream's id, whatever the source list says
+		// is left: MJPEG carries no audio.
+		if (!audioOnly && info && S && S.family(info) === 'multipart') {
 			return 'multipart';
 		}
 		return wantWebRTC();
@@ -717,6 +817,25 @@
 		return served === 0 ? ' · Main stream' : ' · Sub stream';
 	}
 
+	// What the encoder-region module wants said, or nothing. Asked rather than
+	// pushed, and guarded like every other optional module: the file may not be
+	// loaded at all, and in the bare vm the tests run it certainly is not.
+	//
+	// It goes on the chip rather than into a note of its own because there is
+	// no control to explain -- the region follows the zoom by itself -- and a
+	// banner for something nobody pressed would be the page talking about
+	// itself. The full sentence is the chip's tooltip.
+	function roiNote() {
+		const n = window.MajesticRoi && window.MajesticRoi.note
+			? window.MajesticRoi.note() : null;
+		if (badge) badge.title = n ? n.title : '';
+		return n ? n.chip : '';
+	}
+
+	// Published so the region module can ask for a repaint when what it wants
+	// said changes -- it has no other reason to know this file exists.
+	window.MajesticPreviewChip = () => setChip();
+
 	function setChip() {
 		// The fallback owns the chip until a player takes the stage back.
 		// chipMedia is cleared with it, so this is belt and braces — but the
@@ -751,7 +870,8 @@
 			chipMedia.w + '×' + chipMedia.h +
 			(fps ? ' · ' + Math.round(fps) + ' fps' : '') +
 			(pct ? ' · ' + pct + '%' : '') +
-			servedNote();
+			servedNote() + roiNote();
+		chipInfo(true);
 		// Its height is what the toast stack hangs off, and a caption that wraps
 		// to a second line has just changed it. Its WIDTH decides nothing about
 		// placement any more (#302).
@@ -887,6 +1007,18 @@
 			hideServedMsg();
 		}
 		setChip();
+	}
+	// The picture stays the camera's substitute until a rung replaces it, so the
+	// chip has to go on naming that: servedCh moves, and nothing else does.
+	function walkServed(info) {
+		if (camera !== 0 || !walk || info.requested !== (stream ? 1 : 0)) {
+			return false;
+		}
+		const wasCh = servedCh;
+		servedCh = info.channel;
+		if (walk.offer(info)) { setChip(); return true; }
+		servedCh = wasCh;
+		return false;
 	}
 	// Talkback is deliberately NOT carried across a transport switch or a
 	// reattach. Everything else here is a preference; this one holds a live
@@ -1039,7 +1171,7 @@
 				// MJPEG stream per camera and no subtype to choose between.
 				{ stream: wireStream(), camera: camera,
 					iceServers: () => ice,
-					audio: audioOn, volume: vol },
+					audio: audioOn, volume: vol, audioOnly: audioOnly },
 				handlersFor(id, onState))),
 		onPromoted: (kind, proven) => {
 			// A different picture is taking the stage, so any tap invitation the
@@ -1070,7 +1202,13 @@
 			// it. That is harmless only because the canvas is opaque and later
 			// in DOM order, which is not a thing to rely on.
 			hideOtherKind(kind);
+			const walked = walk && walk.promoted(kind);
 			settle();
+			// After settle(), which clears the slot for any non-WebRTC session.
+			// The software rung has its own disclosure, about the decoder.
+			if (walked && kind === 'mse') {
+				showStageMsg('served', window.MajesticServed.walkSentence(walked));
+			}
 			// Only when this promotion means a picture. Holding the fallback,
 			// an unproven one is just the swap saying it had nothing of its
 			// own in the way — and showing the empty video element for it
@@ -1106,6 +1244,14 @@
 			// erasing the demotion the WebRTC refusal had recorded a moment
 			// earlier. showFallback() unlights both radios straight after, so
 			// nothing on screen said so; the storage was wrong for good (#269).
+			// A walk's trial is not the viewer's: the transport group goes on
+			// describing the picture on screen, nothing is written to storage,
+			// and the walk carries on rather than stopping here.
+			if (kind !== 'webrtc' && walk && swap.playing() === 'webrtc' &&
+				walk.failed(kind, why)) {
+				reflectTransport('webrtc');
+				return;
+			}
 			if (kind === 'webrtc') {
 				reflectTransport('mse');
 				// The reason first, because it is the news, then the standing
@@ -1199,6 +1345,7 @@
 			// attempt, and the chip has to go on describing the stage.
 			else if (badge && !holdingFallback) {
 				badge.textContent = (s === 'error') ? 'reconnecting…' : s + '…';
+				chipInfo(false);
 			}
 		},
 	});
@@ -1208,7 +1355,14 @@
 	// MSE for the fourth.
 	const MajesticVideoImpl = (kind) => MajesticTransport.impl(kind);
 
+	// Every attach but the ones a walk makes: whatever asked for this one, it
+	// replaces the session the walk was for.
 	function attachPlayer(kind) {
+		if (walk) walk.leave();
+		attachRung(kind);
+	}
+
+	function attachRung(kind) {
 		// Any fresh attach supersedes a pending software-rung retry: it belongs
 		// to a session that is being replaced, and firing it now would stage a
 		// wasm player over the new one. The chain cancels for the attaches it
@@ -1228,7 +1382,7 @@
 		// reaches this and only one of them is a button.
 		const S = window.MajesticSources;
 		const info = curStreamInfo();
-		if (want !== 'multipart' && info && S &&
+		if (!audioOnly && want !== 'multipart' && info && S &&
 			S.family(info) === 'multipart') {
 			want = 'multipart';
 		}
@@ -1321,6 +1475,12 @@
 		return {
 			onState: (s, d) => {
 				onState(s, d);
+				// With no picture there is no codec or size to report, so
+				// the chip would say "connecting…" over sound that is
+				// playing. It says what is.
+				if (audioOnly && s === 'playing' && isLive() && badge) {
+					badge.textContent = 'Sound only';
+				}
 				// After the swap has judged the state: 'playing' is what
 				// promotes a trial, so this is the first moment isLive() can
 				// have flipped.
@@ -1334,12 +1494,20 @@
 				}
 			},
 			onCodec: (codec, cs, w, h) => {
+				// No picture: the chip says "Sound only", and a video
+				// formatter handed a null codec and no size would replace it.
+				if (audioOnly) return;
 				const m = { codec: codec, w: w, h: h };
 				if (!isLive()) { heldMedia = m; return; }
 				applyMedia(m);
 			},
 			onServed: (info) => {
 				if (!isLive()) { heldServed = info; return; }
+				// Straight from a session on screen, and only from there. A held
+				// reply answers a trial, and a trial over WebRTC is someone
+				// pressing WebRTC: they get what WebRTC can give, and the toast
+				// saying so, rather than being thrown back to where they were.
+				if (walkServed(info)) return;
 				applyServed(info);
 			},
 			// null means we asked for audio and the camera had none to give (mic
@@ -1405,6 +1573,9 @@
 						: base;
 				}
 				if (!isLive()) return;
+				// Only the player on screen: one staged behind it is not the
+				// picture the guest is watching.
+				pictureTrace(s);
 				if (s.transport === 'wasm') {
 					softwareNote(s);
 					// Sustained software playback refills the retry budget so the
@@ -1600,6 +1771,9 @@
 		// accommodates what the source can serve. Recording the choice here is
 		// what keeps the two apart with one line rather than four.
 		wantSubtype = stream;
+		// With no channel on, the list offers only MJPEG, and the sound is
+		// asked for on the main stream's id: nothing to accommodate.
+		if (audioOnly) return moved;
 		const S = window.MajesticSources;
 		const src = srcOf(camera);
 		const p = (S && src) ? S.pick(src, stream) : null;
@@ -1697,6 +1871,7 @@
 		Promise.all([mjConfig(), sourcesReady]),
 		new Promise(done => setTimeout(() => done(null), CONFIG_WAIT_MS)),
 	]).then(answers => {
+		if (answers) audioOnly = soundOnly(answers[0]);
 		if (answers) chooseSub(answers[0]); else attachedBlind = true;
 		syncStreamControls();
 		attachPlayer(startingRung());
@@ -1707,6 +1882,13 @@
 	// default is helpful; overriding a decision is not.
 	mjConfig().then(cfg => {
 		if (!attachedBlind) return;
+		// A camera with no picture opened blind asked for a stream that is
+		// not there; open it again for the sound it does have.
+		if (soundOnly(cfg) && !audioOnly) {
+			audioOnly = true;
+			attachPlayer(startingRung());
+			return;
+		}
 		// The stream, unless the person has since chosen one themselves:
 		// correcting a default is helpful, overriding a decision is not.
 		const moved = !userPickedStream && chooseSub(cfg);
@@ -1786,6 +1968,17 @@
 		servedCh = null;
 		servedShownKey = '';
 		hideServedMsg();
+		// AFTER `stream` has moved, and that ordering is the whole of it:
+		// anything measured against the channel being left has to be dropped,
+		// and a listener asking which channel is shown must not be answered
+		// with the one it is leaving. Fired here rather than at the top of the
+		// function, where it was, because there `shownStream()` still returned
+		// the old channel and the region module picked its strength from that
+		// channel's bitrate. Announced rather than called: the only listener is
+		// optional and this file must not learn what it does.
+		try {
+			window.dispatchEvent(new CustomEvent('mj-stream-changed'));
+		} catch (e) {}
 		// Nothing is attached: the chain ran out and the stage is showing the
 		// MJPEG fallback or the note. The pick is still a request worth
 		// honouring — an H.264 substream plays in a browser that refused an
@@ -1801,6 +1994,12 @@
 		// nothing, since one MJPEG stream serves every channel of a camera. So
 		// ask the whole chain again instead.
 		if (liveKind === 'multipart' && fellToMultipart) {
+			attachPlayer(startingRung());
+			return;
+		}
+		// Left the channel a walk was for: the next one starts over from the
+		// viewer's own transport, which the walk never changed.
+		if (walk && walk.leave()) {
 			attachPlayer(startingRung());
 			return;
 		}

@@ -1,10 +1,11 @@
-// Factory reset: stream `sysupgrade -n --web` through j/run.cgi into the pane on
-// factory-reset.cgi, then wait for the camera to come back and hand the user over to
-// it. Vanilla JS; `$` and `termWriter` come from main.js.
+// Factory reset: POST to factory-reset.cgi, which runs `sysupgrade -n --web`
+// and answers with its output, stream that into the pane, then wait for the
+// camera to come back and hand the user over to it. Vanilla JS; `$` and
+// `termWriter` come from main.js.
 //
 // Not the /ws/upgrade socket update.js uses: that endpoint exists to drive a
-// firmware flash, and a reset writes no image. run.cgi is the plain streaming
-// pipe this page has always used. What changed is what happens around it.
+// firmware flash, and a reset writes no image, so the page streams its own
+// POST response instead.
 //
 // The old version lived inline in the CGI and did two things that no longer
 // hold. It read the stream a line at a time and appended each one, which is
@@ -130,11 +131,8 @@
 	// raises the native dialog over the transcript, which is the bug #154 opened
 	// on in the first place.
 	async function stream() {
-		const r = await rawFetch('/cgi-bin/j/run.cgi?cmd=' + btoa(out.dataset.cmd));
-		// Not encodeURIComponent()'d: run.cgi eval()s QUERY_STRING as shell with
-		// only & → ; substituted, so nothing decodes percent-escapes on the way
-		// back out. base64's / and = survive a query string as they are.
-		if (!r.ok) throw new Error('run.cgi answered ' + r.status);
+		const r = await rawFetch('/cgi-bin/factory-reset.cgi', { method: 'POST' });
+		if (!r.ok) throw new Error('factory-reset.cgi answered ' + r.status);
 		const rd = r.body.getReader();
 		for (;;) {
 			const { value, done } = await rd.read();
@@ -148,11 +146,20 @@
 	// again and has simply forgotten us, which is exactly what a wiped overlay
 	// leaves behind — so it counts as up, and the navigation that follows will
 	// collect the login page on its own.
+	//
+	// Except a text/plain answer, which majestic never gives for "/". That is
+	// the updater's log follower, serving port 80 from a RAM root mid-wipe, and
+	// its stream never ends -- so the request is aborted whatever it answered,
+	// because a connection left open is a process chain left running there.
 	function ping() {
 		const ctl = new AbortController();
 		const to = setTimeout(() => ctl.abort(), 2500);
 		return rawFetch('/?_=' + Date.now(), { cache: 'no-store', signal: ctl.signal })
-			.then(() => { clearTimeout(to); return true; })
+			.then(r => {
+				clearTimeout(to);
+				ctl.abort();
+				return !/^text\/plain/i.test(r.headers.get('content-type') || '');
+			})
 			.catch(() => { clearTimeout(to); return false; });
 	}
 

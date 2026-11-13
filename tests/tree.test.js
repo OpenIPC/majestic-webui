@@ -5,7 +5,7 @@
 // leaf is a row that is not there, and a settings page missing a row looks
 // exactly like a settings page: on 2 September 2026 majestic began flagging
 // the stream bitrate `x-live` (a save applies it without a rebuild), the page
-// read that flag as "the Live adjustments leaf draws this", and Bitrate
+// read that flag as "the Picture leaf draws this", and Bitrate
 // vanished from Main stream and Sub stream. No error, no gap in the layout,
 // nothing in the console — it was found three days later, by accident, while
 // fixing #316 on the same leaf.
@@ -86,15 +86,20 @@ group('the image section is absorbed onto the Live leaf');
 	check('image is absorbed', t.absorbed('image'));
 	check('image has no leaf of its own', !leaves(t).includes('image'));
 	check('the image group leads with the Live leaf', t.leafIds(t.groups()[0]).join() === 'live,isp,nightMode');
-	check('Rotate is drawn on the Live leaf', leafOf(t, 'image.rotate').join() === 'live');
-	check('Automatic tuning is drawn on the Live leaf', leafOf(t, 'image.tuning').join() === 'live');
+	// Rule 3: an absorbed section's leftovers go home, never to the Live leaf.
+	// This fixture predates Automatic tuning being classed live, so it is a
+	// leftover here and goes home with Rotate; on today's daemon it is lifted.
+	check('Rotate is drawn on ISP / Exposure', leafOf(t, 'image.rotate').join() === 'isp');
+	check('a leftover goes home, not to the Live leaf', leafOf(t, 'image.tuning').join() === 'isp');
 	check('mirror and flip are lifted', t.lifted().has('image.mirror') && t.lifted().has('image.flip'));
 	check('the Live leaf lists the knobs first, in deck order',
 		t.leafFields('live').slice(0, 6).map(f => f.dot.split('.').pop()).join() === ORDER.join());
-	check('then the leftovers', t.leafFields('live').slice(6).map(f => f.dot).join() === 'image.rotate,image.tuning');
+	check('and nothing after them', t.leafFields('live').length === 6);
 	check('the leftovers alone are what image still has to draw',
 		t.sectionFields('image').map(f => f.dot).join() === 'image.rotate,image.tuning');
 	check('asked with the lifted keys in, image is all eight', t.sectionFields('image', true).length === 8);
+	check('ISP / Exposure draws them after its own keys',
+		t.leafFields('isp').slice(-2).map(f => f.dot).join() === 'image.rotate,image.tuning');
 	everyKeyOnce('shipped schema', t, SCHEMA);
 }
 
@@ -117,6 +122,64 @@ group('autofocus can move to a synthetic Motors category');
 	const afDots = t.leafFields('autofocus').map(f => f.dot);
 	check('each Autofocus field is drawn once',
 		afDots.length > 0 && afDots.every(dot => leafOf(t, dot).length === 1));
+}
+
+// The Live leaf is "adjust and watch": every row on it changes the picture as
+// it is touched. A key there that waits for Save and a pipeline reload reads
+// as a control that does nothing -- the quarter turn beside the Orientation
+// pad was exactly that (#583). So the leaf may draw lifted keys and nothing
+// else, on any schema, and a leftover with nowhere to go keeps its section's
+// page rather than landing here.
+group('the Live leaf draws only live keys');
+{
+	for (const [name, schema] of [['shipped schema', SCHEMA], ['current daemon', (() => {
+		const s = clone(SCHEMA);
+		s.properties.image.properties.tuning['x-live'] = true;
+		return s;
+	})()]]) {
+		const t = build(schema);
+		const notLive = t.leafFields('live').filter(f => !t.lifted().has(f.dot)).map(f => f.dot);
+		check(name + ': every row on the Live leaf is live', !notLive.length, notLive.join(', '));
+	}
+	const s = clone(SCHEMA);
+	s.properties.image.properties.tuning['x-live'] = true;
+	const t = build(s);
+	check('current daemon: Rotate is the one image key sent home',
+		t.homedAt('isp').join() === 'image' &&
+		t.sectionFields('image').map(f => f.dot).join() === 'image.rotate');
+	// A section whose leftovers have no home is not absorbed: it keeps a page.
+	const u = clone(s);
+	u.properties.isp = undefined;
+	delete u.properties.isp;
+	const tu = build(u);
+	check('no home, no absorption: the section keeps its page',
+		!tu.absorbed('image') && leaves(tu).includes('image'));
+	everyKeyOnce('no home', tu, u);
+}
+
+// The flattened record is what the search reads, and a tier missing from it is
+// a word the page shows and the search cannot find -- which reads as the
+// setting not existing rather than as a broken index. No camera emits `help`
+// yet, so this is planted rather than found.
+group('the flattened record carries all three documentation tiers');
+{
+	const s = clone(SCHEMA);
+	s.properties.video0.properties.bitrate.help = 'a long technical explanation';
+	s.properties.image.properties.luminance.help = 'and one on a lifted knob';
+	const t = build(s);
+	const bitrate = t.sectionFields('video0').find(f => f.dot === 'video0.bitrate');
+	check('a section record carries the daemon\'s help',
+		bitrate && bitrate.help === 'a long technical explanation');
+	check('it still carries the hint beside it',
+		bitrate && typeof bitrate.hint === 'string');
+	// The Live leaf draws neither hint nor help, but the search counts both --
+	// see the comment at the lift in mj-tree.js. Pinned so the mirror is not
+	// quietly broken on one side.
+	const knob = t.leafFields('live').find(f => f.dot === 'image.luminance');
+	check('a lifted knob carries it too',
+		knob && knob.help === 'and one on a lifted knob');
+	check('a field the daemon said nothing more about carries an empty string',
+		t.sectionFields('video0').every(f => typeof f.help === 'string'));
 }
 
 group('a section the leaf lifts a minority of keeps its page');
@@ -262,15 +325,31 @@ group('Day / Night: every setting is in a heading or on the pin map');
 	const bothWays = placed.filter(k => onMap.indexOf(k) >= 0);
 	check('and none is both a row and drawn by the map', !bothWays.length, bothWays.join(', '));
 
+	// The pin map draws its roles, and the polarity chips on them, out of
+	// these hidden fields: a role whose key or invert is missing from the list
+	// would be drawn on the map AND as a row.
+	const MAP = require(path.join(__dirname, '..', 'www', 'a', 'ircut-map.js'));
+	const roleKeys = MAP.ROLES.reduce((acc, r) =>
+		acc.concat([r.key], r.polarity ? [r.polarity.invert] : []), []);
+	const offMap = roleKeys.filter(k => onMap.indexOf(k) < 0);
+	check('every pin-map role and its polarity are map-driven', !offMap.length,
+		'not hidden: ' + offMap.join(', '));
+
 	const known = new Set(placed.concat(onMap));
 	const orphans = Object.keys(NM).filter(k => !known.has(k));
 	check('every key in the shipped schema is accounted for', !orphans.length,
 		'unplaced: ' + orphans.join(', '));
 
-	// The reverse is deliberately NOT "the map names only keys that exist". It
-	// has to be able to name one the daemon has not shipped yet — this fixture
-	// predates backlightInvert, which a current camera has — and naming one
-	// costs nothing, because a key that is absent simply is not rendered.
+	// The reverse is deliberately NOT "the map names only keys that exist".
+	// The map has to stay free to name a key this build does not ship, and
+	// naming one costs nothing: a key that is absent is simply not rendered.
+	//
+	// Every key named in the map happens to be in this fixture, so nothing
+	// here demonstrates that — but the case is live on real hardware. The six
+	// dimmable-lamp keys are offered by an hi3516ev300 and by no hi3516av300,
+	// which answers 404 for the channel; this fixture is the shape of a camera
+	// that has them. Do not read "no key here is missing" as licence to start
+	// asserting the reverse.
 	//
 	// What would cost something is a HEADING left with nothing under it: a
 	// micro-caps name and a rule across the column, introducing no settings.
@@ -279,6 +358,51 @@ group('Day / Night: every setting is in a heading or on the pin map');
 	const empty = groups.filter(g => !drawn(g).length).map(g => g.id);
 	check('no heading is left with nothing under it', !empty.length,
 		'empty: ' + empty.join(', '));
+}
+
+// ── The exposure rows' headings on the Live leaf ───────────────────────────
+//
+// isp's groups are drawn only where their rows are lifted, and the isp page
+// skips a heading whose rows all went to the Live leaf. So the two failures
+// are: a group key the daemon does not lift, which would leave its heading on
+// the isp page with the rest of the group gone; and a key in two groups, drawn
+// under whichever heading came first. Every key here has to be in the shipped
+// schema, too -- the headings were written against it (#582).
+group('ISP: the Live leaf headings name lifted keys, once each');
+{
+	// The exposure keys as an hi3516ev300 declares them, merged into a copy
+	// rather than into the shared fixture: every assertion above counts what
+	// the image section puts on the Live leaf, and these would join it.
+	const s = clone(SCHEMA);
+	Object.assign(s.properties.isp.properties, JSON.parse(fs.readFileSync(
+		path.join(__dirname, 'fixtures', 'schema-isp-exposure.json'), 'utf8')));
+	const ISP = s.properties.isp.properties;
+	const groups = TREE.sectionGroups('isp');
+	const t = build(s);
+	check('the section has a group map', !!groups && groups.length > 0);
+	check('every group has an id and keys', groups.every(g => g.id && g.keys.length));
+	check('only the first group goes without a heading',
+		groups.slice(1).every(g => g.label));
+	const placed = groups.reduce((acc, g) => acc.concat(g.keys), []);
+	const dupes = placed.filter((k, i) => placed.indexOf(k) !== i);
+	check('no key is in two headings', !dupes.length, dupes.join(', '));
+	// A lifted isp key named in no group is drawn ahead of the first heading:
+	// it would sit among the two mode switches, which is how the external
+	// tuner switch came to be second on the card.
+	const unnamed = Object.keys(ISP).filter(k => t.lifted().has('isp.' + k) && placed.indexOf(k) < 0);
+	check('every lifted isp key is placed on purpose', !unnamed.length, unnamed.join(', '));
+	const missing = placed.filter(k => !(k in ISP));
+	check('every grouped key is in the shipped schema', !missing.length, missing.join(', '));
+	const notLifted = placed.filter(k => !t.lifted().has('isp.' + k));
+	check('every grouped key is lifted to the Live leaf', !notLifted.length, notLifted.join(', '));
+	// A condition naming a field or a value the schema does not have would
+	// dim a group forever, or never -- and either looks like a design choice.
+	const bad = groups.filter(g => g.activeWhen).filter(g => {
+		const c = ISP[g.activeWhen.field];
+		return !c || !Array.isArray(c.enum) || c.enum.indexOf(g.activeWhen.equals) < 0;
+	}).map(g => g.id);
+	check('every activeWhen names a real mode and value', !bad.length, bad.join(', '));
+	everyKeyOnce('exposure keys', t, s);
 }
 
 group('a list of objects is one leaf, not one per member');
@@ -308,8 +432,15 @@ group('a list of objects is one leaf, not one per member');
 	};
 	// A key the camera declares but has superseded is offered to nobody: the
 	// list replaced the single Address, so drawing both is a question about
-	// which one wins. It stays in the schema for the API's sake, which is why
-	// the tree has to be told rather than left to infer it from absence.
+	// which one wins. The tree has to be TOLD that, rather than left to infer
+	// it from absence, because the key is still in the schema being sent.
+	//
+	// Current majestic no longer sends it at all -- the singular outgoing
+	// settings are deprecated and converted onto the rows on load, so nothing
+	// in that section is hidden any more. This stays exactly as it is: the
+	// page talks to whatever daemon the camera is running, and one that
+	// predates the conversion still marks the old Address hidden and still
+	// expects a page not to draw it.
 	s.properties.outgoing.properties.server['x-hidden'] = true;
 	const t = TREE.build(s, {}, new Set());
 	const dots = allDots(t, s, new Set());
@@ -320,6 +451,58 @@ group('a list of objects is one leaf, not one per member');
 	check('and nothing else under it is', mine.length === 1,
 		'also drawn: ' + mine.join(', '));
 	everyKeyOnce('with a destination list', t, s, new Set());
+}
+
+// A section whose leaf is not a form.
+//
+// Rule 4 drops a section with nothing to draw, and that is the right rule: it
+// is what keeps an absorbed section, or one whose keys are all lifted, from
+// leaving an empty tab behind. `pins` is the exception — one key, hidden,
+// because the page draws the chip from /api/v1/pinmux rather than from the
+// schema. The exception has to be NAMED, or the leaf silently disappears the
+// moment the daemon stops sending a visible key, which is exactly the kind of
+// silent loss this file exists for.
+{
+	group('a section whose leaf draws something other than its fields');
+	const s = clone(SCHEMA);
+	s.properties.pins = {
+		type: 'object',
+		properties: {
+			assignments: { type: 'array', title: 'Pins', 'x-hidden': true },
+		},
+	};
+	for (const g of s['x-groups']) {
+		if (g.id === 'system') g.sections.push('pins');
+	}
+
+	const plain = TREE.build(s, { liveOrder: ORDER, liveId: 'live' });
+	const sys = plain.groups().find(g => g.id === 'system');
+	check('unnamed, a section with only hidden keys has no leaf',
+		plain.leafIds(sys).indexOf('pins') < 0);
+
+	const named = TREE.build(s, { liveOrder: ORDER, liveId: 'live', custom: ['pins'] });
+	const sys2 = named.groups().find(g => g.id === 'system');
+	check('named as custom, it keeps its leaf',
+		named.leafIds(sys2).indexOf('pins') >= 0);
+	check('and it still draws no fields of its own',
+		named.leafFields('pins').length === 0);
+	check('naming it changes nothing about any other leaf',
+		JSON.stringify(named.leafIds(sys2).filter(l => l !== 'pins')) ===
+		JSON.stringify(plain.leafIds(sys)));
+}
+
+group('a decimal key is on a leaf, so search can find it');
+
+// renderField draws `number` as a box with step="any", but the tree listed it
+// as undrawable, so every decimal field — the calibration angles, the lamp
+// curve — sat on the page and out of search and the rail's counts.
+{
+	const s = clone(SCHEMA);
+	s.properties.nightMode.properties.curveTest = { type: 'number', title: 'Curve', minimum: 0.2, maximum: 4 };
+	const t = build(s);
+	check('a number key is drawn on exactly one leaf',
+		leafOf(t, 'nightMode.curveTest').length === 1);
+	everyKeyOnce('with a number key', t, s);
 }
 
 done();

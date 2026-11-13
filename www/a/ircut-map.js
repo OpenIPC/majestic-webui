@@ -57,8 +57,10 @@
 		};
 	}
 
-	// The four things a pad can be. Colours are the dashboard's validated
-	// series set, so a pad and its row in the list always agree.
+	// The five things a pad can be. The first four colours are the dashboard's
+	// validated series set, so a pad and its row in the list always agree; the
+	// white light's is a fifth hue checked the same way (contrast on both card
+	// surfaces, and separation from the four under deuteranopia).
 	const ROLES = [
 		// Which coil is which is majestic's to say, not ours, and it is the
 		// opposite of what reads naturally from the key names. With BOTH coils
@@ -103,6 +105,12 @@
 			polarity: { invert: 'backlightInvert', on: 'lamp on = HIGH', off: 'lamp on = LOW' } },
 		{ key: 'lightSensorPin', label: 'Daylight sensor', hint: 'photocell that says when it is dark', color: '#8a5cd8',
 			polarity: { invert: 'lightSensorInvert', on: 'dark = HIGH', off: 'dark = LOW' } },
+		// A second lamp beside the night illuminator, switched on and off
+		// (nightMode.whiteLightPin): what lights a colour night, or what
+		// whiteLight turns on for movement, a sighting or by hand. A white lamp
+		// on a PWM channel is configured as a channel and is not a pad here.
+		{ key: 'whiteLightPin', label: 'White light', hint: 'a white lamp beside the night illuminator', color: '#c2417a',
+			polarity: { invert: 'whiteLightInvert', on: 'lamp on = HIGH', off: 'lamp on = LOW' } },
 	];
 	const byKey = {};
 	ROLES.forEach((r) => { byKey[r.key] = r; });
@@ -117,13 +125,13 @@
 	// onChange(assign). The map owns no config: it reports, the page saves.
 	function mount(host, opts) {
 		opts = opts || {};
-		const info = opts.info || { banks: [] };
+		let info = opts.info || { banks: [] };
 		const geo = geometry(info.banks);
 		let assign = Object.assign({}, opts.assign || {});
 		let sel = null;
-		let sweeping = null;
+		let sweeping = null; /* {a, b} while a pair is being driven */
 
-		// Pads with an owner that is not one of our four roles.
+		// Pads with an owner that is not one of our roles.
 		//
 		// Two different claims, and only one of them is real ownership.
 		// /sys/kernel/debug/gpio names who holds each line: a DRIVER holds
@@ -134,7 +142,7 @@
 		// camera out of the pad a rescan needs most.
 		//
 		// The roles here are the ones majestic and U-Boot assign OUTSIDE this
-		// section. The four Day / Night roles are excluded because they are
+		// section. The Day / Night roles are excluded because they are
 		// drawn as roles, in their own colours; these have no row of their own
 		// on this page, so without a word here their pads would read as free
 		// to anyone picking one.
@@ -294,6 +302,47 @@
 			clr.appendChild(t0);
 			clr.addEventListener('click', () => setRole(pin, null));
 			pop.appendChild(clr);
+
+			// Ruling a pad out of the scan, next to where its role is set
+			// rather than in a separate list of numbers somewhere else. This
+			// is the control for the case the camera cannot detect on its own:
+			// a pad that takes the network down without troubling the camera.
+			if (opts.onAvoid) {
+				const av = avoidOf(pin);
+				const a = el('button', 'mj-pinmap-role mj-pinmap-avoid');
+				a.type = 'button';
+				const d1 = el('span', 'mj-pinmap-dot');
+				a.appendChild(d1);
+				const t1 = el('span');
+				t1.textContent = av ? 'Allow the scan to try it' : 'Don\u2019t try this one';
+				a.appendChild(t1);
+				const tick = el('em');
+				// A pad the camera went down on is offered back like any other,
+				// as the hunt's own list does with its "try it again". The tick
+				// says why it is there, so the press is an informed one.
+				tick.textContent = av ? esc0(av) : '';
+				a.appendChild(tick);
+				a.addEventListener('click', () => opts.onAvoid(pin, !av));
+				pop.appendChild(a);
+			}
+		}
+
+		// The popover builds with textContent everywhere else; this one string
+		// is short enough to want shortening rather than escaping.
+		function esc0(s) {
+			return s.length > 22 ? s.slice(0, 21) + '\u2026' : s;
+		}
+
+		// Pads the CAMERA has been told to leave alone, and why. Distinct from
+		// `owned` on purpose: owned is the camera's own wiring and is not the
+		// owner's to change here, while this list is theirs and must stay one
+		// click from being taken back. So an avoided pad is drawn differently
+		// and stays ENABLED.
+		function avoidOf(pin) {
+			const a = ((info && info.avoid) || [])
+				.filter((x) => x && x.pin === pin)[0];
+			return a ? (a.why === 'asked' ? 'you asked for it to be left alone'
+				: 'it stopped the camera') : null;
 		}
 
 		function paint() {
@@ -322,7 +371,17 @@
 					if (!owned[p.pin]) b.disabled = false;
 					else b.title += ' — ' + owned[p.pin];
 				}
-				if (sweeping === p.pin) b.classList.add('mj-pin-try');
+				const avoid = avoidOf(p.pin);
+				if (avoid) {
+					// A channel nothing else uses: fill is spoken for three
+					// times over (owned, role colour, sweep) and the outer ring
+					// twice. A hatch and a struck-through number read as
+					// "crossed out", which is what it is.
+					b.classList.add('mj-pin-avoid');
+					b.title = 'Pin ' + p.pin + ' — not driven, ' + avoid;
+				}
+				if (sweeping && (sweeping.a === p.pin || sweeping.b === p.pin))
+					b.classList.add('mj-pin-try');
 				if (sel === p.pin) b.classList.add('mj-pin-sel');
 			});
 			if (sel === null) { pop.hidden = true; return; }
@@ -383,7 +442,15 @@
 			},
 			// Called by the scan so the pad being driven lights up on the same
 			// map the person is about to click.
-			sweep: (pin) => { sweeping = pin; paint(); },
+			// Both pads of the pair, because a pair is what gets driven: with
+			// only the first lit, the drawing disagreed with the sentence
+			// above it naming two.
+			sweep: (a, b) => { sweeping = { a: a, b: b === undefined ? null : b }; paint(); },
+			// A fresh answer from the camera, for the one fact that changes
+			// without the map being rebuilt: which pads it has been told to
+			// leave alone. Rebuilding would close the popover the press came
+			// from, which is exactly where the person still is.
+			reinfo: (fresh) => { info = fresh || info; paint(); },
 			select: (pin) => { sel = pin; paint(); },
 			close: close,
 			// The map outlives a section change only if nothing tears it down,

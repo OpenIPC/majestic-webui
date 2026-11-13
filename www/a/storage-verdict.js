@@ -69,8 +69,97 @@
 		return recorder && recorder.v ? recorder.v.records_state : null;
 	}
 
+	// Seconds of lost footage, in words.
+	//
+	// Here rather than in timeline.js because the banner on every page needs it
+	// and timeline.js loads only on Recordings — and because two formatters are
+	// how one page comes to say "0 s" where another says "under a second" about
+	// the same loss, which is the drift this file exists to prevent.
+	//
+	// Sub-second losses are real and must not round to zero: a discarded
+	// fragment is only as long as the recorder was told to make it, and on a
+	// camera dropping partial ones the whole window can sit under a second.
+	// "0 s of video has been dropped" is a sentence that reports a loss and
+	// then denies it.
+	function duration(sec) {
+		const s = Math.max(0, sec);
+		if (s < 1) return 'under a second';
+		const w = Math.round(s);
+		if (w < 60) return w + ' s';
+		const m = Math.floor(w / 60), ss = w % 60;
+		if (m < 60) return ss ? m + ' min ' + ss + ' s' : m + ' min';
+		const h = Math.floor(m / 60), mm = m % 60;
+		return mm ? h + ' h ' + mm + ' min' : h + ' h';
+	}
+
 	function known(recorder) {
 		return !!recorder;
+	}
+
+	// How much more footage the card can take before the oldest starts going.
+	//
+	// NOT the free space, which is the question it is easy to ask by mistake.
+	// The camera deletes the oldest recording once the card reaches
+	// records.maxUsage, so what can still be ADDED is the room up to that line,
+	// and the free space runs past it by whatever the threshold holds back.
+	// Measured on a 29 GB card at 94% with the threshold at 95%: 1.81 GB free
+	// against 0.36 GB of real headroom, so a page reading the free space
+	// promised five times the footage the camera was going to add.
+	//
+	// The shape of that error is worse than its size. Free space never falls
+	// below the reserve — at the threshold this card still has 1.46 GB of it —
+	// so a projection built on it has a floor it can never go under, and goes
+	// on offering that much footage for ever while the camera deletes a clip
+	// for every clip it writes.
+	//
+	// Here rather than on the page for the reason everything else in this file
+	// is: two places ask this question, and two sums are how they come to
+	// answer it differently.
+	//
+	// THREE answers, not two, and the third is the one this whole function is
+	// about. `known` false means a reading did not arrive — the card's own
+	// figures, or the threshold — and nothing may be said about how much
+	// footage is left, because the alternative is the very error being fixed
+	// here wearing different clothes:
+	//
+	//   - coercing an absent `used` to zero computes the headroom of an EMPTY
+	//     card, so a partial answer from the endpoint reads as a card with
+	//     everything still to give;
+	//   - treating an absent threshold as "no threshold" is worse, because the
+	//     page's configuration fetch resolves to {} when it FAILS. A request
+	//     that did not happen would then be evidence that the camera fills its
+	//     card to the brim, and the estimate would go back to counting free
+	//     space — which is exactly what this function exists to stop.
+	//
+	// `capped` stays the caller's cue that a threshold applies, and is only
+	// ever meaningful when `known`.
+	// A number, or NaN for anything that is not one.
+	//
+	// Written out rather than done with `+x`, because unary plus turns null,
+	// '' and false into 0 — all of which are ways a reading fails to arrive,
+	// and every one of them would pass an isFinite() check as a perfectly good
+	// zero. A usage of null read that way computes the headroom of an EMPTY
+	// card, which is the largest wrong answer this function can give.
+	function fin(x) {
+		if (typeof x === 'number') return isFinite(x) ? x : NaN;
+		if (typeof x === 'string' && x.trim() !== '') {
+			const n = +x;
+			return isFinite(n) ? n : NaN;
+		}
+		return NaN;
+	}
+
+	function headroom(total, used, cap) {
+		const t = fin(total), u = fin(used), c = fin(cap);
+		if (!isFinite(t) || !isFinite(u) || t <= 0 || u < 0) {
+			return { room: 0, capped: false, known: false };
+		}
+		const free = Math.max(0, t - u);
+		// A successful read always carries this key, because majestic answers
+		// with its defaults filled in. Absent means the answer never came.
+		if (!isFinite(c)) return { room: free, capped: false, known: false };
+		if (c <= 0 || c >= 100) return { room: free, capped: false, known: true };
+		return { room: Math.max(0, t * c / 100 - u), capped: true, known: true };
 	}
 
 	// Positive claims need positive evidence. A card is only known writable
@@ -93,7 +182,7 @@
 	// caller — it is a claim about a window only the caller can define, so it
 	// is passed in rather than computed here, and '' means "none, or nobody
 	// measured".
-	function fromRecorder(recorder, dropped, on) {
+	function fromRecorder(recorder, dropped, on, queued) {
 		const it = noun(on);
 		const It = it.charAt(0).toUpperCase() + it.slice(1);
 		const rs = state(recorder);
@@ -140,7 +229,65 @@
 					'Faster storage, or a lower bitrate, is the fix.',
 			};
 		}
+		// Behind, but nothing lost yet — and this is the only sentence in
+		// this file that arrives while there is still time to act on it.
+		// Everything above fires once footage is already gone, which makes
+		// them a record of a loss rather than a warning about one.
+		//
+		// `queued` comes in already judged, exactly as `dropped` does and for
+		// the identical reason: the counters are since-boot, so whether a
+		// queue is a moment's backlog or a card that cannot keep up is a claim
+		// about a window, and only the caller knows what window it is watching.
+		// It invents no threshold — a fragment waiting to be written is behind
+		// by definition.
+		if (queued) {
+			return {
+				kind: 'marginal', level: 'warn',
+				short: It + ' is falling behind — clips are waiting to be written.',
+				detail: '<strong>' + It + ' is falling behind.</strong> ' +
+					'Clips are queuing up waiting to be written, though none have been lost yet. ' +
+					'If it keeps up, footage will start to go missing.',
+			};
+		}
 		return null;
+	}
+
+	// A swap somebody asked for is not a fault, and every other sentence in
+	// this file is about a fault.
+	//
+	// While the recorder is stood down it is not recording, and the card is
+	// very often not even in the slot -- so without this the page would reach
+	// for one of the five sentences that end "nothing is being recorded",
+	// about a camera doing exactly what its operator told it to. That is the
+	// same false alarm as calling an unmounted card a failure, arriving during
+	// the one minute nobody wants to be alarmed.
+	//
+	// Read from records_stood_down rather than from anything this page holds,
+	// so every tab agrees: the gauge rides the heartbeat each page already
+	// runs, and a swap started on the SD-card page silences the banner on a
+	// dashboard somebody left open in another window. Absent means a majestic
+	// that cannot report it, which is not the same as a camera that is not
+	// swapping -- so it is gated on the number being there.
+	function swapping(recorder) {
+		const v = recorder && recorder.v;
+		if (!v || typeof v.records_stood_down !== 'number') return null;
+		if (!v.records_stood_down) return null;
+		return {
+			kind: 'swapping', level: 'info',
+			short: 'Recording is paused while the SD card is being changed.',
+			// Says the recording is paused, and nothing about the card.
+			//
+			// The pause comes first and the unmount follows it, so there is a
+			// moment where this is true and the card is still mounted. A
+			// banner that said the card had been let go would be wrong for
+			// that moment -- and it is a banner on every page, read by someone
+			// who may be standing at the camera. Only the swap dialog, which
+			// knows the unmount returned, says it is safe to take out.
+			detail: '<strong>Recording is paused while the SD card is being changed.</strong> ' +
+				'Wait for the SD card page to say the card is safe to take out. ' +
+				'Recording starts again as soon as a card is back in — and on its own ' +
+				'within ten minutes if nothing else does it first.',
+		};
 	}
 
 	function fromCard(card) {
@@ -195,17 +342,23 @@
 	// Returns null while the card is fine — including while it is merely full,
 	// which is normal operation: majestic deletes the oldest clips at
 	// records.maxUsage and carries on.
-	function of(card, recorder, dropped, path) {
+	function of(card, recorder, dropped, path, queued) {
 		const on = onCard(card, path);
 		// The card's own half is an answer about the SD slot, so it is only an
 		// answer about recording when that is where the recording goes. The
 		// recorder's half always is -- majestic is reporting on whatever it was
 		// actually pointed at.
-		return fromRecorder(recorder, dropped, on) || (on ? fromCard(card) : null);
+		// The swap is asked first, ahead of both halves. It is the one state
+		// here that is not a fault, and every sentence it would otherwise
+		// reach describes the camera as broken.
+		return swapping(recorder) || fromRecorder(recorder, dropped, on, queued) ||
+			(on ? fromCard(card) : null);
 	}
 
 	window.MajesticStorageVerdict = {
 		of: of, writable: writable, state: state, known: known,
+		headroom: headroom,
+		duration: duration,
 		onCard: onCard, prefixOf: prefixOf,
 	};
 }());

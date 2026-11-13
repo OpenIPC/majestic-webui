@@ -68,7 +68,7 @@ Thank you.
 
 <p style="text-align:center"><a href="https://opencollective.com/openipc/contribute/backer-14335/checkout" target="_blank"><img src="https://opencollective.com/webpack/donate/button@2x.png?color=blue" width="375" alt="Open Collective donate button"></a></p>
 
-[1]: https://openipc.org/assets/openipc-logo-black.svg
+[1]: https://raw.githubusercontent.com/OpenIPC/.github/refs/heads/main/assets/openipc-logo-black.svg
 [2]: https://github.com/openipc/firmware
-[3]: https://openipc.org/#telegram-chat-groups
+[3]: https://openipc.org/community
 [4]: https://opencollective.com/openipc/contribute/backer-14335/checkout

@@ -20,12 +20,16 @@ network_wlan_ssid=""
 network_wlan_password=""
 network_adapter=""
 network_fallback=""
+modem_power=""
+modem_apn=""
 while IFS="=" read -r _k _v; do
 	case "$_k" in
 		wlanssid) network_wlan_ssid=$_v ;;
 		wlanpass) network_wlan_password=$_v ;;
 		wlandev) network_adapter=$_v ;;
 		netaddr_fallback) network_fallback=$_v ;;
+		modem) modem_power=$_v ;;
+		modem_apn) modem_apn=$_v ;;
 	esac
 done <<EOF
 $(fw_printenv 2>/dev/null)
@@ -160,6 +164,34 @@ adapter_is_modem() {
 	grep -qF "\"$network_adapter\"" /etc/wireless/modem 2>/dev/null
 }
 
+# What the installed S40network does with eth0 beside a wireless adapter. Read
+# from the script itself, because updatewebui puts this page on firmware of any
+# age. Newer firmware keeps eth0 on DHCP from its file while no Wi-Fi network
+# is saved, and once one is brings eth0 and wlan0 both up from their files,
+# the cable preferred -- unless `netmode wifi` asks for the older Wi-Fi-only
+# layout, where eth0 sits on the fixed fallback address. Older firmware parks
+# eth0 on that fixed address as soon as there is a wireless adapter.
+env_wlanssid=$(fw_printenv -n wlanssid 2>/dev/null)
+env_netmode=$(fw_printenv -n netmode 2>/dev/null)
+fw_s40_has() {
+	grep -qF "$1" /etc/init.d/S40network 2>/dev/null
+}
+eth0_beside_wifi() {
+	[ -e /sys/class/net/eth0 ] || return 1
+	if [ -z "$env_wlanssid" ]; then
+		fw_s40_has 'fw_printenv -n wlanssid'
+	else
+		[ "$env_netmode" != wifi ] && fw_s40_has 'start_dual'
+	fi
+}
+
+# eth0 on the dual layout once a Wi-Fi network is saved: up from boot, but
+# its file is read only when a cable arrives. Every other interface the boot
+# script reads, it reads at boot. Only meaningful where iface_is_booted holds.
+waits_for_cable() {
+	[ "$1" = "eth0" ] && [ -n "$network_adapter" ] && [ -n "$env_wlanssid" ]
+}
+
 iface_is_booted() {
 	if [ -z "$network_adapter" ]; then
 		[ "$1" = "eth0" ]
@@ -171,7 +203,69 @@ iface_is_booted() {
 	# NEITHER of the two interfaces this page edits comes up from its file, and
 	# saying wlan0 does would promise a restart that changes nothing.
 	adapter_is_modem && return 1
+	[ "$1" = "eth0" ] && { eth0_beside_wifi; return; }
 	[ "$1" = "wlan0" ]
+}
+
+# A change sbin/netapply is holding open, waiting for proof the camera can
+# still be reached on it before it is kept. Sets pending_token, pending_iface
+# and pending_phase (starting, applying, then applied). pending_dead is set
+# when the record is there and its process is not: a worker that was killed,
+# which leaves the file the camera boots from on the previous settings.
+netapply_pending() {
+	local p
+	pending_token=""; pending_iface=""; pending_phase=""; pending_dead=""
+	p=$(cat /tmp/netapply.pending 2>/dev/null) || return 1
+	set -- $p
+	pending_token=$2
+	pending_iface=$3
+	pending_phase=$4
+	[ -n "$1" ] && kill -0 "$1" 2>/dev/null && return 0
+	pending_dead=1
+	return 1
+}
+
+# Takes the one-change-at-a-time record, atomically: noclobber creates it only
+# if it is not there, so of two saves at once only one gets it. A record whose
+# process is gone is left from a worker that was killed, and is cleared.
+netapply_hold() {
+	netapply_pending
+	[ -n "$pending_dead" ] && rm -f /tmp/netapply.pending
+	(set -C; echo "$$ $1 $2 starting" > /tmp/netapply.pending) 2>/dev/null
+}
+
+# How long a fixed address is held open for proof that it can be reached.
+# netapply keeps it as soon as the browser that saved it connects to the new
+# address -- a sign-in page is enough. Asking for a confirmation request
+# instead put a sign-in in the way, since a session belongs to the address it
+# was made at, and the change rolled back under the form (#690). The window
+# is still long enough for that sign-in, the one proof left when the browser
+# reaches the camera some other way. A DHCP change has no address for the
+# browser to follow -- its lease is the proof -- so it keeps the short window.
+# Both are passed to netapply, so the notice below and the rollback cannot
+# disagree.
+netapply_wait=180
+netapply_wait_dhcp=30
+
+# "token outcome" of the last change netapply finished, for TOKEN ($1).
+netapply_outcome() {
+	local t o
+	read -r t o 2>/dev/null < /tmp/netapply.done
+	[ "$t" = "$1" ] && outcome=$o
+}
+
+# What the page tells the owner a finished change came to.
+netapply_report() {
+	case "$1" in
+		kept)
+			redirect_to "network.cgi?iface=${edit_iface}" "success" "Network settings kept." ;;
+		unsaved)
+			redirect_to "network.cgi?iface=${edit_iface}" "warning" \
+				"The new network settings are in effect, but they could not be saved, so the camera goes back to the previous ones when it restarts. The log has the reason." ;;
+		rolledback)
+			redirect_to "network.cgi?iface=${edit_iface}" "danger" \
+				"That change was not confirmed in time, so the previous settings were put back." ;;
+	esac
 }
 
 # The interface the camera is on. The default route names it when there is
@@ -222,6 +316,11 @@ done
 # under Diagnostics (OpenIPC/majestic#311).
 net_read() {
 	local f="/etc/network/interfaces.d/$1"
+	# While netapply holds a change open the file keeps the previous stanza
+	# -- the one the camera comes back on if it restarts -- and the stanza
+	# being tried is beside it.
+	netapply_pending && [ "$pending_iface" = "$1" ] && [ -f "/tmp/netapply.new.$1" ] &&
+		f="/tmp/netapply.new.$1"
 	# This interface's own hardware address. sysinfo's network_macaddr is the
 	# DEFAULT ROUTE's, which is a different interface as soon as there are two
 	# -- the eth0 tab was printing wlan0's address under eth0's name.
@@ -270,6 +369,10 @@ net_read() {
 	# The wireless network in use is the one wpa_supplicant was started
 	# with: the pre-up wrote it from the U-Boot variables of that moment,
 	# and a later save changes the variables and nothing else.
+	# Whether a cable or an access point is there. Only "0" is a reading: the
+	# file cannot be read on an interface that is administratively down, and
+	# that silence is not the same as a link that is known to be dark.
+	now_carrier=$(cat "/sys/class/net/$1/carrier" 2>/dev/null)
 	now_ssid=$(sed -n 's/^[[:space:]]*ssid="\(.*\)"$/\1/p' /tmp/wpa_supplicant.conf 2>/dev/null | head -n1)
 	now_psk=$(sed -n 's/^[[:space:]]*psk=\([0-9a-f]*\)$/\1/p' /tmp/wpa_supplicant.conf 2>/dev/null | head -n1)
 }
@@ -284,11 +387,25 @@ net_read() {
 # file has drifted: on a camera with an adapter set, eth0's file says DHCP for
 # ever while the kernel holds the static fallback, and judging that difference
 # raised a restart banner that no restart could clear.
+#
+# Nor is eth0 waiting for a cable with nothing on it. With Wi-Fi and Ethernet
+# both in use, the firmware raises eth0 and reads its file only once a cable
+# arrives, so a camera booted on Wi-Fi with the cable out has eth0 up, dark
+# and empty -- and boots straight back into that state, which kept the banner
+# up through every restart the banner asked for (#720). The cable arriving is
+# what applies the file, not a restart. Narrowly that: a fixed address stays
+# on a dark interface, so one that has an address is still judged, and an
+# interface the boot script reads AT boot -- Wi-Fi among them -- is judged
+# however dark it is, since its file has had its chance and a restart gives
+# it another. The wireless credentials below are judged either way.
 net_pending() {
 	iface_is_booted "$1" || return 1
 	[ -n "$cfg_mode" ] || return 1
-	[ "$cfg_mode" = "$now_mode" ] || return 0
-	if [ "$cfg_mode" = "static" ]; then
+	if waits_for_cable "$1" && [ -z "$now_mode" ] && [ "$now_carrier" = "0" ]; then
+		:
+	elif [ "$cfg_mode" != "$now_mode" ]; then
+		return 0
+	elif [ "$cfg_mode" = "static" ]; then
 		[ "$cfg_address" = "$now_address" ] || return 0
 		[ "$cfg_netmask" = "$now_netmask" ] || return 0
 		[ "$cfg_gateway" = "$now_gateway" ] || return 0
@@ -312,6 +429,34 @@ for i in $network_list; do
 	net_pending "$i" && any_pending=1
 done
 net_read "$edit_iface"
+
+# The browser arriving with the token -- at the new address, or over a
+# connection the change did not touch -- is the proof netapply waits for.
+# Hex only: it becomes part of a file name.
+if [ -n "$GET_confirm" ]; then
+	case "$GET_confirm" in *[!0-9a-f]*) GET_confirm="" ;; esac
+fi
+# Reaching this URL is the proof, so the request that does is what confirms;
+# the answer waits for netapply to say what it did with it, since the window
+# can close between the two.
+if [ -n "$GET_confirm" ]; then
+	outcome=""
+	if netapply_pending && [ "$pending_token" = "$GET_confirm" ] && [ "$pending_phase" = "applied" ]; then
+		touch "/tmp/netapply.ok.$GET_confirm"
+		i=0
+		while [ $i -lt 30 ] && ! netapply_outcome "$GET_confirm"; do
+			i=$((i + 1))
+			usleep 100000
+		done
+	else
+		netapply_outcome "$GET_confirm"
+	fi
+	netapply_report "$outcome"
+	if [ "$pending_token" = "$GET_confirm" ] && [ -n "$pending_dead" ]; then
+		redirect_to "network.cgi?iface=${edit_iface}" "danger" \
+			"Applying that change was interrupted. The previous settings are the saved ones, and the camera comes back on them when it restarts."
+	fi
+fi
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
 	case "$POST_action" in
@@ -434,6 +579,8 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			;;
 
 		reset)
+			netapply_pending && redirect_back "warning" \
+				"A network change is waiting to be confirmed. Reset once it has been kept or put back."
 			# The firmware's set is staged beside the directory and swapped in
 			# only once every copy succeeded, so a copy that fails -- the
 			# overlay full, say -- leaves what was there rather than a camera
@@ -484,29 +631,111 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			fi
 
 			if [ -z "$error" ]; then
-				command="setnetwork"
-				command="${command} -i $network_interface"
-				command="${command} -m $network_mode"
-				command="${command} -h $network_hostname"
+				# An argument list, not a command line handed to eval.
+				#
+				# These are the values an operator typed, and a passphrase is
+				# entitled to contain a space, a quote or a dollar sign. The
+				# lines this replaced pasted each one into a string that was
+				# then eval'd, so the shell parsed the operator's input as
+				# shell: `my camera` reached setnetwork as -h my with a stray
+				# word after it and the page still reported the save as done,
+				# a quote or an apostrophe anywhere ended the save with a raw
+				# "unterminated quoted string" on screen, and a semicolon ran
+				# what followed it (#547).
+				#
+				# setnetwork was never the problem -- it reads getopts, so it
+				# has always taken its values as separate arguments. It just
+				# had no way to receive them as separate arguments while the
+				# caller was building one string. Nothing here needs quoting
+				# rules now: "$@" carries each value whole, whatever is in it.
+				set -- -i "$network_interface" -m "$network_mode" -h "$network_hostname"
 
 				if [ "$network_interface" = "wlan0" ]; then
-					command="${command} -s $network_wlan_ssid"
-					command="${command} -p $network_wlan_password"
+					set -- "$@" -s "$network_wlan_ssid" -p "$network_wlan_password"
 				fi
 
 				if [ "$network_mode" != "dhcp" ]; then
-					command="${command} -a $network_address"
-					command="${command} -n $network_netmask"
-					[ -n "$network_gateway" ] && command="${command} -g $network_gateway"
-					[ -n "$network_nameserver" ] && command="${command} -d $network_nameserver"
+					set -- "$@" -a "$network_address" -n "$network_netmask"
+					[ -n "$network_gateway" ] && set -- "$@" -g "$network_gateway"
+					[ -n "$network_nameserver" ] && set -- "$@" -d "$network_nameserver"
 				fi
 
-				echo "$command" >> /tmp/webui.log
+				# What was asked for, for the Diagnostics dump -- rendered
+				# separately from the arguments actually passed, and with the
+				# wireless passphrase held back. The line this replaced echoed
+				# the command it was about to eval, so /tmp/webui.log kept the
+				# WiFi password of every camera it had ever been set on, in
+				# clear, for anyone who could read a log. Both notification
+				# senders stopped echoing their curl line for that same reason.
+				log_line="setnetwork"
+				log_hide=
+				for log_arg in "$@"; do
+					if [ -n "$log_hide" ]; then
+						log_line="$log_line ********"
+						log_hide=
+						continue
+					fi
+					[ "$log_arg" = "-p" ] && log_hide=1
+					log_line="$log_line $(shq "$log_arg")"
+				done
+				printf '%s\n' "$log_line" >> /tmp/webui.log
+
+				# Applied now rather than at the next restart, wherever the
+				# firmware brings this interface up from its file: sbin/netapply
+				# bounces it once this answer has reached the browser, and puts
+				# the old stanza back unless the camera is shown to be reachable
+				# on the new one. A reboot used to be the only way to change an
+				# address. New Wi-Fi credentials still wait for the restart: they
+				# live in the environment, which netapply does not roll back.
+				apply_now=""
+				if iface_is_booted "$edit_iface" && command -v netapply >/dev/null 2>&1; then
+					apply_now=1
+					if [ "$edit_iface" = "wlan0" ] &&
+						{ [ "$network_wlan_ssid" != "$env_wlanssid" ] ||
+						[ "$network_wlan_password" != "$(fw_printenv -n wlanpass 2>/dev/null)" ]; }; then
+						apply_now=""
+					fi
+				fi
+				if [ -n "$apply_now" ]; then
+					token=$(tr -dc 'a-f0-9' < /dev/urandom | head -c 16)
+					netapply_hold "$token" "$edit_iface" || redirect_back "warning" \
+						"The last network change is still waiting to be confirmed. Try again once it has been kept or put back."
+					backup="/tmp/netapply.backup.$edit_iface"
+					if ! { cp -f "/etc/network/interfaces.d/$edit_iface" "$backup" 2>/dev/null ||
+						cp -f "/rom/etc/network/interfaces.d/$edit_iface" "$backup" 2>/dev/null; }; then
+						rm -f /tmp/netapply.pending
+						apply_now=""
+					fi
+				fi
+
 				# setnetwork refuses on its own checks and says why on stdout;
 				# its status used to be dropped, so a refused save was
 				# reported as a save.
-				if ! out=$(eval "$command" 2>&1); then
+				if ! out=$(setnetwork "$@" 2>&1); then
+					[ -n "$apply_now" ] && rm -f "$backup" /tmp/netapply.pending
 					redirect_back "danger" "Network settings were not saved: $(esc "$out")"
+				fi
+
+				if [ -n "$apply_now" ]; then
+					NETAPPLY_WAIT=$netapply_wait NETAPPLY_WAIT_DHCP=$netapply_wait_dhcp setsid netapply "$edit_iface" "$token" "$backup" "$network_mode" </dev/null >/dev/null 2>&1 &
+					# The page that answers must find the change pending, and
+					# a worker that did not take the record over within two
+					# seconds is not applying anything: the save then stands
+					# as a save, for the next restart, and the record goes so
+					# that a worker starting late finds it gone and gives up.
+					i=0
+					while [ $i -lt 20 ] && ! { netapply_pending && [ "$pending_token" = "$token" ] && [ "$pending_phase" != "starting" ]; }; do
+						i=$((i + 1))
+						usleep 100000
+					done
+					if [ "$pending_token" = "$token" ] && [ "$pending_phase" != "starting" ] && [ -z "$pending_dead" ]; then
+						to=""
+						[ "$network_mode" = "static" ] && to=$network_address
+						redirect_to "network.cgi?iface=${edit_iface}&applying=${token}&to=${to}" "success" \
+							"Network settings saved. Applying them now."
+					fi
+					[ "$pending_token" = "$token" ] && [ "$pending_phase" = "starting" ] && rm -f /tmp/netapply.pending
+					rm -f "$backup"
 				fi
 
 				update_caminfo
@@ -532,6 +761,8 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 					msg="$msg They are stored, but the camera does not bring $(iface_word "$edit_iface") up from this file."
 				elif net_pending "$edit_iface"; then
 					msg="$msg They take effect when the camera restarts."
+				elif waits_for_cable "$edit_iface" && [ -z "$now_mode" ] && [ "$now_carrier" = "0" ]; then
+					msg="$msg They take effect when $(iface_word "$edit_iface") is connected."
 				fi
 				redirect_to "network.cgi?iface=${edit_iface}" "success" "$msg"
 			fi
@@ -542,7 +773,10 @@ fi
 # The header reads network_gateway for its no-default-route banner, and that
 # is a statement about the kernel; so the banner it does draw for the pending
 # save is asked for by name, and the form's variables are filled in below it.
-[ -n "$any_pending" ] && restart_pending=1
+# Not while netapply is applying a change: the file and the kernel differ for
+# the seconds before it takes effect, and a restart is exactly what the change
+# no longer needs.
+[ -n "$any_pending" ] && ! netapply_pending && restart_pending=1
 
 # This page draws its own title, because the interface switcher sits on the
 # same line as it. Without this the header prints one too and the page opens
@@ -569,10 +803,26 @@ if [ -z "$error" ]; then
 		network_gateway=$cfg_gateway
 		network_nameserver=$cfg_nameserver
 	else
-		network_address=$now_address
-		network_netmask=$now_netmask
-		network_gateway=$now_gateway
-		network_nameserver=$now_nameserver
+		# A link-local address is not a lease. It is what the camera gives
+		# itself when no DHCP server answered (169.254.0.0/16, from the
+		# firmware's leasefail), and carried into the fields it became the
+		# starting point for Manual: a 255.255.0.0 mask, no router (#690).
+		case "$now_address" in
+			169.254.*)
+				# Emptied, not left alone: sysinfo has already set these to
+				# the address in use.
+				network_address=""
+				network_netmask=""
+				network_gateway=""
+				network_nameserver=""
+				;;
+			*)
+				network_address=$now_address
+				network_netmask=$now_netmask
+				network_gateway=$now_gateway
+				network_nameserver=$now_nameserver
+				;;
+		esac
 	fi
 fi
 
@@ -649,6 +899,51 @@ fi
 	</span>
 </div>
 
+<%# A change netapply is holding open. The browser is on the interface being
+    changed when it reached the camera at that interface's address -- then a
+    new fixed address is where it must go next; otherwise nothing it relies on
+    is moving, and confirming over the same connection is enough. Without
+    script the text says what to do, and the link carries the token. %>
+<% if [ -n "$GET_applying" ] && netapply_pending && [ "$pending_token" = "$GET_applying" ]; then
+	applying_to=""
+	echo "$GET_to" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && applying_to=$GET_to
+	applying_same=""
+	[ "${HTTP_HOST%%:*}" = "$now_address" ] && applying_same=1
+	keep="network.cgi?iface=${edit_iface}&confirm=${pending_token}"
+	applying_acts="<a class=\"btn btn-sm btn-outline-secondary\" href=\"$(attr_escape "$keep")\">Keep these settings</a>"
+	# Scheme-relative, and on the port this page came in on, so the link
+	# reaches the same server at the new address.
+	applying_port=""
+	case "$HTTP_HOST" in
+		*:*) case "${HTTP_HOST##*:}" in '' | *[!0-9]*) ;; *) applying_port=":${HTTP_HOST##*:}" ;; esac ;;
+	esac
+	# The deadline is the one netapply is counting down, which depends on the
+	# mode of the stanza it is trying -- read from that stanza, not inferred
+	# from the query string, which a page viewed over the other interface
+	# does not carry a reliable answer in.
+	applying_mode=$(awk '$1 == "iface" { print $4; exit }' "/tmp/netapply.new.$pending_iface" 2>/dev/null)
+	if [ "$applying_mode" = "dhcp" ]; then
+		applying_wait="$netapply_wait_dhcp seconds"
+	else
+		applying_wait="$((netapply_wait / 60)) minutes"
+	fi
+	if [ -n "$applying_same" ] && [ -n "$applying_to" ] && [ "$applying_to" != "$now_address" ]; then
+		applying_text="<b>The camera is moving to $(esc "$applying_to").</b> This page follows it to <a href=\"$(attr_escape "//${applying_to}${applying_port}/cgi-bin/${keep}")\">$(esc "${applying_to}${applying_port}")</a> in a few seconds, and the camera keeps the new settings as soon as this browser reaches it there, even if it is only asked to sign in again. If it is not reached within ${applying_wait}, the camera goes back to the previous ones by itself."
+		# The button would point at the address being left.
+		applying_acts=""
+	elif [ -n "$applying_same" ] && [ -z "$applying_to" ]; then
+		applying_text="<b>The camera is asking for an address by DHCP.</b> It keeps the change once it has one, and goes back to the previous settings if none comes within ${applying_wait}. If the address changes, your router shows the new one."
+	else
+		applying_text="<b>Applying the new settings.</b> They are kept once this page can reach the camera again; otherwise the previous ones come back within ${applying_wait}."
+		# Only a fixed address gives the page somewhere new to follow the
+		# camera to.
+		[ "$applying_mode" = "dhcp" ] || applying_text="$applying_text Reaching the camera at its new address keeps them too, even if only its sign-in page."
+	fi %>
+<div id="net-applying" data-token="<% attr_escape "$pending_token" %>" data-to="<% attr_escape "$applying_to" %>" data-same="<%= $applying_same %>" data-iface="<% attr_escape "$edit_iface" %>">
+	<% notice warn "$applying_text" "$applying_acts" %>
+</div>
+<% fi %>
+
 <%# The form's cards are dealt into equal columns sized to how many there are
     -- three on a wireless interface, two on a wired one -- so the row fills
     rather than leaving one card alone on a second line with a hole beside it.
@@ -717,6 +1012,74 @@ fi
 	<div class="col-12 mj-save"><% button_submit %></div>
 	</div>
 </form>
+
+<%# The cellular modem: majestic reads it over its AT port and publishes it in
+    /metrics, so everything the modem says about itself -- hardware, SIM, cell,
+    signal, data session -- is filled in by network.js from the heartbeat, the
+    same sample the Dashboard draws from. What the camera knows and majestic
+    does not -- the address on usb0, the route, the resolvers, the switches in
+    the U-Boot environment -- is read here. Shown wherever there is a modem
+    interface or a modem setting; a camera with neither gets no card. %>
+<%
+cell_addr=$(ip -4 addr show dev usb0 2>/dev/null | awk '$1 == "inet" { print $2; exit }')
+cell_gw=$(ip -4 route show default dev usb0 2>/dev/null | awk '{ for (n = 1; n < NF; n++) if ($n == "via") { print $(n + 1); exit } }')
+cell_metric=$(ip -4 route show default dev usb0 2>/dev/null | awk '{ for (n = 1; n < NF; n++) if ($n == "metric") { print $(n + 1); exit } }')
+# Which interface the kernel would send internet traffic out of right now:
+# asking it beats re-deriving its choice from metrics and link states.
+cell_via=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (n = 1; n < NF; n++) if ($n == "dev") { print $(n + 1); exit } }')
+cell_dns=$(awk '$1 == "nameserver" { printf "%s%s", s, $2; s = ", " }' /etc/resolv.conf 2>/dev/null)
+%>
+<% if [ -d /sys/class/net/usb0 ] || [ -n "$modem_power$modem_apn" ] || adapter_is_modem; then %>
+<div class="row g-4 mt-0">
+<div class="col-12">
+<div class="card" id="cellular"><div class="card-body">
+	<% card_head "Cellular modem" "usb0" %>
+	<p id="cell-state" class="x-small mb-2 text-secondary">Waiting for the modem&hellip;</p>
+	<div class="row g-4">
+		<div class="col-12 col-md-6 col-lg-4">
+			<% group_head "Signal" %>
+			<dl class="small list mb-0">
+				<dt>RSRP</dt><dd id="cell-rsrp">&ndash;</dd>
+				<dt>RSRQ</dt><dd id="cell-rsrq">&ndash;</dd>
+				<dt>SINR</dt><dd id="cell-sinr">&ndash;</dd>
+				<dt>RSSI</dt><dd id="cell-rssi">&ndash;</dd>
+				<dt>CSQ</dt><dd id="cell-csq">&ndash;</dd>
+			</dl>
+		</div>
+		<div class="col-12 col-md-6 col-lg-4">
+			<% group_head "Network" %>
+			<dl class="small list mb-0">
+				<dt>Operator</dt><dd id="cell-op">&ndash;</dd>
+				<dt>Cell</dt><dd id="cell-cell">&ndash;</dd>
+				<dt>Band</dt><dd id="cell-band">&ndash;</dd>
+				<dt>Data session</dt><dd id="cell-bearer">&ndash;</dd>
+				<dt>On usb0</dt><dd id="cell-netdev">&ndash;</dd>
+				<dt>usb0 address</dt><dd><% esc "${cell_addr:-none}" %><% [ -n "$cell_gw" ] && printf ' <span class="x-small text-secondary">via %s%s</span>' "$(esc "$cell_gw")" "$([ -n "$cell_metric" ] && esc ", metric $cell_metric")" %></dd>
+				<dt>Internet via</dt><dd><% esc "${cell_via:-no route}" %></dd>
+				<dt>Resolvers</dt><dd class="text-break"><% esc "${cell_dns:-none}" %></dd>
+			</dl>
+		</div>
+		<div class="col-12 col-md-6 col-lg-4">
+			<% group_head "Hardware" %>
+			<dl class="small list mb-0">
+				<dt>Model</dt><dd id="cell-model">&ndash;</dd>
+				<dt>Firmware</dt><dd class="text-break" id="cell-rev">&ndash;</dd>
+				<dt>IMEI</dt><dd id="cell-imei">&ndash;</dd>
+				<dt>SIM</dt><dd id="cell-sim">&ndash;</dd>
+				<dt>ICCID</dt><dd class="text-break" id="cell-iccid">&ndash;</dd>
+				<dt>APN</dt><dd><% if [ -n "$modem_apn" ]; then esc "$modem_apn"; else printf 'the network&rsquo;s default'; fi %></dd>
+				<% if [ "$modem_power" = "off" ]; then %><dt>Power</dt><dd class="text-warning">turned off in the firmware environment</dd><% fi %>
+			</dl>
+		</div>
+	</div>
+	<p class="x-small text-secondary mb-0 mt-2" id="cell-age"></p>
+	<% if [ -x /usr/sbin/modem-at ]; then %>
+	<p class="x-small mb-0 mt-1"><a href="sms.cgi">Messages, balance and packages</a> &mdash; what the operator has sent to the SIM, and its short codes.</p>
+	<% fi %>
+</div></div>
+</div>
+</div>
+<% fi %>
 
 <div class="row g-4 mt-0">
 <div class="col-12 col-lg-6">
@@ -874,6 +1237,7 @@ fi
 </div>
 </div>
 
+<script src="/a/ip-octets.js" defer></script>
 <script src="/a/network.js" defer></script>
 
 <%in p/footer.cgi %>

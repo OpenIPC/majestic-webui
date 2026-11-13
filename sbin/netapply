@@ -1,0 +1,246 @@
+#!/bin/sh
+# netapply IFACE TOKEN BACKUP MODE
+#
+# Puts an interface's saved stanza into effect now, and keeps it only if the
+# camera is shown to be reachable on it; otherwise puts the stanza it replaced
+# back. network.cgi starts this, detached, after setnetwork has written the
+# new /etc/network/interfaces.d/IFACE and BACKUP holds the old one.
+#
+# Saving used to change nothing until a reboot (the firmware reads the stanzas
+# only at boot), which is a reboot to change an address. Applying at once has
+# its own trap: the page that asked for the change is served over the
+# interface being changed, so a mistyped address or gateway would cut the
+# owner off with nothing on the camera to notice. Hence the round trip:
+#
+#   MODE static -- the browser is sent to the new address with TOKEN. The
+#                  change is kept once a client that was talking to the
+#                  camera when it was saved completes a TCP connection to the
+#                  new address, or when an authenticated request carrying
+#                  TOKEN arrives (network.cgi?confirm=). Nothing within WAIT
+#                  seconds: rolled back.
+#
+#                  The connection is the proof that matters, and it no longer
+#                  waits on a sign-in. The new address is a new origin to the
+#                  browser, holding no session, so the confirmation URL lands
+#                  on the sign-in page -- and the browser reaching that page
+#                  already shows the camera can be reached (#690). The client
+#                  is checked because a stranger reaching the address is no
+#                  such proof: with a wrong gateway a device on the camera's
+#                  own segment still connects while its owner, a router away,
+#                  cannot. majestic hands a CGI no REMOTE_ADDR, so the clients
+#                  are read from the kernel's socket table while the request
+#                  that saved the change is still open.
+#   MODE dhcp   -- there is no address to send the browser to, so the lease
+#                  itself is the proof: a default route through IFACE keeps
+#                  the change. An address alone is not one -- udhcpc's
+#                  leasefail puts `ipaddr` on an interface with no lease.
+#                  A confirmation keeps it too.
+#
+# Until it is kept the new stanza lives in $NEW, and the file the firmware
+# boots from holds the old one. A camera cut off by a bad address is most often
+# power-cycled by its owner, and it has to come back on the settings that
+# worked -- as it does if this is killed, whatever kills it.
+#
+# One change at a time: PENDING names the run in progress -- "pid token iface
+# phase". network.cgi creates it, refusing to if it exists, with the phase
+# `starting`; this takes it over, or gives up if it is not that record. The
+# phase is `applying` until the new stanza is in effect and `applied` after: a
+# confirmation counts only once it is `applied`, because before then the
+# connection the page is on proves nothing about the new settings. DONE holds
+# the last run's "token outcome": kept, unsaved (kept, but the file could not
+# be written, so the next boot brings back the old one) or rolledback.
+
+iface=$1
+token=$2
+backup=$3
+mode=$4
+
+IFDIR=${NETAPPLY_IFDIR:-/etc/network/interfaces.d}
+RUN=${NETAPPLY_RUN:-/tmp}
+VARRUN=${NETAPPLY_VARRUN:-/var/run}
+PROC=${NETAPPLY_PROC:-/proc/net}
+PENDING=$RUN/netapply.pending
+DONE=$RUN/netapply.done
+NEW=$RUN/netapply.new.$iface
+WAIT=${NETAPPLY_WAIT:-180}
+WAIT_DHCP=${NETAPPLY_WAIT_DHCP:-30}
+# Long enough for the page answering the save to reach the browser over the
+# link about to be bounced.
+DELAY=${NETAPPLY_DELAY:-4}
+
+[ -n "$iface" ] && [ -n "$token" ] && [ -f "$backup" ] || exit 1
+set -- $(cat "$PENDING" 2>/dev/null)
+[ "$2" = "$token" ] && [ "$4" = starting ] || exit 1
+
+log() {
+	logger -t netapply "$*"
+	echo "$(date '+%F %T') netapply: $*" >> "$RUN/webui.log"
+}
+
+# Down by the stanza that brought the interface up ($1), up by $2, or by the
+# file the firmware reads when there is no $2. ifdown reads the CURRENT file to
+# know how to stop an interface: taking a DHCP eth0 to a fixed address by the
+# new one ran the static teardown and left the old udhcpc running, to renew
+# the lease over the address that had just been typed in. The routes go with
+# it whatever ifdown managed, so that a default route through the interface
+# afterwards is the new settings' and not one the old ones left.
+apply() {
+	ifdown -i "$1" -f "$iface" >/dev/null 2>&1
+	stop_dhcp
+	ip -4 route flush dev "$iface" >/dev/null 2>&1
+	if [ -n "$2" ]; then
+		ifup -i "$2" "$iface" >/dev/null 2>&1
+	else
+		ifup "$iface" >/dev/null 2>&1
+	fi
+}
+
+# A udhcpc for this interface that ifdown did not stop -- and only a udhcpc:
+# the pid in the file can have been reused by anything since.
+stop_dhcp() {
+	local pid comm
+	pid=$(cat "$VARRUN/udhcpc.$iface.pid" 2>/dev/null) || return 0
+	comm=
+	read -r comm 2>/dev/null < "/proc/$pid/comm"
+	[ "$comm" = udhcpc ] && kill "$pid" 2>/dev/null
+	return 0
+}
+
+# Every TCP socket as "state local remote", addresses in the kernel's hex.
+# IPv4 is 8 digits; majestic's listener is dual-stack, so an IPv4 browser
+# sits in tcp6 as a v4-mapped address, unwrapped here to the same 8.
+conns() {
+	cat "$PROC/tcp" "$PROC/tcp6" 2>/dev/null | awk '
+		function v4(a) {
+			if (length(a) == 8) return a
+			# The wildcard a dual-stack listener is bound to.
+			if (a == "00000000000000000000000000000000") return "00000000"
+			if (length(a) == 32 && substr(a, 1, 24) == "0000000000000000FFFF0000") return substr(a, 25)
+			return ""
+		}
+		$1 ~ /:$/ {
+			split($2, l, ":"); split($3, r, ":")
+			la = v4(l[1]); ra = v4(r[1])
+			if (la != "" && ra != "") print $4, la ":" l[2], ra ":" r[2]
+		}'
+}
+
+# a.b.c.d as /proc/net/tcp spells it: the address's four bytes read as one
+# host-order word, which on these little-endian SoCs reverses them.
+hex4() {
+	local IFS=.
+	set -- $1
+	printf '%02X%02X%02X%02X' "$4" "$3" "$2" "$1"
+}
+
+# Who is talking to the camera, as "client:port" -- the remote address and
+# the camera's own port it came in on. Inbound only: a socket whose local port
+# something listens on. The camera's own outbound connections, to a broker or
+# a server somewhere, name a peer that was never the owner's browser.
+clients_now() {
+	conns | awk '
+		$1 == "0A" { split($2, l, ":"); listen[l[2]] = 1; next }
+		$1 == "01" { split($2, l, ":"); split($3, r, ":"); if (r[1] !~ /7F$/) est[r[1] ":" l[2]] = 1 }
+		END { for (k in est) { split(k, x, ":"); if (x[2] in listen) print k } }' | sort -u | tr '\n' ' '
+}
+
+# A new connection to the new address, from one of CLIENTS and on the port it
+# was using, that got through its handshake: established, or anything a
+# completed one ends in. A SYN that arrived proves nothing -- the answer to
+# it is what a wrong gateway loses. SEEN are the ones that were there when
+# the new settings came up, so everything else was answered through them.
+reached() {
+	[ -n "$addr" ] && [ -n "$clients" ] || return 1
+	conns | awk -v a="$addr" -v c="$clients" -v s="$seen" '
+		BEGIN { n = split(c, x, " "); for (i = 1; i <= n; i++) ok[x[i]] = 1
+			n = split(s, x, " "); for (i = 1; i <= n; i++) old[x[i]] = 1 }
+		$1 ~ /^(01|04|05|06|08|09|0B)$/ {
+			split($2, l, ":"); split($3, r, ":")
+			if (l[1] == a && ((r[1] ":" l[2]) in ok) && !($3 in old)) { f = 1; exit }
+		}
+		END { exit !f }'
+}
+
+leased() {
+	ip -4 route show dev "$iface" 2>/dev/null | grep -q '^default'
+}
+
+finish() {
+	echo "$token $1" > "$DONE"
+	rm -f "$NEW" "$PENDING" "$RUN/netapply.ok.$token"
+	exit 0
+}
+
+# Stopped before the new stanza was touched, there is nothing to undo.
+applied=
+rollback() {
+	log "$1: putting the previous $iface settings back"
+	[ -n "$applied" ] && apply "$NEW"
+	finish rolledback
+}
+
+# The new stanza out of the boot path, the old one back into it.
+if ! { cp -f "$IFDIR/$iface" "$NEW" &&
+	cp -f "$backup" "$IFDIR/$iface.netapply" &&
+	mv -f "$IFDIR/$iface.netapply" "$IFDIR/$iface"; }; then
+	log "could not stage the new $iface settings; they take effect at the next restart"
+	rm -f "$NEW" "$IFDIR/$iface.netapply" "$backup" "$PENDING"
+	exit 1
+fi
+rm -f "$backup"
+
+# Taken while the save that started this is still being answered, so the
+# browser that made it is among them.
+clients=$(clients_now)
+addr=
+if [ "$mode" = static ]; then
+	addr=$(awk '$1 == "address" { print $2; exit }' "$NEW" 2>/dev/null)
+	[ -n "$addr" ] && addr=$(hex4 "$addr")
+fi
+
+trap '' HUP
+echo "$$ $token $iface applying" > "$PENDING"
+trap 'rollback "stopped"' TERM INT
+sleep "$DELAY"
+log "applying the $mode settings saved for $iface"
+rm -f "$RUN/netapply.ok.$token"
+applied=1
+apply "$IFDIR/$iface" "$NEW" || rollback "ifup refused the new $iface settings"
+# Taken once the new settings are up, so that only a handshake answered
+# through them counts. When the new address is the old one with only the
+# gateway changed, the connections already open to it were made under the
+# old settings -- including any opened in the moment before the bounce.
+seen=
+[ -n "$addr" ] && seen=$(conns | awk -v a="$addr" '{ split($2, l, ":"); if (l[1] == a) print $3 }' | tr '\n' ' ')
+echo "$$ $token $iface applied" > "$PENDING"
+
+limit=$WAIT
+[ "$mode" = dhcp ] && limit=$WAIT_DHCP
+kept=
+i=0
+while [ "$i" -lt "$limit" ]; do
+	if [ -e "$RUN/netapply.ok.$token" ]; then
+		kept=confirmed
+		break
+	fi
+	if [ "$mode" = static ] && reached; then
+		kept=reached
+		break
+	fi
+	if [ "$mode" = dhcp ] && leased; then
+		kept=leased
+		break
+	fi
+	sleep 1
+	i=$((i + 1))
+done
+
+[ -n "$kept" ] || rollback "no confirmation for $iface within $limit s"
+trap '' TERM INT
+if cp -f "$NEW" "$IFDIR/$iface.netapply" && mv -f "$IFDIR/$iface.netapply" "$IFDIR/$iface"; then
+	log "kept the new $iface settings ($kept)"
+	finish kept
+fi
+rm -f "$IFDIR/$iface.netapply"
+log "kept the new $iface settings ($kept), but could not save them; the next restart brings back the previous ones"
+finish unsaved

@@ -27,11 +27,14 @@ page_label() {
 	recordings)     printf '%s' "Recordings" ;;
 	# Camera
 	camera)         printf '%s' "Settings" ;;
+	counting)       printf '%s' "Counting" ;;
 	usb)            printf '%s' "USB" ;;
 	stream-urls)    printf '%s' "Stream URLs" ;;
+	raw)            printf '%s' "Raw" ;;
 	config)         printf '%s' "Config file" ;;
 	# System
 	network)        printf '%s' "Network" ;;
+	sms)            printf '%s' "SMS" ;;
 	time)           printf '%s' "Time" ;;
 	access)         printf '%s' "Access" ;;
 	update)         printf '%s' "Update" ;;
@@ -45,6 +48,7 @@ page_label() {
 	openwall)       printf '%s' "OpenWall" ;;
 	telegram)       printf '%s' "Telegram" ;;
 	ntfy)           printf '%s' "Ntfy" ;;
+	max)            printf '%s' "MAX" ;;
 	vtun)           printf '%s' "VTun" ;;
 	wireguard)      printf '%s' "WireGuard" ;;
 	proxy)          printf '%s' "Proxy" ;;
@@ -68,11 +72,11 @@ page_label() {
 # and does not need repeating.
 page_menu() {
 	case "$1" in
-	camera|usb|stream-urls|config)
+	camera|counting|usb|stream-urls|raw|config)
 		printf '%s' "Camera" ;;
-	network|time|access|update|backup|logs|console|files|sdcard)
+	network|sms|time|access|update|backup|logs|console|files|sdcard)
 		printf '%s' "System" ;;
-	openwall|telegram|ntfy|vtun|wireguard|proxy)
+	openwall|telegram|ntfy|max|vtun|wireguard|proxy)
 		printf '%s' "Services" ;;
 	esac
 }

@@ -5,7 +5,8 @@
 #         "newer":true|false|null}
 #
 # `newer` is null for "cannot tell" — no updater, no network, a manifest that
-# did not answer. Callers must treat null as "say nothing", never as false and
+# did not answer, or a build that differs from this camera's without being
+# dated after it (p/firmware.sh, fw_newer). Callers must treat null as "say nothing", never as false and
 # never as true.
 #
 # WHY THIS EXISTS. The update notice counts what changed in the camera software,
@@ -25,6 +26,8 @@
 # a stale one is refreshed by whichever request notices first.
 
 CACHE=/tmp/fw-latest.json
+# Held while a check runs. See the lock below.
+BUSY="$CACHE.busy"
 
 # The two answers are not equally safe to remember, so they are not cached for
 # the same length of time.
@@ -39,13 +42,27 @@ CACHE=/tmp/fw-latest.json
 # offers nothing. That is the contradiction this endpoint exists to prevent,
 # arriving by a different road. So a yes is re-checked often, and the extra
 # queries only happen while an update is genuinely waiting to be installed.
+#
+# An answer that settled nothing -- the check came back empty, or this camera
+# reports no revision to compare against -- is the third. It used not to be
+# remembered at all, so that it would be retried; but "retried" meant on every
+# page view, and on a camera with a route and no internet each one is a
+# sysupgrade that runs for its full 15 seconds. A camera that reports no
+# revision paid it with the internet up: three seconds, on every page. So it is
+# remembered, briefly: long enough that browsing does not run one check per
+# page, short enough that a network coming back is noticed in minutes.
 TTL_NO=21600    # six hours
 TTL_YES=900     # fifteen minutes
+TTL_UNSURE=300  # five minutes
 
 json_hdr() { printf 'HTTP/1.1 200 OK\nContent-Type: application/json\nCache-Control: no-store\n\n'; }
 
-installed=$(sed -n 's/^GITHUB_VERSION="\?\([^",]*\).*/\1/p' /etc/os-release 2>/dev/null \
-            | sed -n 's/.*+\([0-9a-f]\{7,\}\).*/\1/p' | head -1)
+# The question and its answer are p/firmware.sh's, shared with the Update page
+# and the scheduled install so the three cannot disagree.
+. "$(dirname "$0")/../p/firmware.sh"
+
+inst_ver=$(fw_installed_version)
+installed=$(fw_sha_of "$inst_ver")
 
 # A half-written cache is not an answer. The file is replaced by rename below,
 # so a reader should never see one — but a crash mid-write, or a cache left by
@@ -64,6 +81,7 @@ fi
 if [ -n "$cached" ]; then
     age=$(( $(date +%s) - $(date -r "$CACHE" +%s 2>/dev/null || echo 0) ))
     case "$cached" in
+        *'"installed":""'* | *'"latestSha":""'*) ttl=$TTL_UNSURE ;;
         *'"newer":true'*) ttl=$TTL_YES ;;
         *) ttl=$TTL_NO ;;
     esac
@@ -74,56 +92,57 @@ if [ -n "$cached" ]; then
     fi
 fi
 
-# Same predicate as the Firmware page, deliberately down to the numbers: a
-# default route must exist, and `sysupgrade` gets the same fifteen seconds. A
-# longer timeout here, or asking without a route, would let this endpoint answer
-# where the page gives up — and two surfaces that disagree is the whole fault
-# this is fixing.
+# One check at a time. Every page asks, and a camera whose check takes its full
+# 15 seconds would otherwise start one more for each page opened while the
+# first was still out. A request that finds one running is answered "cannot
+# tell" at once, which the notice already treats as silence; it is not cached,
+# so the next request reads what the running check writes.
 #
-# The page reads $network_gateway from the shared shell prelude, which is a
-# haserl template this cannot include, so the one line that computes it is
-# repeated here verbatim rather than reimplemented — `ip route`, not
-# /proc/net/route, because a hand-rolled parse of that file is how this check
-# was wrong the first time: `grep -E` does not read \t as a tab, so it saw no
-# default route on a camera that plainly had one and switched the notice off
-# everywhere.
-latest=""
-if [ -n "$(ip route 2>/dev/null | awk '/default/ {print $3}')" ] &&
-   command -v sysupgrade >/dev/null 2>&1; then
-    latest=$(timeout 15 sysupgrade --list-builds 2>/dev/null \
-             | grep -Eo '[A-Za-z0-9._]+-[0-9]{8}-[0-9a-f]+' | head -1)
+# mkdir, because it either creates the directory or fails, in one step. A lock
+# left by a check that was killed is recognised by its age -- no check lives
+# past its 15 seconds -- and taken over, but only by a request whose own mkdir
+# then succeeds: two arriving at the same stale lock race for it like any
+# other, and the loser answers "cannot tell" rather than checking alongside.
+# What is left is the instant between reading a stale lock's age and removing
+# it, in which another request may already have retaken it; at worst that runs
+# two checks once, each still bounded by its 15 seconds.
+unsure() {
+    json_hdr
+    printf '{"installed":"%s","latest":"","latestSha":"","newer":null}' "$installed"
+    exit 0
+}
+if ! mkdir "$BUSY" 2>/dev/null; then
+    held=$(( $(date +%s) - $(date -r "$BUSY" +%s 2>/dev/null || echo 0) ))
+    [ "$held" -ge 0 ] && [ "$held" -lt 60 ] && unsure
+    rmdir "$BUSY" 2>/dev/null
+    mkdir "$BUSY" 2>/dev/null || unsure
 fi
 
-latest_sha=$(printf '%s' "$latest" | sed -n 's/.*-\([0-9a-f]\{7,\}\)$/\1/p')
-
-if [ -z "$latest" ] || [ -z "$latest_sha" ] || [ -z "$installed" ]; then
-    newer=null
-else
-    case "$latest_sha" in
-        "$installed"*) newer=false ;;
-        *) case "$installed" in "$latest_sha"*) newer=false ;; *) newer=true ;; esac ;;
-    esac
-fi
+latest=$(fw_latest_build)
+latest_sha=$(fw_build_sha "$latest")
+newer=$(fw_newer "$inst_ver" "$latest")
 
 body=$(printf '{"installed":"%s","latest":"%s","latestSha":"%s","newer":%s}' \
         "$installed" "$latest" "$latest_sha" "$newer")
 
-# Only a real answer is worth caching; an unknown should be retried, not
-# remembered.
+# Every answer is cached, for the time its kind is trusted (see the TTLs
+# above). Which kind it is turns on whether both revisions were read, not on
+# whether `newer` came out null: a camera running a build later than the newest
+# published gets null on every ask, and that is a settled answer, held as long
+# as a no.
 #
 # Written to a private name and renamed into place, because the notice is on
 # every page and these requests overlap: `> "$CACHE"` truncates the file first
 # and fills it after, so a reader arriving between the two gets an empty or
 # partial body, and the mtime the truncation just set makes it look fresh.
 # rename is atomic, so a reader sees either the old answer or the new one.
-if [ "$newer" != "null" ]; then
-    tmp="$CACHE.$$"
-    if printf '%s' "$body" > "$tmp" 2>/dev/null; then
-        mv -f "$tmp" "$CACHE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
-    else
-        rm -f "$tmp" 2>/dev/null
-    fi
+tmp="$CACHE.$$"
+if printf '%s' "$body" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$CACHE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+else
+    rm -f "$tmp" 2>/dev/null
 fi
+rmdir "$BUSY" 2>/dev/null
 
 json_hdr
 printf '%s' "$body"

@@ -49,10 +49,19 @@ window.MajesticWebRTC = (function () {
 	// data-channel feed. Resolved at every use rather than captured, the way
 	// the chain resolves its rules: a test may install it after this file.
 	const S = () => window.MajesticSignal;
+	// ICE restart (preview-ice.js), resolved the same way. Without it a dead
+	// path is a new session, as it always was.
+	const I = () => window.MajesticIce;
 
 	function attach(video, opts) {
 		opts = opts || {};
-		const onState = opts.onState || function () {};
+		const onStateOwn = opts.onState || function () {};
+		// A share's guest copies the share page's diagnostics, not this
+		// page's: where the player gave up goes there too.
+		const onState = function (state, why) {
+			if (state === 'fallback') S().shareTrace('player fell back', why || '');
+			return onStateOwn.apply(this, arguments);
+		};
 		const onCodec = opts.onCodec || function () {};
 		const onAudio = opts.onAudio || function () {};
 		// Talkback state, and the per-second measurement feed behind the stats
@@ -69,6 +78,9 @@ window.MajesticWebRTC = (function () {
 		// `sig` is the signalling handle (preview-signal.js) for the current
 		// attempt; every handler it was opened with is bound to that attempt.
 		let pc = null, sig = null, statsTimer = null, signalTimer = null;
+		// The current peer connection's restarter, and whether ICE has left
+		// connected since the picture last had it.
+		let restart = null, iceDown = false;
 		// Autoplay refused on a fresh document load with no user activation (Opera
 		// for Android, majestic-webui#317): the muted picture is ready but paused,
 		// and play() is never retried, so nothing shows until an in-app navigation
@@ -179,6 +191,14 @@ window.MajesticWebRTC = (function () {
 		// that had just proved itself, blanking the picture — the very flicker
 		// staging exists to remove.
 		let wantAudio = !!opts.audio;
+		// No picture to carry: the camera has no video channel turned on,
+		// so the session is the microphone alone. The
+		// audio is always negotiated then, and listening is the element's
+		// mute rather than a renegotiation -- there is nothing else this
+		// session could be, and nothing to fall back to without it.
+		const audioOnly = !!opts.audioOnly;
+		let listening = !!opts.audio;
+		if (audioOnly) wantAudio = true;
 		let volume = opts.volume === undefined ? 1 : opts.volume;
 		let lastCodec = '', lastW = 0, lastH = 0;
 
@@ -302,6 +322,12 @@ window.MajesticWebRTC = (function () {
 					if (r.type === 'inbound-rtp' && r.kind === 'audio') {
 						s.audioKbps = rate(r.bytesReceived || 0, rateAudioBytes);
 						rateAudioBytes = r.bytesReceived || 0;
+						// With no picture the sound is the media: it is what
+						// says the session is alive, and what a stall is.
+						if (audioOnly && typeof r.bytesReceived === 'number') {
+							bytes = r.bytesReceived;
+							codec = 'opus';
+						}
 					} else if (r.type === 'outbound-rtp' && r.kind === 'audio') {
 						// This browser's microphone, as the browser counts it.
 						// The camera's audio-in counter is the other half: one
@@ -342,7 +368,14 @@ window.MajesticWebRTC = (function () {
 					clearTimeout(signalTimer);
 					onState('playing', codec);
 				}
-				if (gotMedia) {
+				if (gotMedia && restart && restart.recovering()) {
+					// Frames stop while the path is down, and that is the
+					// restart's to mend: retiring the session here would tear
+					// it down halfway through a restart that was about to
+					// bring the same picture back. Counted afresh once ICE is
+					// up again.
+					stalledMs = 0;
+				} else if (gotMedia) {
 					// The no-signal watchdog was disarmed when the first bytes
 					// arrived and nothing else is watching, so this is what
 					// notices a stream that stops. Retire the attempt on a
@@ -519,6 +552,8 @@ window.MajesticWebRTC = (function () {
 
 		function teardownPc() {
 			clearInterval(statsTimer); statsTimer = null;
+			if (restart) { restart.stop(); restart = null; }
+			iceDown = false;
 			if (pc) {
 				try {
 					pc.ontrack = null;
@@ -557,6 +592,9 @@ window.MajesticWebRTC = (function () {
 			// fetch, and a reconnect should use the answer once it lands
 			// instead of repeating the empty list it started with.
 			const ice = S().iceOf(opts);
+			S().shareTrace('player ice servers', ice.map(function (x) {
+				return [].concat(x.urls).map(function (u) { return String(u).split(':')[0]; }).join('+');
+			}).join(' '));
 
 			try {
 				pc = new RTCPeerConnection({ iceServers: ice });
@@ -570,7 +608,7 @@ window.MajesticWebRTC = (function () {
 			// has the camera encode for nobody — the same reasoning as the MSE
 			// path's opt-in, arrived at from the other end.
 			try {
-				pc.addTransceiver('video', { direction: 'recvonly' });
+				if (!audioOnly) pc.addTransceiver('video', { direction: 'recvonly' });
 				if (wantMic && micTrack) {
 					// One section carrying both directions, not two: the camera
 					// answers a single audio m-line.
@@ -585,7 +623,7 @@ window.MajesticWebRTC = (function () {
 
 			pc.ontrack = function (ev) {
 				if (ev.streams && ev.streams[0]) video.srcObject = ev.streams[0];
-				video.muted = !wantAudio;
+				video.muted = audioOnly ? !listening : !wantAudio;
 				try { video.volume = volume; } catch (e) {}
 				// The play() promise cannot be trusted to report an autoplay
 				// refusal (Opera resolves it without playing, #317), so watch the
@@ -618,6 +656,13 @@ window.MajesticWebRTC = (function () {
 						return;
 					}
 					if (!err || err.name !== 'NotAllowedError') return;
+					// The sound is all there is, so it is not given up, and the
+					// control is left saying what the viewer chose: the next
+					// gesture anywhere on the page starts it, unmuted.
+					if (audioOnly) {
+						playOnGesture(video, function () { return current(my); });
+						return;
+					}
 					onAudio(null);
 					// Renegotiate rather than just muting. The audio
 					// transceiver is only ever added when wantAudio is set,
@@ -637,11 +682,44 @@ window.MajesticWebRTC = (function () {
 			pc.onicecandidate = function (ev) {
 				if (ev.candidate) send('candidate', ev.candidate.candidate);
 			};
+			const R = I();
+			restart = R ? R.restarter({
+				pc: function () { return current(my) ? pc : null; },
+				sig: function () { return current(my) ? sig : null; },
+				played: function () { return gotMedia; },
+				lost: function () {
+					if (!current(my)) return;
+					lastFailure = 'the network path to the camera was lost';
+					reconnect();
+				},
+			}) : null;
 			pc.oniceconnectionstatechange = function () {
 				if (!pc || !current(my)) return;
 				const s = pc.iceConnectionState;
-				if (s === 'failed' || s === 'closed') reconnect();
-				else if (s === 'disconnected') onState('error');
+				S().shareTrace('player ice', s);
+				// A session that never played, or a page without the
+				// restarter, has nothing to mend: a new session, as before.
+				if (s === 'closed' || (s === 'failed' && (!gotMedia || !restart))) {
+					reconnect();
+					return;
+				}
+				if (s === 'disconnected' || s === 'failed') {
+					if (!iceDown) onState('error');
+					iceDown = true;
+				} else if (iceDown && R && R.up(s)) {
+					// The chip said "reconnecting" and nothing else would
+					// rewrite it: the poll announces the codec and size only
+					// when they change, and after a restart they have not.
+					// So report the recovery the way a session coming up is
+					// reported, and the picture it has, whatever the stats
+					// go on to say.
+					iceDown = false;
+					if (gotMedia) {
+						onState('playing', lastCodec);
+						if (lastW && lastH) onCodec(lastCodec, lastCodec, lastW, lastH);
+					}
+				}
+				if (restart) restart.state(s);
 			};
 
 			gotMedia = false;
@@ -672,6 +750,9 @@ window.MajesticWebRTC = (function () {
 				},
 				answer: function (sdp) {
 					if (!current(my)) return;
+					// An ICE restart's answer, applied or dropped there; the
+					// audio and talkback checks below are the first answer's.
+					if (restart && restart.answer(sdp)) return;
 					pc.setRemoteDescription({ type: 'answer', sdp: sdp })
 						.then(function () {
 							if (!current(my)) return;
@@ -720,6 +801,10 @@ window.MajesticWebRTC = (function () {
 				},
 				candidate: function (line, mid) {
 					if (!current(my)) return;
+					// Held while a restart's answer is outstanding: those
+					// belong to the new generation, and are added once it is
+					// applied.
+					if (restart && restart.candidate(line, mid)) return;
 					// Handed over without waiting for the answer to be applied,
 					// which is safe rather than sloppy: addIceCandidate chains
 					// onto the same operations queue as setRemoteDescription,
@@ -747,7 +832,8 @@ window.MajesticWebRTC = (function () {
 					// nothing. Adopted, that re-pick is a real renegotiation —
 					// and a mid-session reconnect re-requests the channel that
 					// actually worked instead of replaying the fallback.
-					if (typeof m.channel === 'number') {
+					// -1 is a session with no channel at all: audio alone.
+					if (typeof m.channel === 'number' && m.channel >= 0) {
 						stream = m.channel | 0;
 						onServed({
 							channel: m.channel | 0,
@@ -771,6 +857,13 @@ window.MajesticWebRTC = (function () {
 				},
 				error: function (text) {
 					if (!current(my)) return;
+					// Its reply to a restart offer, on a session that was
+					// playing: a lost path, reconnected, not a reason to
+					// change transport.
+					if (restart && restart.restarting()) {
+						restart.refused();
+						return;
+					}
 					// The camera could not answer. Much the commonest cause is
 					// a profile this browser will not take — see
 					// docs/webrtc-browser-interop.md — and MSE has no such
@@ -783,7 +876,7 @@ window.MajesticWebRTC = (function () {
 					if (sig === handle) sig = null;
 					if (current(my)) reconnect();
 				},
-			});
+			}, { origin: opts.origin, session: opts.session });
 			sig = handle;
 
 			clearInterval(statsTimer);
@@ -869,6 +962,14 @@ window.MajesticWebRTC = (function () {
 		// same one Main/Sub already takes.
 		function setAudio(on) {
 			on = !!on;
+			if (audioOnly) {
+				// The track is already here; only the element was muted. From
+				// the click, so the browser lets the sound play.
+				listening = on;
+				video.muted = !on;
+				if (on) video.play().catch(function () {});
+				return;
+			}
 			if (on === wantAudio) return;
 			wantAudio = on;
 			video.muted = !on;

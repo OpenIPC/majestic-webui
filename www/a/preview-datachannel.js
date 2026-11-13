@@ -188,6 +188,7 @@ window.MajesticDataChannel = (function () {
 		opts = opts || {};
 		const stream = opts.stream | 0;
 		const S = window.MajesticSignal;
+		const trace = function (what, detail) { if (S.shareTrace) S.shareTrace(what, detail); };
 		const feed = {
 			readyState: 0, binaryType: 'arraybuffer',
 			onopen: null, onmessage: null, onmeta: null, onclose: null, onerror: null,
@@ -205,9 +206,19 @@ window.MajesticDataChannel = (function () {
 			close: function () { finish(null); },
 			stats: stats,
 		};
-		let pc = null, dc = null, sig = null, ended = false;
+		let pc = null, dc = null, sig = null, ended = false, restart = null;
 		let openTimer = null, firstTimer = null, statsTimer = null;
 		let rxBytes = 0, msgs = 0, seqGaps = 0, camGaps = 0, late = 0, lastSeq = 0;
+		// Frames by count, not by event: a hole of five is five frames, and
+		// the stats panel grades the link on the share that never arrived.
+		// Only the LINK's holes count — one the camera flagged is its own
+		// drop, which says nothing about the path. And the channel is
+		// unordered, so a hole may yet be filled: its seqs wait in `holes`,
+		// and a frame that turns up late gives its count back. Bounded, so
+		// a long outage cannot grow it; the oldest hole is simply final.
+		let frames = 0, framesMissed = 0;
+		const holes = new Set();
+		const HOLES_MAX = 256;
 		let idrRequests = 0, lastIdrAt = 0, gotMessage = false;
 		let rttMs = null, cam = {}, camAt = 0, served = null, lastQueueMs = 0, keyframes = 0;
 		const parts = reassembler();
@@ -216,6 +227,7 @@ window.MajesticDataChannel = (function () {
 			const ps = parts.stats();
 			return {
 				feed: 'datachannel', rxBytes: rxBytes, msgs: msgs, keyframes: keyframes,
+				frames: frames, framesMissed: framesMissed,
 				seqGaps: seqGaps, camGaps: camGaps, late: late, idrRequests: idrRequests,
 				partsReassembled: ps.partsReassembled, partsDropped: ps.partsDropped,
 				rttMs: rttMs, queueMs: lastQueueMs, cam: cam, served: served,
@@ -229,12 +241,16 @@ window.MajesticDataChannel = (function () {
 			if (ended) return;
 			ended = true;
 			clearTimeout(openTimer); clearTimeout(firstTimer); clearInterval(statsTimer);
+			if (restart) { restart.stop(); restart = null; }
 			if (dc) { try { dc.onopen = dc.onmessage = dc.onclose = dc.onerror = null; dc.close(); } catch (e) {} dc = null; }
 			if (pc) { try { pc.onicecandidate = pc.oniceconnectionstatechange = null; pc.close(); } catch (e) {} pc = null; }
 			if (sig) { sig.close(); sig = null; }
 			const was = feed.readyState;
 			feed.readyState = 3;
 			if (reason === null) return;
+			// Inside a share, where the feed went goes in the guest's report
+			// too: the player moves on to the socket feed without a word.
+			trace('data-channel feed ended', reason);
 			demote(reason);
 			if (was !== 1 && feed.onerror) { try { feed.onerror({ reason: reason }); } catch (e) {} }
 			if (feed.onclose) { try { feed.onclose({ code: 4000, reason: reason, wasClean: false }); } catch (e) {} }
@@ -283,11 +299,23 @@ window.MajesticDataChannel = (function () {
 					// frames it sent and this end never saw, and is asked
 					// for — at most every three seconds.
 					seqGaps++;
+					if (!(m.flags & FLAG_GAP)) {
+						framesMissed += m.seq - lastSeq - 1;
+						for (let q = Math.max(lastSeq + 1, m.seq - HOLES_MAX); q < m.seq; q++) holes.add(q);
+						while (holes.size > HOLES_MAX) holes.delete(holes.values().next().value);
+					}
 					meta.gap = true;
 					const now = Date.now();
 					if (!(m.flags & FLAG_GAP) && now - lastIdrAt > IDR_MIN_GAP_MS) { lastIdrAt = now; feed.send('{"request":"idr"}'); }
 				}
-				if (lastSeq && m.seq <= lastSeq) { late++; return; }
+				if (lastSeq && m.seq <= lastSeq) {
+					late++;
+					// Too late for the picture, which moved on to the next
+					// keyframe — but the link delivered it.
+					if (holes.delete(m.seq)) framesMissed--;
+					return;
+				}
+				frames++;
 				lastSeq = m.seq;
 			}
 			if (feed.onmeta) feed.onmeta(meta);
@@ -301,8 +329,12 @@ window.MajesticDataChannel = (function () {
 			}
 		}
 
+		const ice = S.iceOf(opts);
+		trace('data-channel feed ice servers', ice.map(function (x) {
+			return [].concat(x.urls).map(function (u) { return String(u).split(':')[0]; }).join('+');
+		}).join(' '));
 		try {
-			pc = new window.RTCPeerConnection({ iceServers: S.iceOf(opts) });
+			pc = new window.RTCPeerConnection({ iceServers: ice });
 			dc = pc.createDataChannel('video', { negotiated: true, id: 0, ordered: false, maxRetransmits: 0 });
 		} catch (e) {
 			setTimeout(function () { finish('refused'); }, 0);
@@ -321,10 +353,27 @@ window.MajesticDataChannel = (function () {
 		dc.onclose = function () { finish('closed'); };
 		dc.onerror = function () {};
 		pc.onicecandidate = function (ev) { if (ev.candidate && sig) sig.send('candidate', ev.candidate.candidate); };
+		// A path that dies under a feed that has carried something is
+		// restarted on this peer connection (preview-ice.js): the channel
+		// rides the same DTLS association and survives it. Two attempts that
+		// do not bring it back end the feed as any other ending of a working
+		// one does, and the consumer goes to the socket.
+		const R = window.MajesticIce;
+		restart = R ? R.restarter({
+			pc: function () { return ended ? null : pc; },
+			sig: function () { return ended ? null : sig; },
+			played: function () { return gotMessage; },
+			lost: function () { finish('closed'); },
+		}) : null;
 		pc.oniceconnectionstatechange = function () {
 			if (!pc) return;
 			const s = pc.iceConnectionState;
-			if (s === 'failed' || s === 'closed') finish(feed.readyState === 1 ? 'closed' : 'ice-failed');
+			trace('data-channel feed ice', s);
+			if (s === 'closed' || (s === 'failed' && (!gotMessage || !restart))) {
+				finish(feed.readyState === 1 ? 'closed' : 'ice-failed');
+				return;
+			}
+			if (restart) restart.state(s);
 		};
 		openTimer = setTimeout(function () { finish('timeout'); }, OPEN_TIMEOUT_MS);
 
@@ -341,20 +390,28 @@ window.MajesticDataChannel = (function () {
 			},
 			answer: function (sdp) {
 				if (ended) return;
+				// A restart's answer, applied or dropped there.
+				if (restart && restart.answer(sdp)) return;
 				if (sdpDeclined(sdp)) { finish('declined'); return; }
 				pc.setRemoteDescription({ type: 'answer', sdp: sdp }).catch(function () { finish('refused'); });
 			},
 			candidate: function (line, mid) {
 				if (ended) return;
+				if (restart && restart.candidate(line, mid)) return;
 				pc.addIceCandidate({ candidate: line, sdpMid: mid }).catch(function () {});
 			},
 			stats: function (line) { cam = S.parseCam(line); camAt = Date.now(); },
 			served: function (m) { served = m; },
 			busy: function () { finish('busy'); },
-			error: function () { finish('refused'); },
+			// A refused restart ends a feed that was working, which is not
+			// the refusal that is remembered for six hours.
+			error: function () {
+				if (restart && restart.restarting()) restart.refused();
+				else finish('refused');
+			},
 			closed: function () { finish(feed.readyState === 1 ? 'closed' : 'signal-closed'); },
 			close: function () { finish(feed.readyState === 1 ? 'closed' : 'signal-closed'); },
-		});
+		}, { origin: opts.origin, session: opts.session });
 		return feed;
 	}
 

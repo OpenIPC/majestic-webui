@@ -29,7 +29,7 @@ window.MajesticStats = (function () {
 	const GRID = 'rgba(255,255,255,.14)';
 
 	let els = null;
-	let latSpark = null, bwChart = null, rssiSpark = null, focusSpark = null;
+	let latSpark = null, bwChart = null, rssiSpark = null, lteSpark = null, fvSpark = null;
 	let open = false;
 	// Per-destination egress, asked for only while somebody is looking. See
 	// the block above outPoll().
@@ -39,7 +39,6 @@ window.MajesticStats = (function () {
 	// tell whether the next one describes the same destination.
 	const outPrev = Object.create(null);
 	const outRate = Object.create(null);   // camera index → bytes/s
-	let focusTimer = null;
 	let prevT = null;      // previous tick's cumulative counters
 	let lastTickAt = 0;
 	let hold = { buf: null, dec: null }; // per-frame figures across empty deltas
@@ -57,6 +56,17 @@ window.MajesticStats = (function () {
 	let refreshMs = null;
 	const armed = [];
 	let lossEma = null;
+	// The data-channel feed's loss: the share of frames the channel's
+	// sequence says never arrived, smoothed like lossEma. Frames rather than
+	// packets — a frame is the smallest thing this feed can lose.
+	let frameLossEma = null;
+	// ...and what it costs the camera to keep that share at zero. The camera
+	// end of the channel resends what the link drops, whatever the browser
+	// asked for when it opened it (measured: 3% loss, holes 0, nothing
+	// abandoned), so on a bad link frames still arrive — late, as waiting —
+	// and the resends are where the link shows. Resent packets per packet
+	// sent, from the camera's dcrtx= and dcsent= keys.
+	let resendEma = null;
 	let srG2gEma = null;
 	let srSeenAt = 0;
 	// Each transport's last settled headline, kept ACROSS transport switches
@@ -71,6 +81,10 @@ window.MajesticStats = (function () {
 	// of it, and printing the ceiling next to "you receive" read as massive
 	// loss when nothing was lost.
 	let vencRate = [null, null];
+	// The best sharpness seen since focusing began. Null until the first
+	// reading, and cleared by focusReset() — a zoom or a new autofocus pass
+	// changes what "best" could even mean.
+	let fvBest = null;
 
 	function fmtK(k) {
 		if (k == null) return '-';
@@ -110,7 +124,7 @@ window.MajesticStats = (function () {
 			'<div class="mj-ns-spark" id="mj-ns-lat-sp"></div>' +
 		'</section>' +
 		'<section class="mj-ns-sec">' +
-			'<div class="mj-ns-cap">Your connection <span class="mj-ns-grade" id="mj-ns-grade"></span></div>' +
+			'<div class="mj-ns-cap"><span id="mj-ns-gcap">Your connection</span> <span class="mj-ns-grade" id="mj-ns-grade"></span></div>' +
 			'<div class="mj-ns-rows">' +
 				'<div class="mj-ns-row" id="mj-ns-r-cap" hidden><span>link can carry</span><b id="mj-ns-cap-est">–</b></div>' +
 				'<div class="mj-ns-row" id="mj-ns-r-set" hidden><span>camera set to</span><b id="mj-ns-set">–</b></div>' +
@@ -126,20 +140,35 @@ window.MajesticStats = (function () {
 		'<section class="mj-ns-sec" id="mj-ns-radio" hidden>' +
 			'<div class="mj-ns-cap">Camera radio</div>' +
 			'<div class="mj-ns-rows">' +
-				'<div class="mj-ns-row"><span>Wi-Fi signal</span><b id="mj-ns-wifi">–</b></div>' +
+				'<div class="mj-ns-row" id="mj-ns-r-wifi"><span>Wi-Fi signal</span><b id="mj-ns-wifi">–</b></div>' +
 				'<div class="mj-ns-row" id="mj-ns-r-wrate" hidden><span>radio link speed</span><b id="mj-ns-wrate">–</b></div>' +
 				'<div class="mj-ns-row" id="mj-ns-r-wretr" hidden><span>radio retries</span><b id="mj-ns-wretr">–</b></div>' +
 			'</div>' +
 			'<div class="mj-ns-spark" id="mj-ns-rssi-sp"></div>' +
+			'<div class="mj-ns-rows" id="mj-ns-lte" hidden>' +
+				'<div class="mj-ns-row"><span>LTE signal</span><b id="mj-ns-lte-sig">–</b></div>' +
+				'<div class="mj-ns-row"><span>cellular</span><b id="mj-ns-lte-st">–</b></div>' +
+			'</div>' +
+			'<div class="mj-ns-spark" id="mj-ns-lte-sp" hidden></div>' +
+		'</section>' +
+		// Focus. A TREND, never a score: the ISP's focus statistic has no
+		// common scale — the repo's own Ingenic fixture reads 1198384 where
+		// this hi3516ev300 reads 6318 — so a percentage, a bar or a
+		// good/bad grade would be inventing a ceiling. And it arrives on the
+		// 2 s heartbeat, which cannot be a focusing viewfinder; it is a
+		// confirmation instrument, for "did that trim help?", which is why
+		// it lives in the opt-in panel and not next to the buttons.
+		'<section class="mj-ns-sec" id="mj-ns-focus" hidden>' +
+			'<div class="mj-ns-cap">Focus</div>' +
+			'<div class="mj-ns-rows">' +
+				'<div class="mj-ns-row"><span>sharpness now</span><b id="mj-ns-fv">–</b></div>' +
+				'<div class="mj-ns-row"><span>best since you started focusing</span><b id="mj-ns-fvmax">–</b></div>' +
+			'</div>' +
+			'<div class="mj-ns-spark" id="mj-ns-fv-sp"></div>' +
 		'</section>' +
 		'<section class="mj-ns-sec" id="mj-ns-egress" hidden>' +
 			'<div class="mj-ns-cap">Camera is serving</div>' +
 			'<div class="mj-ns-rows" id="mj-ns-eg-rows"></div>' +
-		'</section>' +
-		'<section class="mj-ns-sec" id="mj-ns-focus" hidden>' +
-			'<div class="mj-ns-cap">Focus metric <span class="mj-ns-grade" id="mj-ns-focus-value">–</span></div>' +
-			'<div class="mj-ns-spark" id="mj-ns-focus-sp"></div>' +
-			'<div class="mj-ns-note">Higher means sharper for the current scene.</div>' +
 		'</section>' +
 		'<section class="mj-ns-fine" id="mj-ns-fp"></section>' +
 		'</div>';
@@ -224,24 +253,33 @@ window.MajesticStats = (function () {
 			segBuf: g('mj-ns-seg-buf'), segDec: g('mj-ns-seg-dec'),
 			lCam: g('mj-ns-l-cam'), lNet: g('mj-ns-l-net'),
 			lBuf: g('mj-ns-l-buf'), lDec: g('mj-ns-l-dec'),
-			grade: g('mj-ns-grade'), vs: g('mj-ns-vs'),
+			grade: g('mj-ns-grade'), gcap: g('mj-ns-gcap'), vs: g('mj-ns-vs'),
 			legEst: g('mj-ns-leg-est'),
 			rCap: g('mj-ns-r-cap'), capEst: g('mj-ns-cap-est'),
 			rSet: g('mj-ns-r-set'), set: g('mj-ns-set'),
 			send: g('mj-ns-send'), recv: g('mj-ns-recv'),
 			repair: g('mj-ns-repair'),
-			radio: g('mj-ns-radio'), wifi: g('mj-ns-wifi'),
+			radio: g('mj-ns-radio'), rWifi: g('mj-ns-r-wifi'), wifi: g('mj-ns-wifi'),
+			rssiSp: g('mj-ns-rssi-sp'),
+			lte: g('mj-ns-lte'), lteSig: g('mj-ns-lte-sig'), lteSt: g('mj-ns-lte-st'),
+			lteSp: g('mj-ns-lte-sp'),
 			rWrate: g('mj-ns-r-wrate'), wrate: g('mj-ns-wrate'),
 			rWretr: g('mj-ns-r-wretr'), wretr: g('mj-ns-wretr'),
+			focus: g('mj-ns-focus'), fv: g('mj-ns-fv'), fvMax: g('mj-ns-fvmax'),
 			egress: g('mj-ns-egress'), egRows: g('mj-ns-eg-rows'),
-			focus: g('mj-ns-focus'), focusValue: g('mj-ns-focus-value'),
 			fp: g('mj-ns-fp'),
 		};
-		els.focus.hidden = true;
 		const MC = window.MjCharts;
 		latSpark = MC.makeSpark(g('mj-ns-lat-sp'), C1, 0, null, 120);
 		rssiSpark = MC.makeSpark(g('mj-ns-rssi-sp'), C1, -90, -30, 60);
-		focusSpark = MC.makeSpark(g('mj-ns-focus-sp'), C2, null, null, 120);
+		// The modem's scale and sentences are main.js's; a page that runs the
+		// player without it simply has no cellular rows.
+		if (typeof MJ_LTE_SCALE === 'object')
+			lteSpark = MC.makeSpark(g('mj-ns-lte-sp'), C1, MJ_LTE_SCALE.lo, MJ_LTE_SCALE.hi, 60);
+		// Auto-scaled at BOTH ends (lo and hi null): the focus statistic has no
+		// common scale across vendors, so pinning either end would be inventing
+		// a floor or a ceiling this camera never had.
+		fvSpark = MC.makeSpark(g('mj-ns-fv-sp'), C2, null, null, 120);
 		bwChart = MC.makeChart(g('mj-ns-bw'), {
 			h: 56, lo: 0, hi: null, colors: [C1, C2], grid: GRID,
 			fmt: (x) => x >= 10 ? String(Math.round(x)) : x.toFixed(1),
@@ -255,30 +293,6 @@ window.MajesticStats = (function () {
 			document.addEventListener('fullscreenchange', measureRefresh);
 		}
 		return true;
-	}
-
-	function updateFocusStatus(status) {
-		if (!ensure()) return false;
-		const m = /(?:^| )metric_fv=(\d+)(?: |$)/.exec(status || '') ||
-			/(?:^| )fv=(\d+)(?: |$)/.exec(status || '');
-		if (!m) return false;
-		const value = +m[1];
-		els.focus.hidden = false;
-		els.focusValue.textContent = String(value);
-		window.MjCharts.pushSpark(focusSpark, value);
-		return true;
-	}
-
-	function pollFocus() {
-		focusTimer = null;
-		if (!open || typeof window.fetch !== 'function') return;
-		window.fetch('/autofocus/status', { credentials: 'same-origin' })
-			.then((r) => r.ok ? r.text() : Promise.reject())
-			.then(updateFocusStatus)
-			.catch(() => {})
-			.finally(() => {
-				if (open) focusTimer = setTimeout(pollFocus, 250);
-			});
 	}
 
 	// ── the 1 Hz WebRTC tick ────────────────────────────────────────────────
@@ -304,6 +318,24 @@ window.MajesticStats = (function () {
 	// an estimate below twice the delivered rate is a fact about the link,
 	// one above it is the estimator idling — and an adaptation triggered by
 	// an idling estimator is the same false positive one step removed.
+	const RANK = { excellent: 0, good: 1, struggling: 2, poor: 3 };
+
+	// The camera's resend share on a data channel, on its own ladder: it is
+	// not packet loss, and does not scale like it — SCTP resends on reordering
+	// as readily as on loss, and a window at a time once a timer fires.
+	// Measured on an Ingenic T31 over Wi-Fi at 0.5–1 Mbit/s, with netem
+	// loss and jitter on the camera's packets only: a clean link 0–2%; 1% loss (±10 ms jitter) 12–14%; 6% loss (±5 ms) 14–18%;
+	// 3% loss (±20 ms) 25–29%. It separates a clean link from a lossy one
+	// cleanly and says nothing about HOW lossy, so it can take the word to
+	// "struggling" and no further — "poor" is left to evidence that can
+	// weigh it. Null while the camera has not said.
+	function resendGrade(pct) {
+		if (pct == null) return null;
+		if (pct > 5) return ['struggling', WARN];
+		if (pct > 2) return ['good', OK];
+		return ['excellent', OK];
+	}
+
 	function gradeOf(lossPct, rtt, jitterMs, encK, cfgK, rembK, recvK) {
 		// The grade reads the estimate ADAPTATION acts on — the camera-side
 		// remb — not the larger of two estimates: a high idle browser figure
@@ -353,6 +385,10 @@ window.MajesticStats = (function () {
 			nack: s.nack || 0, rtx: parseInt(cam.rtx, 10) || 0,
 			rxBytes: s.rxBytes || 0, totalFrames: totalFrames,
 			droppedFrames: droppedFrames, stalls: s.stalls || 0,
+			dcFrames: dcFeed ? s.dc.frames || 0 : 0,
+			dcMissed: dcFeed ? s.dc.framesMissed || 0 : 0,
+			dcRtx: dcFeed && cam.dcrtx !== undefined ? parseInt(cam.dcrtx, 10) || 0 : null,
+			dcBytes: dcFeed ? parseInt(String(cam.dcsent || '').split('/')[1], 10) || 0 : 0,
 		};
 		// A cumulative counter that went BACKWARDS means the peer connection
 		// was rebuilt under us (preview-webrtc reconnects internally without
@@ -362,10 +398,13 @@ window.MajesticStats = (function () {
 		// decay through the new session's first seconds.
 		if (p && (prevT.packetsReceived < p.packetsReceived ||
 				prevT.jbEmitted < p.jbEmitted ||
-				prevT.rxBytes < p.rxBytes)) {
+				prevT.rxBytes < p.rxBytes || prevT.dcFrames < p.dcFrames ||
+				prevT.dcBytes < p.dcBytes)) {
 			p = null;
 			hold = { buf: null, dec: null };
 			lossEma = null;
+			frameLossEma = null;
+			resendEma = null;
 			srG2gEma = null;
 		}
 		const good = p && dt > 0.25 && dt < 5;
@@ -573,11 +612,23 @@ window.MajesticStats = (function () {
 		// actually emits, what arrives.
 		const remb = parseInt(cam.remb, 10) || 0;
 		const capK = Math.max(s.availKbps || 0, remb);
-		// MSE has no loss counter and no round trip — TCP converts both into
-		// waiting. So the grade reads the two symptoms this transport CAN
-		// show: playback having stalled recently, and the element dropping
-		// frames to catch up.
+		// The buffered players grade on what their feed can see. Over a
+		// WebSocket that is playback only: TCP turns loss and round trip into
+		// waiting, so the two symptoms left are playback having stalled
+		// recently and the element dropping frames to catch up — and a verdict
+		// built from those is about the playback, not the link, so the section
+		// says "Playback" and never "excellent". Under it "Your connection"
+		// graded a Wi-Fi that WebRTC measured at 6% loss excellent, one tap
+		// away from the WebRTC view calling the same link poor.
+		//
+		// The data-channel feed CAN see the link, through the camera: the
+		// camera's end resends what the link drops, so its resend share is
+		// the loss a WebSocket hides — and its sequence numbers still count
+		// any frame that never arrived, and its peer connection measures the
+		// round trip. The worst of those is the connection's word, and
+		// playback trouble can only make it worse.
 		let gr;
+		if (els.gcap) els.gcap.textContent = mse && !dcFeed ? 'Playback' : 'Your connection';
 		if (mse) {
 			if (good && prevT.stalls > p.stalls) lastStallAt = now;
 			const dropRate = good && prevT.totalFrames > p.totalFrames
@@ -590,16 +641,53 @@ window.MajesticStats = (function () {
 			// it never had. Heavy dropping is playback visibly failing, not
 			// "good" — the ladder demotes twice, like the WebRTC grade does.
 			const stalled = lastStallAt > 0 && now - lastStallAt < 10000;
-			gr = stalled || dropRate > 10 ? ['struggling', WARN]
-				: dropRate > 2 ? ['good', OK]
-				: ['excellent', OK];
+			if (dcFeed) {
+				if (good) {
+					const dMiss = Math.max(0, prevT.dcMissed - p.dcMissed);
+					const dGot = Math.max(0, prevT.dcFrames - p.dcFrames);
+					if (dMiss + dGot > 0) {
+						const pct = dMiss / (dMiss + dGot) * 100;
+						frameLossEma = frameLossEma == null ? pct
+							: frameLossEma + (pct - frameLossEma) * 0.3;
+					}
+				}
+				if (good && prevT.dcRtx != null && p.dcRtx != null) {
+					// ~1200 bytes a packet: the channel fills to the path MTU
+					// WebRTC stacks assume, and the figure is a share for a
+					// ladder, not an accounting.
+					const dPk = Math.max(0, prevT.dcBytes - p.dcBytes) / 1200;
+					const dRtx = Math.max(0, prevT.dcRtx - p.dcRtx);
+					if (dPk >= 1) {
+						const pct = Math.min(100, dRtx / dPk * 100);
+						resendEma = resendEma == null ? pct
+							: resendEma + (pct - resendEma) * 0.3;
+					}
+				}
+				// No word about the link until it has been measured: a frame
+				// share needs a tick of frames, and the round trip needs the
+				// channel's candidate pair — before those, "excellent" would
+				// be the zero a missing reading defaults to. Playback trouble
+				// can still speak for itself meanwhile.
+				let link = frameLossEma != null && rttMs != null
+					? gradeOf(frameLossEma, rttMs, 0, 0, 0, 0, 0) : null;
+				const rs = resendGrade(resendEma);
+				if (rs && (!link || RANK[rs[0]] > RANK[link[0]])) link = rs;
+				const play = stalled || dropRate > 10 ? ['struggling', WARN]
+					: dropRate > 2 ? ['good', OK] : null;
+				gr = play && (!link || RANK[play[0]] > RANK[link[0]]) ? play : link;
+			} else {
+				gr = stalled ? ['stalling', WARN]
+					: dropRate > 10 ? ['dropping frames', WARN]
+					: dropRate > 2 ? ['mostly smooth', OK]
+					: ['smooth', OK];
+			}
 		} else {
 			gr = gradeOf(lossEma || 0, s.rttMs || 0, s.jitterMs || 0,
 				parseInt(cam.enc, 10) || 0, s.configuredKbps || 0, remb,
 				s.kbps || 0);
 		}
-		els.grade.textContent = gr[0];
-		els.grade.style.color = gr[1];
+		els.grade.textContent = gr ? gr[0] : '';
+		els.grade.style.color = gr ? gr[1] : '';
 		els.rCap.hidden = !capK;
 		if (capK) {
 			// A saturated link's estimate approximates capacity; an idle
@@ -640,8 +728,15 @@ window.MajesticStats = (function () {
 		// Repairs as rates: recovery working is the good news worth telling.
 		// On MSE there is nothing to repair — TCP already repaired it, and
 		// the price appears as buffering, which is what gets counted.
+		// Over the data channel nothing was repaired — the channel resends
+		// nothing — so what the link lost is printed first, the evidence the
+		// grade above stands on.
 		if (good && mse) {
-			els.repair.textContent = 're-buffered ' + (s.stalls || 0) +
+			els.repair.textContent = (dcFeed ?
+				(frameLossEma != null ? 'lost ' + frameLossEma.toFixed(1) +
+					'% of frames \u00b7 ' : '') +
+				(resendEma != null ? 'camera re-sent ' +
+					resendEma.toFixed(1) + '% \u00b7 ' : '') : '') + 're-buffered ' + (s.stalls || 0) +
 				'\u00d7 \u00b7 frames dropped ' + (prevT.droppedFrames || 0);
 		} else if (good) {
 			const rep = [];
@@ -924,6 +1019,34 @@ window.MajesticStats = (function () {
 		vencRate[0] = rate('venc0_rcvd_bytes');
 		vencRate[1] = rate('venc1_rcvd_bytes');
 
+		// Focus. `in v` rather than a truthiness test, because 0 is a real
+		// reading — a black scene has no detail to measure — and absent is a
+		// camera whose SoC publishes no focus statistic at all (the gauge is a
+		// HiSilicon gen4 and Ingenic T31 thing). Absent hides the section and
+		// says nothing: a camera that cannot measure focus is not a camera that
+		// is out of focus.
+		// Present AND finite. `in` separates absent from zero, which is the
+		// distinction that matters most here — 0 is a real reading from a black
+		// scene — but it says nothing about the number being usable: the shared
+		// metrics parser will hand back Infinity for a malformed line, and that
+		// reaches the rounding, the high-water mark and the sparkline's own
+		// bounds, where it becomes non-finite SVG coordinates and no chart at
+		// all. A reading that cannot be drawn is not a reading.
+		const fv = v.isp_afmetrics;
+		const hasFv = 'isp_afmetrics' in v && Number.isFinite(fv) && fv >= 0;
+		els.focus.hidden = !hasFv;
+		if (hasFv) {
+			els.fv.textContent = String(Math.round(fv));
+			// The best THIS run of focusing has reached, not an all-time high
+			// and not the `peak=` of some earlier pass: both of those describe
+			// a scene and a zoom that have since moved on, and drawing the bar
+			// against one would state a target that no longer exists. Reset by
+			// whoever is focusing — see MajesticStats.focusReset().
+			if (fvBest === null || fv > fvBest) fvBest = fv;
+			els.fvMax.textContent = String(Math.round(fvBest));
+			if (fvSpark) window.MjCharts.pushSpark(fvSpark, fv);
+		}
+
 		// Radio: words first, the dBm beside them. Rows vanish on a wired
 		// camera rather than standing full of dashes. Presence is judged
 		// across the whole wifi_* family and the grade falls back to the
@@ -933,7 +1056,37 @@ window.MajesticStats = (function () {
 		const hasWifi = ['wifi_rssi_dbm', 'wifi_link_quality_ratio',
 			'wifi_bitrate_mbps', 'wifi_retries_total',
 			'wifi_missed_beacons_total'].some((k) => k in v);
-		els.radio.hidden = !hasWifi;
+		// The cellular modem shares the section: it is the camera's other
+		// radio, and the one a camera on a mast is most likely to be using.
+		// Grade and sentence are main.js's, the same the Dashboard shows.
+		const lteSt = lteSpark && typeof mjLteState === 'function'
+			? mjLteState(v, s.m.info && s.m.info.modem_info) : null;
+		els.radio.hidden = !hasWifi && !lteSt;
+		els.rWifi.hidden = !hasWifi;
+		els.rssiSp.hidden = !hasWifi;
+		els.lte.hidden = els.lteSp.hidden = !lteSt;
+		if (lteSt) {
+			const lr = ('modem_rsrp_dbm' in v) ? v.modem_rsrp_dbm : null;
+			const lg = mjLteGrade(v);
+			// The glass is narrow, so the rows carry words, as the Wi-Fi one
+			// does: the grade without its reason, and the state cut to what
+			// changes the picture. The Dashboard and the Network page have
+			// the sentences.
+			els.lteSig.textContent = lr != null
+				? lr + ' dBm' + (lg ? ' · ' + lg[0].split(' — ')[0] : '') : '–';
+			els.lteSig.style.color = lg ? [OK, WARN, BAD][lg[2]] : '';
+			const li = s.m.info.modem_info || {};
+			els.lteSt.textContent = li.sim && li.sim !== 'READY'
+				? 'SIM ' + li.sim.toLowerCase()
+				: !('modem_registered' in v) ? lteSt[0]
+				: !v.modem_registered ? 'not registered'
+				: v.modem_data_connected === 0 ? 'no data session'
+				: (li.operator || 'registered') +
+					('modem_band' in v ? ' · band ' + v.modem_band : '');
+			els.lteSt.style.color = { 'text-success': '', 'text-danger': BAD,
+				'text-warning': WARN }[lteSt[1]] || '';
+			if (lr != null) window.MjCharts.pushSpark(lteSpark, lr);
+		}
 		if (hasWifi) {
 			const r = ('wifi_rssi_dbm' in v) ? v.wifi_rssi_dbm : null;
 			const q = ('wifi_link_quality_ratio' in v)
@@ -1011,6 +1164,8 @@ window.MajesticStats = (function () {
 		lastTickAt = 0;
 		hold = { buf: null, dec: null };
 		lossEma = null;
+		frameLossEma = null;
+		resendEma = null;
 		srG2gEma = null;
 		// A stall belongs to the session that stalled; without this a real
 		// stall bled through an MSE→WebRTC→MSE round trip and branded the
@@ -1061,6 +1216,7 @@ window.MajesticStats = (function () {
 			if (el) el.hidden = true;
 		});
 		if (els.grade) els.grade.style.color = '';
+		if (els.gcap) els.gcap.textContent = 'Your connection';
 	}
 
 	function setOpen(o) {
@@ -1069,17 +1225,33 @@ window.MajesticStats = (function () {
 		// asking starts and stops with the panel rather than running for
 		// every minute somebody leaves Live View up.
 		if (open) outStart(); else outStop();
-		if (open && !focusTimer) pollFocus();
-		if (!open && focusTimer) {
-			clearTimeout(focusTimer);
-			focusTimer = null;
-		}
 		// Pixel-space charts skip rendering while [hidden] leaves them 0
 		// wide; the first frame after opening is when they can measure.
 		if (open && window.MjCharts)
 			requestAnimationFrame(() => window.MjCharts.renderAll());
 	}
 
-	return { tick: tick, reset: reset, setOpen: setOpen,
-		updateFocusStatus: updateFocusStatus };
+	// "Best since you started focusing" only means anything within one scene at
+	// one zoom. The pad calls this when either changes — a zoom verb, or a new
+	// autofocus pass — so the figure describes the session of focusing the
+	// operator is actually in, rather than a high-water mark from a framing
+	// they have left behind. Guarded at the call site like every other entry
+	// point here, because preview-page.js runs under a bare vm in two tests.
+	function focusReset() {
+		fvBest = null;
+		if (els && els.fvMax) els.fvMax.textContent = '–';
+		// Emptying the arrays is not enough: the sparkline keeps its drawn
+		// paths until something renders it again, so the graph went on showing
+		// the previous scene's measurements beside a blanked "best". Push the
+		// cleared state through the same draw the ticker uses, so the panel
+		// says nothing rather than something stale.
+		if (fvSpark) {
+			fvSpark.ks = [];
+			fvSpark.ys = [];
+			if (fvSpark.fill) fvSpark.fill.setAttribute('d', '');
+			if (fvSpark.line) fvSpark.line.setAttribute('d', '');
+		}
+	}
+
+	return { tick: tick, reset: reset, setOpen: setOpen, focusReset: focusReset };
 })();

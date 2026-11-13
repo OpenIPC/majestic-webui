@@ -16,7 +16,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 
  if [ -n "$POST_wg_privkey" ] && [ -n "$POST_wg_pubkey" ]; then
   for var in wg_privkey wg_pubkey wg_sharkey wg_allowed wg_endpoint wg_alive wg_address; do
-   val=$(eval echo "\$POST_${var}")
+   val=$(t_value "POST_${var}")
    fw_setenv "$var" "$val"
   done
  

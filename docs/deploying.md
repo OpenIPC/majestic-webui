@@ -1,0 +1,100 @@
+# Deploying and the overlay
+
+How `sbin/updatewebui` puts this tree on a camera, and what the read-only
+squashfs plus jffs2 overlay makes non-obvious. Both scripts carry the rest of
+the reasoning in their own headers.
+
+`sbin/updatewebui [options] [branch]` fetches a branch zip from GitHub and
+installs `www/*` → `/var/www`, `sbin/*` → `/usr/sbin`, `bin/*` → `/usr/bin` —
+the same payload `tools/build-dist.sh` hands buildroot. Default branch is
+`master`; `--help` lists the options, `--dry-run` reports what would change,
+`--restore` undoes an install. Edits to a running camera can also be made
+directly under `/var/www/cgi-bin/` and `/usr/sbin/`.
+
+`sbin/updatewebui` and `sbin/updatewebui-fetch` both open with the full
+reasoning. What you need before getting there:
+
+**The rootfs is a read-only squashfs pivoted to `/rom`, with a jffs2 overlay on
+top.** Everything installed is an overlay copy hiding the firmware's own file
+underneath, which outlives the firmware upgrade that would have replaced it
+(#202). Three rules follow, and all three fail silently:
+
+- Write only files that genuinely differ from `/rom`'s, drop the overlay copy of
+  anything the firmware already has byte-identical, and prune entries this
+  release no longer ships. On a current camera that is 37 overlay files, not 80.
+- **Remove in the overlay's upper directory** (`upperdir=` from `/proc/mounts`;
+  `/overlay/root` on 4.x, `/overlay` on the 3.10 out-of-tree overlayfs), never
+  through the merged path — a plain `rm /var/www/x` writes a whiteout that hides
+  the firmware's copy for good.
+- **Unlink entries, never the directories holding them.** Removing a directory
+  from the upper layer leaves the merged parent listing empty until the next
+  reboot. The one sanctioned exit is `--restore`'s closing offer, on an explicit
+  yes and paired with an immediate reboot.
+
+**Nothing on the camera is touched until the download is fetched, verified and
+unpacked.** The version this replaced wiped `/var/www` *before* checking
+anything, so an unknown branch 404'd, unpacked nothing, and left the camera with
+no WebUI at all and whiteouts over the firmware's copies.
+
+**The put-back is planned before the removals.** Removing an overlay copy while
+something still holds the file open leaves a merged entry the kernel goes on
+serving for the removed inode, and nothing can `rename()` over one — it answers
+`ESTALE`. The script running from the very path a `--restore` removes is exactly
+that case, so what a run is about to write again is never removed first.
+
+**`--restore` is the install's inverse, not a wipe.** It removes a path only
+where the overlay copy still holds exactly what the manifest
+(`/etc/webui/updatewebui.manifest`) says the install put there — the same path
+holding anything else is work done on the camera since, and it stays — then
+unpacks every `/etc/webui/updatewebui-local-*.tar.gz` oldest-first over what it
+removed. So install → `--restore` is a round trip, and running `--restore` twice
+does the same thing twice instead of eating on the second run what the first
+handed back. The manifest is **emptied rather than deleted** at the end, because
+"this script installed nothing" and "no version that kept a record has ever run
+here" must not read alike: the second sends the next `--restore` down a blanket
+sweep of `/var/www` that cannot tell your files from ours. `--no-backup` opts out
+of both halves.
+
+**The installer is not on the camera.** `tools/build-dist.sh` renames
+`sbin/updatewebui-fetch` onto `sbin/updatewebui` in the payload, so the tarball
+buildroot fetches carries the stub under the name people type and never the 48 KB
+script. The full installer stays in git at `sbin/updatewebui`, because that path
+is the URL the stub fetches — and the installer's skip is conditional on
+`sbin/updatewebui-fetch` being present beside it, or a camera installing the
+already-reduced shape would end up with no installer at all. Two reasons for the
+split: the rootfs is a fixed-size squashfs partition where 48 KB stopped a board
+building at all, and a script that installs itself is always one release behind.
+
+**Two traps that are invisible until they bite.** `grep -f` with an **empty**
+pattern file — busybox reads it as *match everything*, GNU as match nothing —
+which is how these manifest lists get filtered. And the **variant** file set:
+`BUILD_OPTION` in `/etc/os-release`, kept in step with the fixup lists in
+buildroot's `majestic-webui.mk`, means an FPV build gets no
+`telegram`/`max`/`openwall`, and a stale overlay copy of a skipped file is
+pruned rather than reinstalled. The FPV page itself (`wfb.cgi`, its old name
+`fpv-wfb.cgi`, `p/fpv_common.cgi`, `a/wfb.js`) is an option,
+`BR2_PACKAGE_MAJESTIC_WEBUI_FPV`, defaulting on for the fpv and wfbng variants;
+the installer's witness is `/rom/var/www/cgi-bin/p/fpv_common.cgi`. The SMS
+page and its two scripts (`sms.cgi`, `j/sms.cgi`, `a/sms.js`, `a/sms-pdu.js`,
+`sms-forward`, `modem-at`) follow a build **option** rather than a variant —
+`BR2_PACKAGE_MAJESTIC_WEBUI_SMS`, set by the device profiles of boards with a
+cellular modem — and a camera cannot read its build options, so the installer
+asks the image instead: they are installed only where `/rom/usr/sbin/modem-at`
+exists. A camera flashed before the option existed has none there, and loses
+the page on its next install until it is reflashed with an image that asks for
+it. The PTZ controls (`a/preview-ptz.js`, `a/ptz-{stick,centre,follow,speed}.js`,
+`a/af-state.js`, `j/ptz.cgi`, and `p/motor.cgi` — installed **empty** rather
+than skipped, since haserl's `<%in %>` fails on a missing file) work the same
+way with `BR2_PACKAGE_MAJESTIC_WEBUI_PTZ`, which defaults on wherever the image has a
+motor driver; the installer's witness is `/rom/usr/bin/gpio-motors`,
+`/rom/usr/lib/majestic-af.so` or `/rom/usr/bin/motor`. Unlike SMS this needs no reflash: every image
+that could ever move a motor already carries one of the two. The Counting page
+(`counting.cgi`, `a/counting.js`, `a/counting-data.js`) follows
+`BR2_PACKAGE_MAJESTIC_WEBUI_COUNTING`, which defaults on wherever the image
+carries an object-detection model (`xmnpu-models` or `cpu-models`): counting
+runs on the detector's boxes. The page is its own witness,
+`/rom/var/www/cgi-bin/counting.cgi`; like SMS, a camera flashed before the option
+existed gets it back only from an image that carries it. The lines-and-zones
+editor on the Settings page is not part of the option: it is drawn only where
+majestic has a counting section, and `a/mj-line.js` is a few kilobytes of the
+settings page itself.

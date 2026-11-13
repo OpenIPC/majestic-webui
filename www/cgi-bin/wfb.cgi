@@ -225,7 +225,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
         update)
             # Log all POST variables for debugging
             for var in $(set | grep ^POST_ | cut -d= -f1); do
-                val=$(eval echo \$$var)
+                val=$(t_value "$var")
                 debug_log "$var = $val"
             done
             
@@ -326,7 +326,7 @@ update_wfbinfo
     <%
     section="wireless broadcast telemetry"
     for key in $section; do
-        locale=$(eval echo \$wfb_${key})
+        locale=$(t_value "wfb_${key}")
         if [ -z "$locale" ]; then
             locale=$(echo "$key" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
         fi

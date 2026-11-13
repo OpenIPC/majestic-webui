@@ -50,6 +50,27 @@
 	// majestic writes booleans as booleans, but a hand-edited majestic.yaml can
 	// leave "true" as a string and nothing on the way in retypes it.
 	const on = (v) => v === true || v === 'true' || v === 1 || v === '1';
+	// What may drive one actuator, from the one key that says it: 'off' (the
+	// pad is not claimed at all), 'manual' (held, moved on request, dusk
+	// leaves it alone) or 'auto'. Anything else — absent, a typo, a value a
+	// newer daemon has learnt — reads as auto, which is both the default and
+	// the safe answer: it is the state every camera was in before the key
+	// existed, and the one that raises findings rather than standing them
+	// down. An unquoted `off` in a hand-edited file is YAML's boolean false
+	// by the time it reaches here, so that spelling comes in too — the same
+	// accommodation the daemon's own reader makes.
+	const mode = (v) =>
+		(v === 'off' || v === false || v === 'false') ? 'off'
+			: v === 'manual' ? 'manual' : 'auto';
+
+	// Does day/night move the IR-cut filter at all? Off leaves it where its
+	// owner put it while the pad stays claimed and the manual switch still
+	// moves it — distinct from parked, which gives the pad up altogether.
+	// Asked in three places (this file's conflict rule and both pages'
+	// trackers), so it is written once.
+	function follows(nm) {
+		return mode((nm || {}).irCut) === 'auto';
+	}
 
 	// Agreement, and the direction is measured rather than assumed: with the
 	// filter in the day position majestic reports ircut_enabled 0 and the
@@ -72,6 +93,28 @@
 	const HUNT_WINDOW_S = 300;
 	const HUNT_FLIPS = 3;
 	const CONFLICT_S = 30;
+
+	// The camera's own hour-wide count, which is a different measurement from
+	// the tracker's five-minute one and needs its own bar. Eight an hour is
+	// four times what a correct camera does in a whole DAY (dusk, dawn) and a
+	// tenth of what the camera that prompted this was doing, so it is
+	// neither a hair trigger nor a number that waits for damage.
+	const CAM_FLIPS_1H = 8;
+	// night_mode_source, as the endpoint documents it: 0 manual, 1 GPIO
+	// sensor, 2 gain thresholds, 3 ADC, 4 automatic. Only 4 runs on the gain
+	// multiples, and only 4 is named here — the findings below ask "is the
+	// automatic monitor deciding", never "which of the other four is".
+	const SRC_AUTO = 4;
+	// Sensor gain is reported in multiples of 1x and bottoms out at exactly
+	// 1x, so a night threshold of 1 is true at every gain the part can
+	// produce. Nothing above this is a judgement call — it is arithmetic.
+	const NIGHT_GAIN_FLOOR = 2;
+	// What the camera accepts, declared in majestic's schema but NOT enforced
+	// on the path a hand-edited majestic.yaml takes.
+	const RANGES = {
+		autoNightGain: [1, 64],
+		autoDayGain: [1, 16],
+	};
 	// Consecutive open-looking frames before the picture is allowed to say
 	// anything. The dashboard samples every 5s, so this is ~20s of agreement —
 	// enough that a frame caught mid-swing, or one magenta lorry crossing the
@@ -98,13 +141,69 @@
 			' s, up from the ' + asked + ' s set below. ';
 	}
 
+	// The wiring a verdict was measured against, as one comparable string.
+	//
+	// Four settings, and only four: the two pads, the single-pad invert, and
+	// whether the daemon drives the filter at all. Everything else on the pin
+	// map — the daylight sensor, the lamp — changes nothing about what a pulse
+	// does, and a key that fires on them is one that throws away a good
+	// measurement for an unrelated edit. Same set the test's own blocker
+	// guards, because it is the same question: does this verdict describe the
+	// camera as it is now.
+	function wiringKey(nm) {
+		nm = nm || {};
+		return [pin(nm.irCutPin1), pin(nm.irCutPin2),
+			on(nm.irCutSingleInvert) ? 1 : 0,
+			// Whether the filter is DRIVEN, not which of the two driven modes
+			// it is in. A verdict says the filter moves when the camera
+			// pulses it, and moving day/night in or out of that is not a
+			// change to what a pulse does — stamping the mode itself would
+			// throw a good measurement away every time somebody turned
+			// automatic switching on.
+			mode(nm.irCut) === 'off' ? 0 : 1].join('/');
+	}
+
+	// Has somebody driven this filter and watched the picture change?
+	//
+	// The passive check is a suspicion — it says so itself, naming what it
+	// cannot rule out — and the test is the measurement that answers it. So a
+	// verdict outranks the picture, and once one exists the suspicion has been
+	// adjudicated and must stop being raised (#498).
+	//
+	// ONLY 'ok', and only while the wiring it was measured against still
+	// stands. A verdict that found a fault leaves the finding alone: the fault
+	// is the news, and it is not this function's to report.
+	//
+	// It is not the dismissal #367 removed, and the difference is where the
+	// invalidation lives. That one recorded an OPINION ("no filter here") that
+	// had to be dropped when the wiring contradicted it — an event, needing a
+	// witness, on a page where the event never happens. This is a MEASUREMENT
+	// carrying the wiring it was taken against, compared against the camera's
+	// own configuration every time it is read. There is no moment to catch and
+	// nothing to keep in step: a record that no longer describes the camera
+	// simply stops counting.
+	//
+	// It does not expire, and that is an argument rather than an omission. The
+	// case it silences is a picture that looks open on a camera whose filter
+	// demonstrably moves — a scene with magenta light in it — and in that case
+	// the picture has ALREADY stopped being able to tell a later fault from
+	// the scene. Expiry would buy no detection back; it would only re-ask a
+	// question that has been answered, on a timer.
+	function settledBy(nm, tested) {
+		return !!tested && tested.id === 'ok' && tested.wiring === wiringKey(nm);
+	}
+
 	// Findings, worst first. `fix` names the section to send someone to; the
 	// consumer decides whether that becomes a link or a tab switch.
 	//
 	// `pic` is optional and is what the camera's own picture says: {look,
 	// streak} from look() and tracker().picture(). It is deliberately never a
 	// verdict on its own — see the note above the picture rules below.
-	function diagnose(nm, sample, track, pic) {
+	//
+	// `tested` is optional and is the remembered result of the IR-cut test,
+	// as {id, wiring, at}. The page reads it; the rule above is what decides
+	// whether it still means anything.
+	function diagnose(nm, sample, track, pic, tested) {
 		nm = nm || {};
 		track = track || {};
 		const out = [];
@@ -123,6 +222,11 @@
 		// two. Nothing here can tell those boards apart, so this is stated
 		// rather than judged (#273).
 		const single = driveable && !has(nm.irCutPin2);
+		// Whether day and night move the filter at all. Absent means they do:
+		// that is the default, and a key this page was not given is one it
+		// knows nothing about. Distinct from parked — the filter is still the
+		// daemon's to drive, and a hand on the IR-cut switch still moves it.
+		const ircutFollows = follows(nm);
 
 		// The one gate the picture gets, and it is the only portable one there
 		// is. An open filter at NIGHT is correct, so the picture may only speak
@@ -145,22 +249,24 @@
 		const pictureOpen = !!(pic && pic.look === 'open' && pic.streak >= PIC_STREAK &&
 			sample && sample.night === 0);
 
-		// Parked: the operator switched the filter off while keeping
-		// its wiring. That is a decision, not a defect — every accusation
+		// Parked: the operator set the filter to off while keeping its
+		// wiring. That is a decision, not a defect — every accusation
 		// about a filter that does not move stands down, and one observation
-		// says what is going on and where the switch is. Explicit === false:
-		// an older daemon has no such key, and absent must not read as off.
-		const ircutParked = nm.irCutEnabled === false;
+		// says what is going on and which setting says so. Only an explicit
+		// off counts: an older daemon has no such key, and absent must not
+		// read as off.
+		const ircutParked = mode(nm.irCut) === 'off';
 		if (ircutParked) {
 			if (driveable) {
 				out.push({
 					id: 'ircut-parked', level: 'info',
 					title: 'The IR-cut filter is switched off',
 					detail: 'Its pins stay configured, but nothing moves the ' +
-						'filter until "Drive the IR-cut filter" is turned back ' +
-						'on. Wherever it sits now is where it stays — open in ' +
-						'daylight reads magenta, and that is the switch, not ' +
-						'the wiring.',
+						'filter until "IR-cut filter" is set back to auto, ' +
+						'where dusk moves it, or manual, where you do. ' +
+						'Wherever it sits now is where it stays — open in ' +
+						'daylight reads magenta, and that is the setting, ' +
+						'not the wiring.',
 					fix: 'nightMode',
 				});
 			}
@@ -191,16 +297,19 @@
 					// which said the same thing where only that banner could
 					// read it (#367). Said unconditionally: the WebUI and the
 					// daemon ship in one firmware image, so a camera running
-					// this page has the switch this sentence names.
-					' If this camera has no IR-cut filter fitted, turn off ' +
-					'"Drive the IR-cut filter" and nothing here will ask again.',
+					// this page has the row this sentence names, and off is one
+					// of the three values it offers.
+					' If this camera has no IR-cut filter fitted, set ' +
+					'"IR-cut filter" to off and nothing here will ask again.',
 				fix: 'nightMode',
 			});
-		} else if (pictureOpen) {
+		} else if (pictureOpen && !settledBy(nm, tested)) {
 			// Pins are set, so the configuration looks right and only the
 			// picture disagrees. That is a reason to MEASURE, not to accuse:
 			// the innocent readings are named, and the answer is one button
-			// away on the section this points at.
+			// away on the section this points at — and once that button has
+			// been pressed and the filter has moved, this stops asking, since
+			// asking again is asking a question that has been answered.
 			out.push({
 				id: 'picture-open', level: 'warning',
 				title: 'The picture looks like an open IR-cut filter',
@@ -359,13 +468,19 @@
 		// to clear the very settings they had just chosen (#325).
 		//
 		// A sensor pin is the case the switch cannot cover: it outranks BOTH
-		// on-screen sets, and nothing else on the page mentions it. The ADC
-		// pad (src 3) outranks them the same way and is named separately: it
-		// is a different mechanism with no key on this page, so telling its
-		// owner to clear the daylight sensor pin would send them to a control
-		// that is not the one deciding.
-		if (monitor && sample && (sample.src === 1 || sample.src === 3)) {
-			const byAdc = sample.src === 3;
+		// on-screen sets, and nothing else on the page mentions it.
+		//
+		// The ADC pad (src 3) is NOT that case, though it used to be handled
+		// as one. The camera reads the ADC only with both thresholds set —
+		// they are what its reading is compared against — so an ADC camera is
+		// a threshold camera in other units: the Legacy switch is on, the
+		// automatic controls are off the page, and src 2's reasoning above
+		// holds word for word. Treated like the pin, it called the very levels
+		// the photocell switches at "set but ignored" (OpenIPC/majestic#367),
+		// and with those left out it went on naming automatic rows nobody can
+		// see, and promised that turning the ADC off would hand day/night to
+		// them — when it hands it to the same pair, read as sensor gain.
+		if (monitor && sample && sample.src === 1) {
 			// What is named has to be what is actually there. The first cut of
 			// this said "the automatic gain multiples and the delays beside
 			// them" whatever was set, on a path that could fire with no
@@ -391,27 +506,23 @@
 					id: 'mech-shadowed',
 					level: deliberate ? 'warning' : 'info',
 					title: 'Some of these settings are not being used',
-					detail: (byAdc
-						? 'This camera is switching on an analog voltage ' +
-							'reading, and it decides before anything else ' +
-							'here does. '
-						: 'A daylight sensor is wired, and it decides ' +
-							'before anything else here does. ') +
+					detail: 'A daylight sensor is wired, and it decides ' +
+						'before anything else here does. ' +
 						'That leaves ' + shadowed.join(' and ') +
 						' set but ignored' +
 						(autoSet ? ', which is why no countdown appears' : '') +
-						'.' + (byAdc
-							? ' The pad it reads is not configured on this page.'
-							: ' Clearing the daylight sensor pin on the wiring ' +
-								'map hands day/night back to the settings here.'),
+						'. Clearing the daylight sensor pin on the wiring ' +
+						'map hands day/night back to the settings here.',
 					fix: 'nightMode',
 				});
 			}
 		}
 
-		// Thresholds are compared against isp_again, so min must sit BELOW max
-		// to leave a band the camera can idle in. Equal is not "no hysteresis
-		// but workable" — it is the same gain deciding both directions.
+		// Thresholds are compared against isp_again — or, with the light level
+		// read from the ADC, against the ADC reading — so min must sit BELOW
+		// max to leave a band the camera can idle in, whichever way the pad
+		// runs. Equal is not "no hysteresis but workable" — it is the same
+		// reading deciding both directions.
 		const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
 		if (lo !== null && hi !== null && lo >= hi) {
 			out.push({
@@ -425,21 +536,123 @@
 			});
 		}
 
-		// The lamp's own park switch, same shape as the filter's: wiring
-		// kept, nothing driven, said once as an observation.
-		if (nm.backlightEnabled === false &&
-			(has(nm.backlightPin) || (nm.backlightPwmChannel &&
-				nm.backlightPwmChannel !== 'none'))) {
+		// The lamp's own mode, same shape as the filter's: wiring kept,
+		// nothing driven, said once as an observation.
+		if (mode(nm.backlight) === 'off' &&
+			(has(nm.backlightPin) ||
+				[nm.irLightPwmChannel, nm.whiteLightPwmChannel]
+					.some((c) => c && c !== 'none'))) {
 			out.push({
 				id: 'light-parked', level: 'info',
 				title: 'The camera light is switched off',
 				detail: 'Its wiring stays configured, but night mode leaves ' +
-					'it dark until "Drive the camera light" is turned back on.',
+					'it dark until "Camera light" is set back to auto, ' +
+					'where night lights it, or manual, where you do.',
 				fix: 'nightMode',
 			});
 		}
 
-		if (driveable && !monitor) {
+		// ── the configuration, before anything has been observed ────────────
+		//
+		// These need no sample, no clock and no history, which is the whole
+		// point of them: they are true the instant the page loads, on a
+		// camera nobody has been watching. Everything below this waits for
+		// evidence, and the fault they describe produces plenty of evidence —
+		// it just produces it at a distant camera with nobody looking.
+		//
+		// The shape they catch, on a gk7205v300 + IMX335 with automatic
+		// day/night and a five-second delay each way: a night gain multiple
+		// of 1, a well-lit scene sitting at 1.0x gain with the exposure well
+		// under its ceiling, and the filter driven back and forth on a
+		// 45 s cycle — autoDayDelay x8, the anti-flap penalty at its
+		// ceiling, plus autoNightDelay. Reproducible from those settings on
+		// any camera; nothing about the scene is needed.
+		const nightGain = pin(nm.autoNightGain);
+		// Only under the automatic monitor. With a pin, a threshold pair or
+		// the ADC deciding, these keys are inert, and warning about a setting
+		// that is not running sends someone to fix the wrong thing.
+		//
+		// Asked of the camera first, and the config only when the camera has
+		// not answered. Which mechanism is live is the camera's to say — the
+		// same rule the settings page states for the notes it puts under
+		// these very fields — and it is not fully reconstructable from here:
+		// the ADC source has no control on this page at all, so a config-only
+		// test cannot name it and would read a camera on its light sensor pad
+		// as running on gain.
+		//
+		// The fallback is not dropped, because the whole value of these two
+		// findings is that they need nothing observed: a daemon too old to
+		// publish the source gauge, or a page in the two seconds before its
+		// first heartbeat, still gets an answer. It is just the weaker one,
+		// and it errs the only safe way — silent when it cannot tell.
+		const srcSaid = sample && typeof sample.src === 'number';
+		const gainDecides = srcSaid
+			? sample.src === SRC_AUTO
+			: monitor && !has(nm.lightSensorPin) &&
+				!(has(nm.minThreshold) && has(nm.maxThreshold));
+		if (gainDecides && nightGain !== null && nightGain < NIGHT_GAIN_FLOOR) {
+			out.push({
+				id: 'nightgain-tautology', level: 'danger',
+				title: 'Night is set to trigger at any brightness',
+				detail: '"Gain multiple that means night" is ' + nightGain +
+					'x, and ' + NIGHT_GAIN_FLOOR + 'x is the lowest setting ' +
+					'that can ever be false — a sensor never reports less ' +
+					'than 1x gain. So the camera switches back to night a few ' +
+					'seconds after every day, in any light, and keeps doing ' +
+					'it. This is not a tuning problem: raising the delays ' +
+					'only makes the cycle slower. Set it to ' +
+					NIGHT_GAIN_FLOOR + ' or more, or clear it and let the ' +
+					'camera decide for itself.',
+				fix: 'nightMode',
+			});
+		}
+
+		// A value the camera accepted only because nothing on the file path
+		// checks. The form refuses these and the API rejects them, so a
+		// camera carrying one was edited by hand.
+		//
+		// Both keys belong to the automatic monitor, so whether the camera is
+		// actually RUNNING on the value depends on which mechanism won — and
+		// a flat "it is being used as written" on a camera whose gains are
+		// shadowed by a pin contradicts the note the settings page puts under
+		// the same field. Said either way, because the value is wrong either
+		// way and bites the moment the other mechanism is cleared; what
+		// changes is the tense.
+		Object.keys(RANGES).forEach(function (key) {
+			const v = pin(nm[key]);
+			if (v === null) return;
+			const lo = RANGES[key][0], hi = RANGES[key][1];
+			// Integers, both of them. A hand-edited 2.5 sits inside the
+			// bounds and is still not a value the form or the API would
+			// take, so bounds alone would let it through in silence — and it
+			// is exactly the shape a hand edit takes.
+			if (v >= lo && v <= hi && Number.isInteger(v)) return;
+			const what = !Number.isInteger(v)
+				? 'is not a whole number, which this setting requires'
+				: 'is outside the ' + lo + '–' + hi + ' it accepts';
+			out.push({
+				id: 'range-' + key, level: 'warning',
+				title: 'A day/night setting is not one the camera accepts',
+				detail: 'nightMode.' + key + ' is ' + v + ', which ' + what +
+					'. ' + (gainDecides
+						? 'The camera is running on it as written'
+						: 'It decides nothing while another mechanism is in ' +
+							'force, but would be used as written if ' +
+							'automatic day/night took over') +
+					'. Only the file skips this check, so it was edited by ' +
+					'hand rather than set here.',
+				fix: 'nightMode',
+			});
+		});
+
+		// Not while the filter is parked. This says the camera is yours to
+		// drive instead of dusk's, and a filter set to off is nobody's to
+		// drive — the daemon refuses to move it, which is why the filter test
+		// stands down on it and the Live tab's toggle is disabled. Without the
+		// term it landed beside "The IR-cut filter is switched off" and told
+		// the reader the API was a way out of it (#555). The runtime check
+		// below already excludes parked for the same reason.
+		if (driveable && !monitor && !ircutParked) {
 			out.push({
 				id: 'manual-only', level: 'info',
 				title: 'Day/night switching is manual',
@@ -458,7 +671,13 @@
 		// A parked filter cannot follow the monitor, so the disagreement the
 		// conflict finding convicts on is the expected state, not a fault.
 		if (monitor && driveable && !ircutParked && known(sample)) {
-			if (!agrees(sample) && track.conflictS >= CONFLICT_S) {
+			// And a filter told not to follow day/night is not merely allowed
+			// to disagree with it — disagreeing is the setting working. The
+			// camera goes to night, the filter stays where its owner put it,
+			// and the gauges differ for as long as that lasts, which is for
+			// ever. Convicting on it would make the one configuration that
+			// asks for this unusable.
+			if (ircutFollows && !agrees(sample) && track.conflictS >= CONFLICT_S) {
 				out.push({
 					id: 'conflict', level: 'danger',
 					title: 'Night mode and the IR-cut filter disagree',
@@ -471,13 +690,53 @@
 					fix: 'nightMode',
 				});
 			}
-			if (track.flips >= HUNT_FLIPS) {
+			// Two ways to know the camera is hunting, and the camera's own is
+			// strictly better wherever it exists.
+			//
+			// track.flips is counted HERE, in this browser, from the moment
+			// this page loaded. It can only see a flap somebody is already
+			// watching: at the 45 s cycle measured in the lab, three flips is
+			// two minutes of sitting on this page, and at one flip every ten
+			// minutes — still hundreds of coil pulses a week, still fatal to
+			// the filter — it is half an hour. Nobody does that to a camera on
+			// a pole in another town, which is how a board flapped for hours
+			// without anyone noticing.
+			//
+			// night_flips_1h is counted by the daemon, which is the only
+			// observer that is always there, over an hour rather than five
+			// minutes, and it is already true when the page opens. The tracker
+			// stays as the fallback for a camera too old to publish it.
+			const camFlips = sample && typeof sample.flips1h === 'number'
+				? sample.flips1h : null;
+			const hunting = camFlips !== null
+				? camFlips >= CAM_FLIPS_1H : track.flips >= HUNT_FLIPS;
+			if (hunting) {
+				// A configuration that can never settle is not a scene
+				// problem, and the advice for the two is opposite: sitting
+				// out a passing lamp is the fix for one and makes the other
+				// slower without making it stop. Where the config finding
+				// above has already named the cause, this says what is
+				// happening and leaves the explanation to it — the same rule
+				// the Dashboard applies to its no-video banner.
+				const explained = out.some(f => f.id === 'nightgain-tautology');
+				const count = camFlips !== null
+					? camFlips + ' switches in the last hour, counted by the ' +
+						'camera itself'
+					: track.flips + ' switches in the last ' +
+						(HUNT_WINDOW_S / 60) + ' minutes';
 				out.push({
-					id: 'hunting', level: 'warning',
+					// Rising to danger on the camera's own count: this is a
+					// latching solenoid being driven through its whole travel
+					// several times an hour, which is wear, not a nuisance.
+					id: 'hunting',
+					level: camFlips !== null && camFlips >= CAM_FLIPS_1H
+						? 'danger' : 'warning',
 					title: 'The camera keeps switching between day and night',
-					detail: track.flips + ' switches in the last ' +
-						(HUNT_WINDOW_S / 60) + ' minutes. ' +
-						(sample && sample.src === 4
+					detail: count + '. ' + (explained
+						? 'The IR-cut filter is a latching solenoid and this ' +
+							'is wearing it out. Fix the setting above and it ' +
+							'stops.'
+						: (sample && sample.src === SRC_AUTO
 							? stretched(nm, sample) +
 								'Something in view is moving the light on and off — ' +
 								'a security lamp, headlights, a sign. Raising ' +
@@ -485,7 +744,7 @@
 								'of darkness before night" makes the camera sit ' +
 								'each one out.'
 							: 'Widen the gap between the day and night thresholds ' +
-								'so dusk cannot sit on the boundary.'),
+								'so dusk cannot sit on the boundary.')),
 					fix: 'nightMode',
 				});
 			}
@@ -513,7 +772,15 @@
 				openRun = (l === 'open') ? openRun + 1 : 0;
 				return openRun;
 			},
-			push: function (sample, nowS) {
+			// `watch` is whether a disagreement means anything right now — false
+			// while the filter is not following day/night, where differing IS
+			// the setting working. Not merely un-reported: the clock must not
+			// RUN, or turning following back on would hand the finding an hour
+			// of disagreement that was legitimate while it accrued, and the
+			// sentence would state a duration that was never a fault.
+			// Flips are counted either way: a camera swinging between day and
+			// night is doing that whatever the filter follows.
+			push: function (sample, nowS, watch) {
 				// An unreachable camera is not a camera holding still. Returning
 				// zeroes without forgetting what came before let the next good
 				// sample bill the whole offline gap as one continuing
@@ -534,7 +801,7 @@
 				// Timed from when the disagreement STARTED, not counted in
 				// samples: the heartbeat backs off and skips ticks on a busy
 				// camera, so a sample count is not a duration.
-				if (agrees(sample)) conflictAt = null;
+				if (agrees(sample) || watch === false) conflictAt = null;
 				else if (conflictAt === null) conflictAt = nowS;
 
 				return {
@@ -552,9 +819,40 @@
 	// Pixels darker than this carry no usable colour, and pixels this bright
 	// are at or near clipping, where the ratio below is meaningless.
 	const DARK = 15, CLIP = 247;
-	// Below this many usable pixels the frame is night, a lens cap or a
-	// teardown, and nothing here may be concluded from it.
-	const MIN_PX = 200;
+	// BOTH statistics drift toward "an open filter" as the light goes away,
+	// and neither drifts back, so an unlit frame is the one place they must
+	// not be allowed to answer at all.
+	//
+	// The magenta excess is normalised by the pixel's own brightness, so a
+	// FIXED channel offset — black-level residue with the white-balance gains
+	// on top of it — says something different at each end of the range. Three
+	// counts between (R+B)/2 and green clears the 0.15 bar at a luminance of
+	// 20; at 80 it takes twelve. The same imbalance is a magenta frame in the
+	// dark and is nothing at all in daylight. And green is the minimum
+	// wherever red and blue carry the larger white-balance gain, which in a
+	// frame made of amplified noise is essentially every pixel: measured on
+	// one daylight frame from an hi3516ev300 with the filter CLOSED, green is
+	// the valley in 0.001 of the pixels above luminance 96 and in 0.426 of
+	// those below 16 — the same frame, either end of its own histogram.
+	//
+	// So a pixel has to carry real signal before its channel order means
+	// anything, and enough of the frame has to carry it before the percentile
+	// is about the frame. Measured over daylight and indoor scenes on three
+	// cameras, the share of the sample at or above LIT ran 0.62 to 0.99, and
+	// an open filter in daylight 0.99; the two verdicts are unchanged by the
+	// floor. A picture a person would call black does not come near it.
+	//
+	// This is not the brightness gate the finding above refuses to make. That
+	// one would ask the scene how dark it is, and auto-exposure makes that
+	// unanswerable — a correctly exposed midnight frame and a correctly
+	// exposed noon frame have the same mean by construction. Auto-exposure is
+	// exactly what makes THIS question answerable: it lifts any scene it can
+	// reach to its target, so a frame still sitting under the floor is one the
+	// camera could not lift, and that is the frame whose colour is its own
+	// noise. The question is whether there is a picture here to take a
+	// statistic of, which is the precondition of the statistics rather than a
+	// claim about the hour.
+	const LIT = 48, MIN_LIT = 0.5;
 	// The sample is a thumbnail, not the frame: these are statistics, and
 	// 160x90 is 14,400 pixels, plenty for a percentile and small enough that
 	// neither the decode nor the readback is felt on a 5s poll.
@@ -578,39 +876,48 @@
 	//         a magenta frame. A warm cast cannot do it at any strength:
 	//         sunset and tungsten are R>G>B monotone, and green is never the
 	//         valley in a monotone ramp.
+	// lit   — the share of the WHOLE sample bright enough for either of those
+	//         to be about a picture rather than about a noise floor. It is a
+	//         share and not a count because it is the frame it describes: the
+	//         count it replaced was 200 against a 14,400-pixel sample, so a
+	//         frame 98.6% of which was under the dark floor could still reach
+	//         a verdict on the 1.4% that was not — the thing its own comment
+	//         said must never happen (#492).
 	function stats(data, w, h) {
 		const n = w * h;
 		const vals = new Float64Array(n);
-		let k = 0, valley = 0;
+		let k = 0, valley = 0, lit = 0;
 		for (let i = 0; i < n; i++) {
 			const p = i * 4, r = data[p], g = data[p + 1], b = data[p + 2];
 			const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+			if (mx >= LIT && mx < CLIP) lit++;
 			if (mx <= DARK || mx >= CLIP) continue;
 			const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
 			if (g <= mn) valley++;
 			const lum = (r + g + b) / 3;
 			vals[k++] = ((r + b) / 2 - g) / (lum > 1 ? lum : 1);
 		}
-		if (!k) return { n: 0, gmin: 0, mex25: 0 };
+		const share = n ? lit / n : 0;
+		if (!k) return { n: 0, lit: share, gmin: 0, mex25: 0 };
 		const a = Array.prototype.slice.call(vals.subarray(0, k))
 			.sort(function (x, y) { return x - y; });
-		return { n: k, gmin: valley / k, mex25: a[Math.floor(k * 0.25)] };
+		return { n: k, lit: share, gmin: valley / k, mex25: a[Math.floor(k * 0.25)] };
 	}
 
 	// Both conditions, never either alone. A night frame under colorToGray is
 	// R=G=B, which satisfies "green is the minimum" in every pixel and would
 	// fire gmin on its own; its magenta excess is 0, which is what stops it.
 	function irLook(st) {
-		return st.n >= MIN_PX && st.gmin >= 0.90 && st.mex25 >= 0.15;
+		return st.lit >= MIN_LIT && st.gmin >= 0.90 && st.mex25 >= 0.15;
 	}
 	// An ordinary coloured frame: green is the valley in only a minority of
 	// pixels, which no amount of warm cast produces (a sunset is R>G>B, and
 	// green is never the valley in a monotone ramp).
 	function colourLook(st) {
-		return st.n >= MIN_PX && st.gmin < 0.6;
+		return st.lit >= MIN_LIT && st.gmin < 0.6;
 	}
 	// The three answers a frame can give, including "I cannot tell" — which is
-	// what a night scene, a lens cap and a mid-swing capture all return.
+	// what an unlit scene, a lens cap and a mid-swing capture all return.
 	function look(st) {
 		if (irLook(st)) return 'open';
 		if (colourLook(st)) return 'colour';
@@ -1144,6 +1451,51 @@
 		return s < 90 ? s + ' s' : Math.round(s / 60) + ' min';
 	}
 
+	// A wait that can run to hours: "40 s", "25 min", "3 h 10 min".
+	function spanWord(s) {
+		if (s < 90) return s + ' s';
+		const m = Math.round(s / 60);
+		if (m < 90) return m + ' min';
+		return Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+	}
+
+	// Why the picture is deciding when the camera was told to ask the sun or
+	// the clock -- they hand back whenever they cannot answer, and a page
+	// that only said "automatic" would read as the setting not having taken.
+	// The reasons are night_sun_state's; the clock's one reason is the clock.
+	function handBackNote(nm, v) {
+		const by = nm.switchBy;
+		if (by === 'sun') {
+			const st = v.night_sun_state;
+			const why = st === 1 ? 'where the camera is has not been said'
+				: st === 2 ? 'the camera\'s clock is not set yet'
+					: st === 3 ? 'it does not get down to the night angle here tonight'
+						: st === 4 ? 'it does not get up to the day angle here today'
+							: null;
+			return why ? ' The sun is not deciding: ' + why + ', so the picture does.' : '';
+		}
+		if (by === 'clock') {
+			return ' The set times are not deciding — the camera\'s clock is not set ' +
+				'yet, or they do not read as times — so the picture does.';
+		}
+		return '';
+	}
+
+	// Under the two NEAR choices: the picture decides, but not a day in the
+	// dark hours. Absent gauges say nothing -- the window is then unknown, not
+	// open.
+	// Said only at night: the window refuses a switch TO day, so a camera
+	// still in day under street lights is not being held by it. The count
+	// runs from when the camera started, and says so -- not "tonight".
+	function windowNote(v, inNight) {
+		if (v.night_window_closed !== 1 || inNight !== true) return '';
+		const n = v.night_days_refused_total;
+		return ' No day until the window around dawn opens' +
+			(typeof n === 'number' && n > 0
+				? ' — refused ' + n + (n === 1 ? ' time' : ' times') + ' since the camera started.'
+				: '.');
+	}
+
 	function probeNote(p) {
 		if (!p) return '';
 		if (p.verdict === PROBE_UNREADABLE) {
@@ -1212,9 +1564,12 @@
 			// as the gain rose. Only a threshold that EXISTS gets a line — an
 			// automatic camera with no night gain set has no night level to
 			// draw, and the sentence says so instead.
-			const marks = [{ v: dayG, color: '#2fb673', label: 'day' }];
+			// `side` is where the state lies against its rule, which the
+			// legend says in words: day at or under the day gain, night from
+			// the night gain up.
+			const marks = [{ v: dayG, color: '#2fb673', label: 'day', side: 'below' }];
 			if (nightG !== null) {
-				marks.push({ v: nightG, color: '#e0a020', label: 'night' });
+				marks.push({ v: nightG, color: '#e0a020', label: 'night', side: 'above' });
 			}
 			const gm = v.night_auto_gain_milli;
 			const pend = v.night_auto_pending;
@@ -1284,7 +1639,8 @@
 			return {
 				mode: 'auto', chart: true,
 				value: gm != null && gm >= 0 ? gm / 1000 : null,
-				marks: marks, line: line + lampNote + probeNote(probe),
+				marks: marks,
+				line: line + windowNote(v, inNight) + lampNote + probeNote(probe) + handBackNote(nm, v),
 				unit: 'x',
 			};
 		}
@@ -1307,8 +1663,8 @@
 				has(nm.minThreshold) && has(nm.maxThreshold))) {
 			const lo = pin(nm.minThreshold), hi = pin(nm.maxThreshold);
 			const marks = [];
-			if (lo !== null) marks.push({ v: lo, color: '#2fb673', label: 'day' });
-			if (hi !== null) marks.push({ v: hi, color: '#e0a020', label: 'night' });
+			if (lo !== null) marks.push({ v: lo, color: '#2fb673', label: 'day', side: 'below' });
+			if (hi !== null) marks.push({ v: hi, color: '#e0a020', label: 'night', side: 'above' });
 			// Why there is no countdown here, said where the countdown would
 			// have been: a threshold monitor switches on the first check that
 			// lands past a threshold, with no dwell to serve out, while
@@ -1341,6 +1697,34 @@
 			};
 		}
 
+		// The sun or the set times, deciding on their own: no reading of the
+		// scene to plot, so a sentence -- which, and when the next switch is,
+		// from the camera's own countdowns. A countdown the camera did not
+		// publish (a white night, a polar day) is left out, not guessed.
+		if (src === 5) {
+			const e = v.night_sun_elevation_millidegrees;
+			// No countdown when day or night is itself unknown: "night in 3 h"
+			// would assert the day the sentence left unsaid.
+			const next = inNight === true ? v.night_sun_next_day_seconds
+				: inNight === false ? v.night_sun_next_night_seconds : null;
+			const where = typeof e === 'number'
+				? ': it is ' + Math.abs(Math.round(e / 100) / 10) + '° ' +
+					(e < 0 ? 'below' : 'above') + ' the horizon'
+				: '';
+			return say('sun', modeWord + 'The sun decides' + where + '.' +
+				(typeof next === 'number' && next >= 0
+					? (inNight ? ' Day again in ' : ' Night in ') + spanWord(next) + '.'
+					: '') + lampNote);
+		}
+		if (src === 6) {
+			const next = inNight === true ? v.night_clock_next_day_seconds
+				: inNight === false ? v.night_clock_next_night_seconds : null;
+			return say('clock', modeWord + 'The set times decide.' +
+				(typeof next === 'number' && next >= 0
+					? (inNight ? ' Day again in ' : ' Night in ') + spanWord(next) + '.'
+					: '') + lampNote);
+		}
+
 		// A wired photocell is the one door with no reading behind it: the pad
 		// is high or low and nothing in between, so the honest answer is which
 		// way it is pointing and why there is no line under it.
@@ -1363,13 +1747,16 @@
 			const bright = on(nm.adcInvert);
 			const DAY = '#2fb673', NIGHT = '#e0a020';
 			const marks = [];
+			// Whichever state it names, the lower threshold's lies below it
+			// and the upper one's above: that is what makes the gap between
+			// them a band where neither switch fires.
 			if (lo !== null) {
 				marks.push({ v: lo, color: bright ? NIGHT : DAY,
-					label: bright ? 'night' : 'day' });
+					label: bright ? 'night' : 'day', side: 'below' });
 			}
 			if (hi !== null) {
 				marks.push({ v: hi, color: bright ? DAY : NIGHT,
-					label: bright ? 'day' : 'night' });
+					label: bright ? 'day' : 'night', side: 'above' });
 			}
 			// Same period and same absent countdown as the gain pair: one
 			// comparison per check, no dwell to serve out. majestic floors an
@@ -1435,6 +1822,8 @@
 
 	const api = {
 		diagnose: diagnose, tracker: tracker, monitorView: monitorView,
+		wiringKey: wiringKey, settledBy: settledBy, follows: follows,
+		mode: mode,
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,

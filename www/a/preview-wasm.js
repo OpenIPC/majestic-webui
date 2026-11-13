@@ -36,7 +36,7 @@ window.MajesticWasm = (function () {
 	// MJ_WASM_BASE overrides it, for a development build or an operator who
 	// would rather host it themselves.
 	const BASE = (window.MJ_WASM_BASE ||
-		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.2.0/dist/');
+		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.2.1/dist/');
 	// The channel feed (preview-datachannel.js), when the camera has one:
 	// the worker is asked to run in its feed mode and this page owns the
 	// transport — a data channel cannot be created in, or transferred into,
@@ -98,7 +98,10 @@ window.MajesticWasm = (function () {
 		let feedObj = null, dcBlocked = false, feedName = 'websocket';
 		function wsUrl(n) {
 			const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-			return proto + '://' + location.host + '/ws/video?stream=' + (n | 0);
+			const ep = window.MajesticSignal && window.MajesticSignal.endpoint
+				? window.MajesticSignal.endpoint(opts)
+				: { base: proto + '://' + location.host, query: '' };
+			return ep.base + '/ws/video?stream=' + (n | 0) + ep.query;
 		}
 		function closeFeed() {
 			if (!feedObj) return;
@@ -115,7 +118,8 @@ window.MajesticWasm = (function () {
 			const D = DC();
 			if (!worker || dead || dcBlocked || !D) return false;
 			feedName = 'datachannel';
-			const f = D.open({ stream: stream, iceServers: opts.iceServers });
+			const f = D.open({ stream: stream, iceServers: opts.iceServers,
+				origin: opts.origin, session: opts.session });
 			feedObj = f;
 			let meta = null;
 			f.onmeta = function (m) { meta = m; };

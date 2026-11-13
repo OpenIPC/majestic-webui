@@ -29,12 +29,18 @@ hide_title=1; full_bleed=1
      second copy under the picture was the only body text on the page. -->
 
 <%in p/player.cgi %>
-<% if [ -n "$ptz_support" ]; then %>
+<!-- The `:` is what keeps this an if. An image with no motor driver carries
+     p/motor.cgi as an empty stub, and an empty include leaves haserl handing
+     sh `then fi` -- a syntax error that ends the page right here, every
+     preview script below it included, so Live renders a stage with no
+     player. tools/lint-templates.sh checks the templates with the stub in. -->
+<% if [ -n "$ptz_support" ]; then : %>
 	<%in p/motor.cgi %>
 <% fi %>
 
 <script src="/a/preview.js"></script>
 <script src="/a/preview-signal.js"></script>
+<script src="/a/preview-ice.js"></script>
 <script src="/a/preview-datachannel.js"></script>
 <script src="/a/preview-webrtc.js"></script>
 <script src="/a/preview-swap.js"></script>
@@ -55,13 +61,49 @@ hide_title=1; full_bleed=1
      asks -- so a build missing either file still works. -->
 <script src="/a/preview-zoom.js"></script>
 <script src="/a/preview-page.js"></script>
+<!-- Where the camera spends its bits: whatever the viewer has zoomed in on
+     becomes an encoder region. After the page, because it asks it which
+     channel is on screen; before nothing, because nothing asks it anything.
+     mj-region.js is the coordinate map it borrows -- the same one the settings
+     page uses to land a rectangle from one stream on another. -->
+<script src="/a/mj-region.js"></script>
+<script src="/a/preview-roi.js"></script>
+<!-- The uncompressed still. After mj-region.js, whose main-to-shown map it
+     inverts to say which rectangle of the MAIN channel is on screen, and after
+     preview-zoom.js, which is what tells it. Like preview-roi.js it is in
+     neither test's SRCS list: preview-page.js does not know it exists. -->
+<script src="/a/preview-still.js"></script>
+<!-- Focus by ear. The grammar first, a window.Majestic* module the glue
+     checks for like every other; then the glue, which is in neither test's
+     SRCS list -- preview-page.js does not know it exists. After
+     preview-stats.js, whose best it keeps in step with its own. -->
+<script src="/a/focus-ear.js"></script>
+<!-- Part of the picture: which cells of the camera's focus grid a rectangle
+     covers, and one number from them. Pure, tested; after mj-region.js, whose
+     map it takes, and before the glue that draws the rectangle. -->
+<script src="/a/focus-area.js"></script>
+<script src="/a/preview-focus.js"></script>
+<!-- The other camera's picture laid over this one where its calibration
+     says it belongs: an outline while Peer is on, the live picture warped
+     onto it on a click inside. After preview-zoom.js, whose placement and
+     view events it follows, and after preview-still.js for the same reason.
+     Guarded like it: a build missing the file, or a camera without the
+     door, leaves the page as it was. -->
+<!-- The embeddable player (the settings pages' picture), which the peer
+     control mounts inside its overlay to play the OTHER camera. After the
+     transport modules it hangs together -- preview.js, preview-swap.js,
+     preview-transport.js, preview-chain.js -- and before preview-peer.js,
+     which checks for it and falls back to snapshots without it. -->
+<script src="/a/mj-preview.js"></script>
+<script src="/a/preview-peer.js"></script>
 <script src="/a/preview-hero.js"></script>
+<script src="/a/preview-bar-sheet.js"></script>
 <!-- Is the camera seeing anything? Nothing the player can answer — a camera on
      the wrong sensor driver plays perfectly and plays black — so this reads the
      exposure gauges off the heartbeat and the picture off the decoded frame,
      and hands the viewer to the Dashboard when neither has anything in it.
      mj-luma.js is the histogram it measures the frame with, the same one the
-     Live adjustments panel uses; video-check.js is the verdict. Both before it,
+     Picture panel uses; video-check.js is the verdict. Both before it,
      and both guarded, so a build missing either leaves the page as it was. -->
 <script src="/a/mj-luma.js"></script>
 <script src="/a/video-check.js"></script>

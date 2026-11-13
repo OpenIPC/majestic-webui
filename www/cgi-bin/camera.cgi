@@ -53,13 +53,14 @@ fi
 # the same pads in the same order everywhere.
 boot_soc=$(printf '%s' "$soc" | mj_json_escape)
 
-boot_sensors=""
-if [ -d /etc/sensors ]; then
-	for f in $(find /etc/sensors -maxdepth 1 -type f 2>/dev/null); do
-		e=$(echo -n "$f" | mj_json_escape)
-		boot_sensors="${boot_sensors}${boot_sensors:+,}\"${e}\""
-	done
-fi
+# The camera's time zone, as the Time page set it. The Day / Night page offers
+# the city it is named after as a first guess at where the camera is, for the
+# sun -- a browser on plain HTTP will not give the page a location itself.
+# Control characters out first: mj_json_escape escapes what can end the
+# script block, not a newline, and /etc/timezone is written by a form -- a zone
+# name with a line break in it would leave the blob unparseable and the whole
+# settings page undrawn. No zone name has one.
+boot_tz=$(printf '%s' "$tz_name" | tr -d '\000-\037' | mj_json_escape)
 
 # The fonts the camera can draw the overlay with. One face ships with the
 # firmware; the point of listing rather than hardcoding is the ones an owner
@@ -117,8 +118,17 @@ boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escap
 	# have meant regenerating it.
 	%>
 	<div class="col-12 col-md-3">
-		<div class="sticky-md-top">
+		<div class="sticky-md-top" id="mj-rail">
 			<h2 class="mj-rail-title"><%= $page_title %></h2>
+			<%
+			# Below md the tree folds behind this, so a phone opens on the section
+			# rather than on a screen of menu (#587). Hidden until mj-settings.js
+			# names the section in it: with no JS the tree simply stays open.
+			%>
+			<button type="button" class="mj-rail-toggle" id="mj-rail-toggle" hidden
+				aria-expanded="false" aria-controls="mj-search-wrap mj-settings-nav">
+				<span class="mj-rail-where"></span><span class="mj-tree-caret"></span>
+			</button>
 			<%
 			# Hidden until mj-settings.js unhides it: with no JS the box would be
 			# a control that silently does nothing.
@@ -133,7 +143,7 @@ boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escap
 	</div>
 
 	<div class="col-12 col-md-9" id="mj-settings-form-col">
-		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>],"motor":{"available":<%= $boot_motor_available %>,"backend":"<%= $boot_motor_backend %>","axes":"<%= $boot_motor_axes %>","af":<%= $boot_motor_af %>}}</script>
+		<script type="application/json" id="mj-settings-boot">{"tab":"<%= $label %>","soc":"<%= $boot_soc %>","tz":"<%= $boot_tz %>","labels":{<%= $labels %>},"exclude":[<%= $boot_exclude %>],"sensors":[<%= $boot_sensors %>],"fonts":[<%= $boot_fonts %>],"motor":{"available":<%= $boot_motor_available %>,"backend":"<%= $boot_motor_backend %>","axes":"<%= $boot_motor_axes %>","af":<%= $boot_motor_af %>}}</script>
 
 		<%
 		# No page-level heading any more: one section is shown at a time and its
@@ -148,6 +158,7 @@ boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escap
 
 <script src="/a/preview.js"></script>
 <script src="/a/preview-signal.js"></script>
+<script src="/a/preview-ice.js"></script>
 <script src="/a/preview-datachannel.js"></script>
 <script src="/a/preview-webrtc.js"></script>
 <script src="/a/preview-swap.js"></script>
@@ -167,7 +178,7 @@ boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escap
 # The camera picture as an embeddable stage: it builds the video/canvas slots,
 # runs the transport ladder over the four scripts above, and hands back a
 # handle. Any section that wants to be looked at while it is changed mounts one;
-# the Live adjustments leaf is the first, and it is not meant to be the last.
+# the Picture leaf is the first, and it is not meant to be the last.
 # Not deferred, because mj-settings.js (which is) calls into it at render time.
 %>
 <script src="/a/mj-preview.js"></script>
@@ -177,6 +188,14 @@ boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escap
 %>
 <script src="/a/mj-luma.js"></script>
 <%
+# What automatic tone tuning is doing, said in a sentence, and which knobs the
+# camera is holding away from the operator's own values. Its own file for the
+# reason ircut-check.js is: it renders a confident sentence whichever branch it
+# takes, and reaching most of those branches on a real camera needs fog or
+# darkness. tests/tone-check.test.js drives every one of them.
+%>
+<script src="/a/tone-check.js" defer></script>
+<%
 # The Audio section's soundcheck: the measurement, the verdict table and the
 # loop that chooses a level. Its own file because every tier of it fails
 # silently, and tests/audio-check.test.js drives all of them without a camera.
@@ -185,9 +204,25 @@ boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escap
 %>
 <script src="/a/audio-check.js" defer></script>
 <script src="/a/ircut-check.js" defer></script>
+<script src="/a/rc-check.js" defer></script>
 <script src="/a/ircut-map.js" defer></script>
 <script src="/a/ircut-pads.js" defer></script>
 <script src="/a/ircut-scan.js" defer></script>
+<script src="/a/pin-sweep.js" defer></script>
+<script src="/a/pin-hunt.js" defer></script>
+<%
+# The sun on the Day / Night page: reading a place out of what an owner
+# pastes, and the twilight strip that chooses the angle. The zone table
+# (tz-places.js) is not listed: it is fetched only when a guess is asked for.
+%>
+<script src="/a/sun-place.js" defer></script>
+<script src="/a/sun-panel.js" defer></script>
+<%
+# The pins page: the chip on the board, drawn from the pad table the camera
+# reports at /api/v1/pinmux. Its own file, and pure where it can be, so
+# tests/pins.test.js can ask it how a pad count is dealt round the four sides.
+%>
+<script src="/a/mj-pins.js" defer></script>
 <%
 # The Day/Night section's light-monitor chart shares the dashboard's chart
 # primitives rather than growing its own.
@@ -200,13 +235,47 @@ boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escap
 %>
 <script src="/a/mj-tree.js" defer></script>
 <%
+# Which of a field's three texts goes where, and whether the row needs the "?"
+# that opens the rest. Its own file for the reason mj-tree.js is: every answer
+# it gives produces a page that looks entirely ordinary when it is wrong -- a
+# mark that opens nothing, a hint cut where nothing was hidden, a search that
+# quietly stops covering the words it used to -- and only a module can be asked
+# by a test. Without it the page keeps the two-tier hints it always drew.
+%>
+<script src="/a/mj-help.js" defer></script>
+<%
+# Where the rail's list has to sit and whether a pick has to move the page. Its
+# own file for the reason mj-fps.js is: rectangle arithmetic that fails silently
+# — a list scrolled to the wrong offset is still a list — and tests/rail.test.js
+# is what can ask it without a camera carrying enough sections to overflow a
+# window.
+%>
+<script src="/a/mj-rail.js" defer></script>
+<%
 # What frame rate the camera reaches at each resolution. Its own file, and pure,
 # so tests/fps-caps.test.js can ask it: a control bounded wrongly is still a
 # control, and reproducing one needs a camera with more than one sensor mode.
 %>
 <script src="/a/mj-fps.js"></script>
+<%
+# What a number field the camera runs by itself says while it is empty, and its
+# name in the mode the camera is in (#582). Its own file, and pure, so
+# tests/exposure.test.js can ask it: a placeholder quoting the wrong multiplier
+# is still a placeholder.
+%>
+<script src="/a/mj-exposure.js" defer></script>
+<%
+# Which spelling of the OSD template's codes this camera reads, and what it
+# does with one it does not know. Its own file, and pure, so
+# tests/osd-codes.test.js can ask it.
+%>
+<script src="/a/mj-osd-codes.js" defer></script>
 <script src="/a/mj-region.js" defer></script>
+<script src="/a/mj-line.js" defer></script>
+<% [ -f /var/www/a/ptz-follow.js ] && echo '<script src="/a/ptz-follow.js" defer></script>' %>
+<script src="/a/analytics-overlay.js" defer></script>
 <script src="/a/mj-servers.js" defer></script>
+<script src="/a/mj-table.js" defer></script>
 <script src="/a/mj-outgoing.js" defer></script>
 <%
 # Where the overlay sits. Its own file for the same reason the tree is: the
@@ -216,6 +285,12 @@ boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escap
 %>
 <script src="/a/mj-place.js" defer></script>
 <script src="/a/mj-queue.js" defer></script>
+<%
+# The NETIP password is stored as the hash its clients send, so the page hashes
+# what the owner types. Its own file so tests/netip-hash.test.js can pin it: a
+# wrong hash saves without complaint and only shows as a refused client.
+%>
+<script src="/a/netip-hash.js" defer></script>
 <script src="/a/mj-settings.js" defer></script>
 
 <% fi %>

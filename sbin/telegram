@@ -1,5 +1,7 @@
 #!/bin/sh
-[ -e "/etc/webui/telegram.conf" ] && source /etc/webui/telegram.conf
+# `.` rather than `source`: busybox ash takes either, but /bin/sh on a
+# developer machine is often dash, which has only the POSIX spelling.
+[ -e "/etc/webui/telegram.conf" ] && . /etc/webui/telegram.conf
 
 if [ "$telegram_enabled" != "true" ]; then
 	echo "Sending to Telegram is not enabled"
@@ -31,52 +33,200 @@ fi
 workdir=$(mktemp -d /tmp/telegram.XXXXXX) || exit 1
 trap 'rm -rf "$workdir"' EXIT INT TERM
 
+# What to send, in the order the answers are allowed to win: the caller's file,
+# the caller's word, then the configuration.
+#
+# --clip and --image are for a webhook that knows what it wants -- a doorbell
+# button asking for video, a dashboard asking for a thumbnail -- and are read
+# before the path, because a path is the one argument that means "send this,
+# I have already made it".
+mode=config
+case "$1" in
+--clip)
+	mode=clip
+	shift
+	;;
+--image)
+	mode=image
+	shift
+	;;
+--text)
+	# A message rather than a picture, read from stdin: what sms-forward
+	# hands over. Never the caption -- the text is the whole of it.
+	mode=text
+	shift
+	;;
+esac
+
+# A clip of one's own: how many seconds of it, clamped.
+#
+# A configured value is an operator's, so it is checked rather than trusted --
+# it reaches a URL and an arithmetic expansion, and the page that usually
+# writes it is not the only thing that can.
+clip_seconds=$telegram_video_seconds
+case "$clip_seconds" in
+'' | *[!0-9]* | ????*) clip_seconds=10 ;;
+esac
+[ "$clip_seconds" -lt 1 ] && clip_seconds=10
+[ "$clip_seconds" -gt 60 ] && clip_seconds=60
+
 filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
-if [ "$telegram_heif" = "true" ]; then
-	snapshot=$workdir/${filename}.heif
-	wget -q -T1 localhost/image.heif -O "$snapshot"
+
+# Called with a path, send that file instead of taking a picture. That is how
+# majestic hands over a finished recording, and the recording is the whole
+# point of the call: a still taken now shows what the camera can see now, not
+# what set the recorder off a minute ago.
+#
+# The file belongs to whoever called, so it is never put in the workdir and
+# never removed -- the trap above only takes away what this script created.
+if [ "$mode" = "text" ]; then
+	cat > "$workdir/text"
+	if [ ! -s "$workdir/text" ]; then
+		echo "Nothing to send"
+		exit 1
+	fi
+elif [ -n "$1" ]; then
+	snapshot=$1
+	if [ ! -s "$snapshot" ]; then
+		echo "Nothing to send: $snapshot"
+		exit 1
+	fi
+elif [ "$mode" = "clip" ] ||
+	{ [ "$mode" = "config" ] && [ "$telegram_video" = "true" ]; }; then
+	# The camera records this one itself. It needs no card and no recorder --
+	# /video.mp4 holds the muxer up for as long as this request is open and
+	# gives it back afterwards -- so it is the one way a camera with no storage
+	# can send what it saw rather than what it can see now.
+	#
+	# ?pre= asks for the seconds BEFORE the request as well, and is usually
+	# answered with none. The camera holds a run-up only while another
+	# request that asked for one is open -- in practice another send still
+	# running -- so a lone one starts at the trigger. Watching the Live page
+	# does not make one: that is WebRTC or MSE, and neither asks this
+	# endpoint for anything. Measured on an hi3516ev300, a second send six
+	# seconds into a ten-second capture opened four seconds earlier than it
+	# was started; the first got nothing. The response says which, and so
+	# does the line printed below.
+	#
+	# The deadline is the clip plus half a minute: ?duration= counts media
+	# rather than wall clock, the first fragment can be a GOP away, and the cut
+	# lands on a whole fragment after that.
+	snapshot=$workdir/${filename}.mp4
+	http=$(curl --silent --show-error \
+		--max-time $((clip_seconds + 30)) \
+		--dump-header "$workdir/clip.head" \
+		--output "$snapshot" --write-out '%{http_code}' \
+		"localhost/video.mp4?pre=${clip_seconds}&duration=${clip_seconds}")
+	rc=$?
+
+	# Three ways this is not a clip, and the first is the one a status line
+	# cannot show. curl writes the code it was given the moment the headers
+	# arrive, so a transfer that stalls, resets or runs into the deadline
+	# after a 200 leaves a partial file behind a successful-looking status.
+	# Its own exit status is what says the body arrived whole, and a
+	# half-written video is worse than no video: it plays, up to the point
+	# where it stops, and nothing about it says it was cut.
+	#
+	# An empty 200 is a refusal too -- a reply that ends before it carries a
+	# fragment is the shape a torn-down pipeline leaves behind.
+	if [ "$rc" -ne 0 ]; then
+		echo "The clip did not arrive whole (curl exit ${rc})"
+		exit 1
+	fi
+	if [ "$http" != "200" ] || [ ! -s "$snapshot" ]; then
+		echo "The camera would not record a clip (HTTP ${http:-none})"
+		exit 1
+	fi
+
+	# The camera says how much of the clip came from before the request. An
+	# ABSENT header is not a run-up of zero -- it is a camera that did not
+	# say -- so the sentence loses the clause rather than inventing a figure.
+	run_up=$(sed -n 's/^[Xx]-[Pp]re[Rr]oll-[Ss]econds:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+		"$workdir/clip.head")
+	if [ -n "$run_up" ]; then
+		echo "Recorded ${clip_seconds}s, run-up ${run_up}s"
+	else
+		echo "Recorded ${clip_seconds}s"
+	fi
 else
-	snapshot=$workdir/${filename}.jpg
-	wget -q -T1 localhost/image.jpg -O "$snapshot"
+	if [ "$telegram_heif" = "true" ]; then
+		snapshot=$workdir/${filename}.heif
+		wget -q -T1 localhost/image.heif -O "$snapshot"
+	else
+		snapshot=$workdir/${filename}.jpg
+		wget -q -T1 localhost/image.jpg -O "$snapshot"
+	fi
+
+	if [ ! -e "$snapshot" ]; then
+		echo "Snapshot file not found"
+		exit 1
+	fi
 fi
 
-if [ ! -e "$snapshot" ]; then
-	echo "Snapshot file not found"
-	exit 1
-fi
 
-command="curl --verbose"
-command="${command} --connect-timeout 100"
-command="${command} --max-time 100"
+# An argument list, not a command line handed to eval.
+#
+# Every value below crosses into curl from somewhere a person can type: the
+# snapshot path is a recording name built from an operator's strftime pattern,
+# the message is free prose, and the token, chat, thread and proxy credentials
+# all come off the extension pages. The version this replaced pasted them into
+# one string and eval'd it, which made a single quote anywhere a way to end the
+# quoting and hand the rest of the upload to sh. Two of the values were escaped
+# by hand against exactly that; the other five were not (#547).
+#
+# Passing "$@" retires the question. Nothing here is re-parsed by a shell, so
+# no value needs escaping and none can be split, globbed or truncated -- and
+# the hand-rolled escaping those two carried is gone with the eval that
+# required it.
+#
+# No --verbose. It writes the request line to stderr, and the request line
+# carries the bot token -- which went nowhere while this ran from cron, and
+# goes wherever the caller's stderr goes now that a hook calls it per clip.
+# The response body is printed below either way, and the exit status is the
+# answer.
+set -- curl --silent --show-error --connect-timeout 100 --max-time 100
 
 if [ "$telegram_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
-	source /etc/webui/proxy.conf
-	command="${command} --socks5-hostname ${socks5_host}:${socks5_port}"
-	command="${command} --proxy-user ${socks5_username}:${socks5_password}"
+	. /etc/webui/proxy.conf
+	set -- "$@" --socks5-hostname "${socks5_host}:${socks5_port}"
+	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
 fi
 
-command="${command} -F 'chat_id=${telegram_channel}'"
+set -- "$@" -F "chat_id=${telegram_channel}"
 if [ -n "$telegram_thread_id" ]; then
-	command="${command} -F 'message_thread_id=${telegram_thread_id}'"
-fi 
-command="${command} --url https://api.telegram.org/bot${telegram_token}"
+	set -- "$@" -F "message_thread_id=${telegram_thread_id}"
+fi
 
 # HEIF is not a valid sendPhoto format (Telegram only accepts JPEG/PNG/GIF/WEBP),
-# so always send it via sendDocument.
-if [ "$telegram_document" = "true" ] || [ "${snapshot##*.}" = "heif" ]; then
-	command="${command}/sendDocument"
-	command="${command} -F 'document=@${snapshot}'"
-	command="${command} -F 'caption=${telegram_message}'"
+# so always send it via sendDocument. A clip goes to sendVideo, which is what
+# gives the reader a player rather than a file to download first -- unless the
+# document switch is on, which says the sender wants the bytes untouched.
+#
+# The method now picks the endpoint and the file field into variables, because
+# the URL is one argument rather than the tail of a string being appended to.
+# A message goes in as a file too: `text=<file` is curl reading the field's
+# value from it, so the text is never an argument and has no length limit
+# but Telegram's own.
+if [ "$mode" = "text" ]; then
+	method=sendMessage
+	set -- "$@" -F "text=<$workdir/text"
+elif [ "$telegram_document" = "true" ] || [ "${snapshot##*.}" = "heif" ]; then
+	method=sendDocument
+	set -- "$@" -F "document=@${snapshot}"
+elif [ "${snapshot##*.}" = "mp4" ]; then
+	method=sendVideo
+	set -- "$@" -F "video=@${snapshot}" -F "supports_streaming=true"
 else
-	command="${command}/sendPhoto"
-	command="${command} -F 'photo=@${snapshot}'"
-	command="${command} -F 'caption=${telegram_message}'"
+	method=sendPhoto
+	set -- "$@" -F "photo=@${snapshot}"
 fi
+[ "$mode" = "text" ] || set -- "$@" -F "caption=${telegram_message}"
+set -- "$@" --url "https://api.telegram.org/bot${telegram_token}/${method}"
 
 # The response body still goes to stdout for anyone running this by hand or out
 # of cron. What is new is the exit status: this used to `exit 0` unconditionally,
 # so a rejected send reported success and telegram.cgi's ?send=image webhook
-# had to dig `ok` out of the JSON body with jsonfilter to find out otherwise.
+# had to dig `ok` out of the JSON body to find out otherwise.
 # Telegram answers a rejected send with 4xx, so the HTTP code alone settles it
 # and the camera no longer needs a JSON parser on flash for this.
 #
@@ -87,9 +237,9 @@ fi
 # The command line is no longer echoed. It carries the bot token, and printing it
 # was the only reason the webhook had to filter its own output before parsing it.
 body=$workdir/response.json
-command="${command} --output '${body}' --write-out '%{http_code}'"
+set -- "$@" --output "$body" --write-out '%{http_code}'
 
-http=$(eval "$command")
+http=$("$@")
 [ -s "$body" ] && cat "$body"
 
 case "$http" in

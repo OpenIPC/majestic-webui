@@ -111,6 +111,15 @@ printf '%s' \
 		     picture plays, so the invitation sits over the scene it will resume.
 		     Hidden until then. -->
 		<img id="mj-snapshot" class="mj-stage-media" alt="" hidden>
+		<!-- The uncompressed still, over the live picture while it is up.
+		     Deliberately NOT .mj-stage-media: preview-zoom.js sizes every one
+		     of those to the whole FRAME at the current zoom, and this picture
+		     is already only the part of the frame on screen. Wearing that class
+		     it was magnified a second time by the zoom it had itself been
+		     cropped to -- at 248% it showed a fifth of what it replaced, and
+		     looked plausible doing it. It fills the stage instead, letterboxed,
+		     which is where the same rectangle already was. -->
+		<img id="mj-still" class="mj-still-media" alt="Uncompressed still" hidden>
 		<!-- Tap-to-play. Some browsers refuse to autoplay even a muted picture
 		     until the page has been interacted with, and Opera for Android parks
 		     it on its first frame without ever rejecting the play() that would
@@ -196,10 +205,48 @@ printf '%s' \
 		     text lands; the × is the keyboard's dismissal (click-anywhere
 		     only serves a pointer) and focusing it pins the toast the same
 		     way hovering does. -->
+		<!-- What the still is, and how old. A frozen picture that reads as a
+		     live one is the single dangerous thing this feature can do, so the
+		     age keeps counting for as long as the still is up rather than being
+		     stated once while nobody is worried. Borrows the adaptation toast's
+		     surface: same stack, same glass, no × because the picture itself
+		     dismisses it. -->
+		<p id="mj-still-note" class="mj-adapt-toast small" role="status" hidden></p>
+		<!-- What the peer control has to say (preview-peer.js): why the other
+		     camera's picture could not be fetched, or -- once -- the pairing
+		     form that lets this camera fetch it. Same surface as the still's
+		     note. -->
+		<p id="mj-peer-note" class="mj-adapt-toast small" role="status" hidden></p>
+		<!-- The focus-by-ear readout (preview-focus.js): the two numbers the
+		     sound encodes, for whoever can look, and the one button the sound
+		     cannot replace. Big digits, because the reader is at arm's length
+		     if there is one. No percentage and no grade: the statistic has no
+		     scale between chips (the Focus note in preview-stats.js). The word
+		     is the live region, not the number, which moves five times a
+		     second. -->
+		<div id="mj-ear-card" class="mj-adapt-toast mj-ear-card small" hidden>
+			<b class="mj-ear-num" id="mj-ear-now">–</b>
+			<span class="mj-ear-sub">best <b id="mj-ear-best">–</b></span>
+			<span class="mj-ear-word" id="mj-ear-word" role="status"></span>
+			<!-- Part of the picture. Hidden until the camera has answered with
+			     its focus grid; preview-focus.js unhides it. The same icon as
+			     the bar's Area, because it is the same gesture: press, then
+			     drag on the picture. -->
+			<button type="button" class="mj-hud-btn" id="mj-ear-area" aria-pressed="false" hidden
+				title="Listen to part of the picture: press, then drag a rectangle over it. A click instead of a drag keeps the whole frame; pressing again goes back to the whole frame.">
+				<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<rect x="3" y="4.4" width="14" height="11.2" rx="1.2" stroke-dasharray="3 2.2"></rect>
+					<path d="M10 7.6v4.8M7.6 10h4.8"></path>
+				</svg>
+				<span>Area</span>
+			</button>
+			<button type="button" class="mj-hud-btn" id="mj-ear-reset">Start over</button>
+		</div>
+		<p id="mj-ear-note" class="mj-adapt-toast small" role="status" hidden></p>
 		<p id="mj-adapt" class="mj-adapt-toast small" role="status" hidden>
 			<span id="mj-adapt-rates" class="mj-adapt-rates"></span>
 			<span id="mj-adapt-why" class="mj-adapt-why"></span>
-			<button type="button" class="mj-adapt-close" aria-label="Dismiss">×</button>
+			<button type="button" class="mj-adapt-close" aria-label="Stop showing bitrate changes" title="Stop showing bitrate changes">×</button>
 		</p>
 		<!-- The served-channel message (preview-page.js): why the channel the
 		     viewer picked is not the one playing, from the camera's own
@@ -277,6 +324,26 @@ printf '%s' \
 			     Armed rather than modal: one drag, then it disarms itself.
 			     A mode you can forget you are in is the wrong thing to put
 			     over a live picture that also steers a camera. -->
+			<!-- Detail. The one thing on this bar that stops the picture, so it
+			     says so in a word and lights while it holds one. Shipped hidden
+			     and unhidden only by a camera that answered the probe in
+			     preview-still.js, because a control that offers the best
+			     possible picture and then cannot produce one is worse than no
+			     control. -->
+			<span class="mj-hud mj-tog-wrap" id="mj-detail-ctl" hidden>
+				<input type="checkbox" class="mj-tog-in" id="mj-detail" autocomplete="off">
+				<label class="mj-tog" for="mj-detail"
+					title="Freeze the part of the scene you are looking at and show it uncompressed, at the main stream's full resolution — no quantiser, no encoder, no enlargement. Trades motion for detail: nothing moves while it is up. Esc or a click returns to live, and so does any zoom or pan.">
+					<span class="mj-led"></span>
+					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<circle cx="8.8" cy="8.8" r="5.2"></circle>
+						<path d="M12.6 12.6 17 17"></path>
+						<path d="M6.9 8.8h3.8M8.8 6.9v3.8"></path>
+					</svg>
+					<span class="mj-tog-t">Detail</span>
+				</label>
+			</span>
+
 			<span class="mj-hud mj-tog-wrap" id="mj-area-ctl" hidden>
 				<input type="checkbox" class="mj-tog-in" id="mj-area" autocomplete="off">
 				<label class="mj-tog" for="mj-area"
@@ -288,6 +355,27 @@ printf '%s' \
 					</svg>
 					<span class="mj-tog-t">Area</span>
 				</label>
+			</span>
+
+			<!-- Peer. Switch it on and the other camera's outline is drawn on
+			     this picture; click inside it and that camera's live picture
+			     is laid over exactly that quadrilateral, aligned with this one
+			     (preview-peer.js). Shipped hidden and unhidden only by a camera
+			     that has both the endpoint and a calibrated peer; the picker
+			     shows only with two or more. -->
+			<span class="mj-hud mj-tog-wrap" id="mj-peer-ctl" hidden>
+				<input type="checkbox" class="mj-tog-in" id="mj-peer" autocomplete="off">
+				<label class="mj-tog" for="mj-peer"
+					title="See another camera's view of this scene. Its outline appears on the picture; click inside it and that camera's live picture is laid over the outline, aligned with this one. Zoom as usual to look closer. Click again or press Esc to take it away.">
+					<span class="mj-led"></span>
+					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<rect x="2.5" y="5" width="8" height="10" rx="1.2"></rect>
+						<rect x="12.5" y="7" width="5" height="6" rx="1"></rect>
+						<path d="M10.5 10h2"></path>
+					</svg>
+					<span class="mj-tog-t">Peer</span>
+				</label>
+				<select id="mj-peer-pick" class="mj-peer-pick" aria-label="Which camera" hidden></select>
 			</span>
 
 			<!-- Which camera. Empty, and built by preview-page.js from
@@ -365,6 +453,25 @@ printf '%s' \
 				<input type="radio" class="mj-seg-in" name="mj-transport" id="mj-transport-m" autocomplete="off">
 				<label class="mj-seg-lbl" for="mj-transport-m" id="mj-transport-m-lbl"
 					title="Plain buffered playback. A couple of seconds behind, but nothing adapts and nothing negotiates.">MSE</label>
+			</span>
+
+			<!-- Focus by ear (preview-focus.js). Shipped hidden; unhidden only once
+			     the heartbeat has shown this camera measures focus at all, and only
+			     where the browser can make a sound. Hear the lens rather than read
+			     it: beeps come faster and higher the closer the picture is to the
+			     best it has been, a low note says the lens has gone past it, one
+			     held tone says it is back on it. -->
+			<span class="mj-hud mj-tog-wrap" id="mj-ear-ctl" hidden>
+				<input type="checkbox" class="mj-tog-in" id="mj-ear" autocomplete="off">
+				<label class="mj-tog" for="mj-ear"
+					title="Hear the focus while you turn the lens. Beeps come faster and higher as the picture nears the best it has been; a low note means you have gone past it; a held tone means you are back on it. Press Start over after changing zoom.">
+					<span class="mj-led"></span>
+					<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M6.5 8.4a3.5 3.5 0 0 1 7 0c0 2.2-2.2 2.6-2.2 4.6a1.6 1.6 0 0 1-3.2 0"></path>
+						<path d="M4 6.4a6.6 6.6 0 0 1 12 0"></path>
+					</svg>
+					<span class="mj-tog-t">By ear</span>
+				</label>
 			</span>
 
 			<span class="mj-hud mj-tog-wrap" id="mj-stats-ctl" hidden>

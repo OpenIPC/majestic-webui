@@ -10,6 +10,8 @@
 // the viewport at 390px (and the same on time.cgi), and a grid row half empty.
 //
 //   WEBUI_LOGIN=root:pw node tools/check-layout.mjs http://<camera>/cgi-bin/network.cgi
+//   WEBUI_LOGIN=root:pw node tools/check-layout.mjs --open "Day / Night" \
+//       http://<camera>/cgi-bin/camera.cgi
 //   node tools/check-layout.mjs --self-test
 //
 // A camera needs credentials: WEBUI_LOGIN=root:secret. A chromium binary comes
@@ -57,7 +59,7 @@ if (!CHROME) {
 // Returned rather than logged so the self-test can assert on it. Each rule
 // exists because something shipped past it.
 function measure() {
-	const R = { clipped: [], overlap: [], empty: [], spill: null, title: document.title };
+	const R = { clipped: [], overlap: [], empty: [], tall: [], spill: null, title: document.title };
 	const nm = (e) =>
 		e.id
 			? '#' + e.id
@@ -144,6 +146,32 @@ function measure() {
 				R.overlap.push(`${nm(a.e)} overlaps ${nm(b.e)} by ${Math.round(ox)}x${Math.round(oy)}px`);
 		}
 
+	// A sticky box taller than the window. `position: sticky` pins the TOP of a
+	// box and does nothing else, so the part of one that does not fit is off
+	// screen at EVERY offset, and reaching it means scrolling the PAGE -- which
+	// is exactly what the sticky was there to avoid, and which carries whatever
+	// sits beside it off the top of the screen on the way. The settings rail was
+	// 1083px against a 900px window: picking a section from the bottom of the
+	// tree left the form column 282px above the fold and the answer was to
+	// scroll back up.
+	//
+	// The RENDERED box is the whole measurement and nothing exempts it. An inner
+	// scroller is the fix, but only because it is what lets the box itself fit:
+	// a scrollport inside a box that is still too tall has its own last rows
+	// below the fold, which is the same fault one layer down. So a scrolling
+	// descendant proves nothing -- an earlier cut of this rule took any of them
+	// as proof, which would have let a tall sticky holding an overflowing <pre>
+	// report clean.
+	for (const e of document.querySelectorAll('body *')) {
+		if (getComputedStyle(e).position !== 'sticky') continue;
+		const r = e.getBoundingClientRect();
+		if (r.height <= window.innerHeight) continue;
+		R.tall.push(
+			`${nm(e)}: ${Math.round(r.height)}px of sticky in a ${window.innerHeight}px window` +
+				' -- the part past the fold is unreachable without scrolling the page',
+		);
+	}
+
 	// A grid line that leaves a hole. One card alone on a second row beside
 	// half a screen of nothing reads as a mistake, because it is one.
 	for (const row of document.querySelectorAll('main .row')) {
@@ -178,6 +206,14 @@ const SELF_TEST_PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
   <div class="card" style="position:absolute;top:10px;left:10px;width:200px">A</div>
   <div class="card" style="position:absolute;top:20px;left:20px;width:200px">B</div>
   <div class="spill"></div>
+  <div class="tall-sticky" style="position:sticky;top:0;height:200vh">
+    <pre style="overflow-y:auto;height:40px;margin:0">a
+scrolling
+descendant
+that
+proves
+nothing</pre>
+  </div>
 </main></body></html>`;
 
 // Sign in the way the browser does.
@@ -214,7 +250,34 @@ async function signIn(page, url) {
 	if (status >= 400) throw new Error(`sign-in refused with HTTP ${status} — check WEBUI_LOGIN`);
 }
 
-async function run(browser, url, setContent, seen = new Set()) {
+// Press things before measuring.
+//
+// Every settings section past the first is behind a click, and so is anything
+// a button reveals -- which is to say most of what this file exists to
+// measure has never been reachable by it. A URL alone lands on the default
+// section, so a clean run said nothing at all about the other twenty.
+//
+// Matched on the VISIBLE TEXT of a leaf element, because that is what a person
+// would say: "open Day / Night, then press Find them for me". Ids drift and
+// are invisible to whoever writes the command.
+async function open(page, labels) {
+	for (const want of labels) {
+		const hit = await page.evaluate((w) => {
+			const el = [...document.querySelectorAll('a,button,li,div,span')]
+				.filter((e) => e.children.length === 0 &&
+					(e.textContent || '').trim() === w)[0];
+			if (!el) return false;
+			el.click();
+			return true;
+		}, want);
+		if (!hit) throw new Error(`nothing on the page reads "${want}"`);
+		// Sections fetch before they draw, and measuring the half-built one is
+		// how this would report a clean page that is not finished.
+		await new Promise((r) => setTimeout(r, 2500));
+	}
+}
+
+async function run(browser, url, setContent, seen = new Set(), labels = []) {
 	let bad = 0;
 	for (const [w, h, label] of VIEWPORTS) {
 		const page = await browser.newPage();
@@ -223,6 +286,17 @@ async function run(browser, url, setContent, seen = new Set()) {
 		let res = null;
 		if (setContent) await page.setContent(url);
 		else res = await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+		if (!setContent && labels.length) {
+			try {
+				await open(page, labels);
+			} catch (e) {
+				console.log(`\n  ${label} ${w}x${h}`);
+				console.log(`    COULD NOT GET THERE — ${e.message}`);
+				await page.close();
+				bad++;
+				continue;
+			}
+		}
 		const R = await page.evaluate(measure);
 		const landed = setContent ? null : page.url();
 		await page.close();
@@ -256,12 +330,13 @@ async function run(browser, url, setContent, seen = new Set()) {
 			...R.clipped.map((m) => `clipped: ${m}`),
 			...R.overlap.map((m) => `overlap: ${m}`),
 			...R.empty.map((m) => `empty:   ${m}`),
+			...R.tall.map((m) => `tall:    ${m}`),
 		];
 		if (!found.length) console.log('    clean');
 		found.forEach((m) => console.log('    ' + m));
 		bad += found.length;
 		if (R.spill) seen.add('spill');
-		for (const k of ['clipped', 'overlap', 'empty']) if (R[k].length) seen.add(k);
+		for (const k of ['clipped', 'overlap', 'empty', 'tall']) if (R[k].length) seen.add(k);
 	}
 	return bad;
 }
@@ -274,14 +349,14 @@ const browser = await puppeteer.launch({
 let status = 0;
 const args = process.argv.slice(2);
 if (args[0] === '--self-test') {
-	console.log('self-test: a page with a clipped select, an overlap, a half-empty row and a spill');
+	console.log('self-test: a page with a clipped select, an overlap, a half-empty row, a spill and a tall sticky (holding a scroller that must not excuse it)');
 	const seen = new Set();
 	const found = await run(browser, SELF_TEST_PAGE, true, seen);
 	// EVERY rule has to fire, not merely some total. A count is green while a
 	// whole rule sits silent -- which is how the first cut of this shipped with
 	// its half-empty-row check never once running, because the page it was
 	// proved against had a row with a single cell and the rule needs two.
-	const want = ['spill', 'clipped', 'overlap', 'empty'];
+	const want = ['spill', 'clipped', 'overlap', 'empty', 'tall'];
 	const missing = want.filter((k) => !seen.has(k));
 	if (missing.length) {
 		console.error(`\nself-test FAILED: these rules never fired: ${missing.join(', ')}.`);
@@ -291,12 +366,23 @@ if (args[0] === '--self-test') {
 		console.log(`\nself-test ok: ${found} findings, all ${want.length} rules fired`);
 	}
 } else if (!args.length) {
-	console.error('usage: node tools/check-layout.mjs <url> [url…]   |   --self-test');
+	console.error('usage: node tools/check-layout.mjs [--open "Label" …] <url> [url…]');
+	console.error('       node tools/check-layout.mjs --self-test');
+	console.error('');
+	console.error('--open presses things before measuring, by their visible text,');
+	console.error('in order. Most of this UI is behind a click: without it a run');
+	console.error('only ever describes whichever section a page opens on.');
 	status = 2;
 } else {
-	for (const url of args) {
-		console.log(`\n=== ${url} ===`);
-		status = (await run(browser, url, false)) ? 1 : status;
+	const labels = [];
+	const urls = [];
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === '--open') labels.push(args[++i]);
+		else urls.push(args[i]);
+	}
+	for (const url of urls) {
+		console.log(`\n=== ${url}${labels.length ? ' — ' + labels.join(' → ') : ''} ===`);
+		status = (await run(browser, url, false, new Set(), labels)) ? 1 : status;
 	}
 }
 await browser.close();

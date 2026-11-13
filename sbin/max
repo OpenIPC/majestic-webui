@@ -1,0 +1,288 @@
+#!/bin/sh
+#
+# Send a picture or a clip to the MAX messenger.
+#
+# The three-step upload below, and the retry on an attachment the service has
+# not finished processing, are derived from MAX-for-OpenIPC by AT-Lee
+# (https://github.com/AT-Lee/MAX-for-OpenIPC), MIT licensed:
+#
+#   Copyright (c) 2026 AT-Lee
+#   Permission is hereby granted, free of charge, to any person obtaining a
+#   copy of this software and associated documentation files (the "Software"),
+#   to deal in the Software without restriction, including without limitation
+#   the rights to use, copy, modify, merge, publish, distribute, sublicense,
+#   and/or sell copies of the Software, and to permit persons to whom the
+#   Software is furnished to do so, subject to the following conditions: the
+#   above copyright notice and this permission notice shall be included in all
+#   copies or substantial portions of the Software.
+#
+# What is theirs is the protocol knowledge -- that MAX does not take the file
+# on the message call, and what to do when the attachment is not ready yet.
+# What is ours is everything about the camera: the capture, the contract with
+# sbin/motion-notify.sh, and the refusals. Their module also carries its own
+# capture loop, which this does not need -- it required HLS to be switched on
+# and truncated its own recording with kill -9, and neither is true of the
+# camera this ships on.
+#
+# `.` rather than `source`: busybox ash takes either, but /bin/sh on a
+# developer machine is often dash, which has only the POSIX spelling.
+[ -e "/etc/webui/max.conf" ] && . /etc/webui/max.conf
+
+if [ "$max_enabled" != "true" ]; then
+	echo "Sending to MAX is not enabled"
+	exit 1
+fi
+
+if [ -z "$max_token" ]; then
+	echo "MAX token not found"
+	exit 1
+fi
+
+if [ -z "$max_chat_id" ]; then
+	echo "MAX chat not found"
+	exit 1
+fi
+
+# Where the API lives.
+#
+# Not a setting, for the same reason api.telegram.org is not one: MAX is a
+# service you join, not one you can run, so there is nothing an owner could
+# usefully point this at. ntfy has a server field because ntfy genuinely is
+# self-hostable -- that is the difference, not a missing feature here.
+#
+# platform-api rather than the platform-api2 the published documentation
+# names: both resolve, only this one answers. Measured from a camera, which is
+# also where the certificate was checked against the firmware's own CA set.
+max_server="https://platform-api.max.ru"
+
+if [ -z "$max_caption" ]; then
+	max_message="$(hostname -s), $(date +'%F %T')"
+else
+	max_message="$(echo "$max_caption" | sed "s/%hostname/$(hostname -s)/;s/%datetime/$(date +"%F %T")/;s/%soctemp/$(ipcinfo --temp)/")"
+fi
+
+# A private directory rather than straight in /tmp: this runs as root, from
+# cron and from a webhook anyone who can reach the camera can fire, and a fully
+# predictable path is a symlink somebody else can plant.
+workdir=$(mktemp -d /tmp/max.XXXXXX) || exit 1
+trap 'rm -rf "$workdir"' EXIT INT TERM
+
+# What to send, in the order the answers are allowed to win: the caller's file,
+# the caller's word, then the configuration. Same contract as sbin/telegram,
+# which is what lets sbin/motion-notify.sh hand all three senders one capture.
+mode=config
+case "$1" in
+--clip)
+	mode=clip
+	shift
+	;;
+--image)
+	mode=image
+	shift
+	;;
+esac
+
+clip_seconds=$max_video_seconds
+case "$clip_seconds" in
+'' | *[!0-9]* | ????*) clip_seconds=10 ;;
+esac
+[ "$clip_seconds" -lt 1 ] && clip_seconds=10
+[ "$clip_seconds" -gt 60 ] && clip_seconds=60
+
+filename="$(hostname -s | tr ' ' '-')"-"$(date +'%Y%m%d-%H%M%S')"
+
+if [ -n "$1" ]; then
+	# A path is a file somebody else made -- the recording majestic has just
+	# closed, or the one capture the movement worker shares between senders.
+	# It belongs to the caller, so it is never put in the workdir and never
+	# removed: the trap only takes away what this script created.
+	snapshot=$1
+	if [ ! -s "$snapshot" ]; then
+		echo "Nothing to send: $snapshot"
+		exit 1
+	fi
+elif [ "$mode" = "clip" ] ||
+	{ [ "$mode" = "config" ] && [ "$max_video" = "true" ]; }; then
+	# The camera records this one itself. No card and no recorder needed --
+	# /video.mp4 holds the muxer up for as long as the request is open.
+	snapshot=$workdir/${filename}.mp4
+	http=$(curl --silent --show-error \
+		--max-time $((clip_seconds + 30)) \
+		--dump-header "$workdir/clip.head" \
+		--output "$snapshot" --write-out '%{http_code}' \
+		"localhost/video.mp4?pre=${clip_seconds}&duration=${clip_seconds}")
+	rc=$?
+
+	# curl writes the status the moment the headers arrive, so a transfer that
+	# stalls or hits the deadline after a 200 leaves a partial file behind a
+	# successful-looking code. Its exit status is what says the body arrived
+	# whole, and a half-written video is worse than none: it plays up to the
+	# point where it stops and nothing about it says it was cut.
+	if [ "$rc" -ne 0 ]; then
+		echo "The clip did not arrive whole (curl exit ${rc})"
+		exit 1
+	fi
+	if [ "$http" != "200" ] || [ ! -s "$snapshot" ]; then
+		echo "The camera would not record a clip (HTTP ${http:-none})"
+		exit 1
+	fi
+
+	# An ABSENT run-up header is not a run-up of zero, it is a camera that did
+	# not say, so the sentence loses the clause rather than inventing a figure.
+	run_up=$(sed -n 's/^[Xx]-[Pp]re[Rr]oll-[Ss]econds:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+		"$workdir/clip.head")
+	if [ -n "$run_up" ]; then
+		echo "Recorded ${clip_seconds}s, run-up ${run_up}s"
+	else
+		echo "Recorded ${clip_seconds}s"
+	fi
+else
+	snapshot=$workdir/${filename}.jpg
+	wget -q -T1 localhost/image.jpg -O "$snapshot"
+
+	if [ ! -s "$snapshot" ]; then
+		echo "Snapshot file not found"
+		exit 1
+	fi
+fi
+
+case "$snapshot" in
+*.mp4) kind=video ;;
+*) kind=image ;;
+esac
+
+# curl, with the proxy settings if they are wanted.
+#
+# A function rather than a string of options, because a string has to be
+# expanded unquoted to become arguments -- and a proxy password with a space or
+# a `*` in it would then be split into several arguments or matched against the
+# filenames in the working directory. The credentials are somebody's, so they
+# are passed as single arguments and never through the shell's word splitting.
+mx_curl() {
+	if [ "$max_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
+		( . /etc/webui/proxy.conf
+		  curl --silent --show-error --connect-timeout 30 --max-time 120 \
+			--socks5-hostname "${socks5_host}:${socks5_port}" \
+			--proxy-user "${socks5_username}:${socks5_password}" "$@" )
+		return $?
+	fi
+	curl --silent --show-error --connect-timeout 30 --max-time 120 "$@"
+}
+
+# Step one: ask for somewhere to put it.
+#
+# The answer differs by kind, and that is the whole reason these are not one
+# code path. For a video the reply carries the token that the message will
+# reference; for an image it carries only a URL, and the token comes back from
+# the upload itself. Measured against the live service, not inferred: a video
+# slot answers {"url","token"} and an image slot answers {"url"}.
+slot=$(mx_curl -X POST -H "Authorization: ${max_token}" \
+	"${max_server}/uploads?type=${kind}")
+upload_url=$(printf '%s' "$slot" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p' | sed 's/\\\//\//g')
+
+if [ -z "$upload_url" ]; then
+	echo "MAX would not take an upload (${slot})"
+	exit 1
+fi
+
+if [ "$kind" = video ]; then
+	token=$(printf '%s' "$slot" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+fi
+
+# Step two: the bytes. The upload host is not the API host and does not answer
+# in JSON for a video -- it returns <retval>1</retval> -- so nothing is parsed
+# out of this for that kind. For an image this reply is where the token is.
+up=$(mx_curl -X POST \
+	-F "file=@${snapshot};filename=$(basename "$snapshot")" "$upload_url")
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	echo "The upload to MAX did not finish (curl exit ${rc})"
+	exit 1
+fi
+
+if [ "$kind" = image ]; then
+	token=$(printf '%s' "$up" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+fi
+
+if [ -z "$token" ]; then
+	echo "MAX did not say where the upload went (${up})"
+	exit 1
+fi
+
+# The caption goes inside JSON, so it is encoded rather than pasted. A
+# backslash, a quote or a control character in an operator's own wording would
+# otherwise produce a body the service rejects -- and the wording is whatever
+# somebody typed on the page, or hand-edited into the file afterwards.
+#
+# Newlines first and separately: they cannot be deleted like the other control
+# characters, because deleting one runs the words either side of it together.
+# A line break in a caption is a space.
+esc_message=$(printf '%s' "$max_message" | tr '\n\r' '  ' |
+	sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/	/\\t/g' |
+	tr -d '\000-\010\013\014\016-\037')
+
+body="{\"text\":\"${esc_message}\",\"attachments\":[{\"type\":\"${kind}\",\"payload\":{\"token\":\"${token}\"}}]}"
+
+# Step three, and the one that can be too early. The service accepts the upload
+# before it has finished processing it, and answers attachment.not.ready until
+# it has. Waiting first would put that delay on every send, so this asks
+# straight away and backs off only when told to -- measured against the live
+# service, an ordinary clip went through on the first attempt.
+attempt=1
+while :; do
+	# The status comes back separately from the body: the body is needed to
+	# recognise the not-ready refusal, and the status is what says the message
+	# was actually created.
+	reply=$(mx_curl -X POST \
+		-H "Authorization: ${max_token}" \
+		-H "Content-Type: application/json" \
+		-d "$body" --write-out '\n%{http_code}' \
+		"${max_server}/messages?chat_id=${max_chat_id}")
+	rc=$?
+	http=$(printf '%s' "$reply" | sed -n '$p')
+	reply=$(printf '%s' "$reply" | sed '$d')
+
+	if [ "$rc" -ne 0 ]; then
+		echo "The message to MAX did not go (curl exit ${rc})"
+		exit 1
+	fi
+
+	case "$reply" in
+	*attachment.not.ready*) ;;
+	*) break ;;
+	esac
+
+	if [ "$attempt" -ge 5 ]; then
+		echo "MAX never finished processing the upload"
+		exit 1
+	fi
+	sleep $((attempt * 2))
+	attempt=$((attempt + 1))
+done
+
+# Created, or refused. Both are judged, because neither alone is enough.
+#
+# A bare search for "message" is not proof of anything: MAX puts a `message`
+# field in its ERRORS too -- {"code":"verify.token","message":"No access
+# token"} is what a camera with the wrong token gets back -- so a sender that
+# looked only for the word reported every rejected send as delivered, which is
+# the worst thing a notifier can do. The success reply opens the field as an
+# OBJECT, `"message":{`, where an error carries a string; that plus a 200 is
+# what is required here.
+case "$http" in
+2??) ;;
+*)
+	echo "MAX refused the message (HTTP ${http}: ${reply})"
+	exit 1
+	;;
+esac
+
+case "$reply" in
+*'"message":{'*)
+	echo "Sent to MAX"
+	exit 0
+	;;
+esac
+
+echo "MAX refused the message (${reply})"
+exit 1

@@ -80,6 +80,43 @@ if ! (
 	echo "lint: could not enter www/cgi-bin, templates unchecked" >> "$FAILS"
 fi
 
+# --- 1b. syntax with the empty stubs in -----------------------------------
+# An image without a motor driver ships p/motor.cgi EMPTY (sbin/updatewebui,
+# and a firmware build with BR2_PACKAGE_MAJESTIC_WEBUI_PTZ off), never the
+# file in this tree.
+# An empty include is not neutral: as the only thing between `then %>` and
+# `<% fi %>` it hands sh `then fi`, a syntax error, and the page stops being
+# emitted there. Live lost its whole player that way on every no-PTZ image,
+# while the pass above stayed green because it only ever sees the full file.
+# So every template that includes a stub is checked a second time against a
+# copy of the tree with the stub emptied, the way a camera has it.
+STUBS='p/motor.cgi'
+STUBTREE=$(mktemp -d) || exit 1
+trap 'rm -f "$FAILS" "$SEEN"; rm -rf "$STUBTREE"' EXIT
+if ! (
+	cp -R www/cgi-bin/. "$STUBTREE" || exit 1
+	cd "$STUBTREE" || exit 1
+	for s in $STUBS; do
+		[ -e "$s" ] || { echo "lint: stub $s is not in the tree" >> "$FAILS"; continue; }
+		: > "$s"
+	done
+	for s in $STUBS; do
+		grep -l "<%in $s %>" $(find . -name '*.cgi' | sort) /dev/null
+	done | sed 's|^\./||' | sort -u | while IFS= read -r f; do
+		echo "e" >> "$SEEN"
+		if ! out=$(haserl -d "$f" < /dev/null 2>&1); then
+			printf 'www/cgi-bin/%s (empty stubs): haserl: %s\n' "$f" "$(printf '%s' "$out" | tail -1)" >> "$FAILS"
+			continue
+		fi
+		if ! err=$(printf '%s\n' "$out" | sh -n 2>&1); then
+			printf 'www/cgi-bin/%s (empty stubs): %s\n' "$f" "$err" >> "$FAILS"
+		fi
+	done
+	exit 0
+); then
+	echo "lint: could not copy www/cgi-bin, empty-stub check did not run" >> "$FAILS"
+fi
+
 # --- 2. escaping ------------------------------------------------------------
 # CLAUDE.md: "Never <%= $userInput %> for anything that came from POST_/GET_."
 # <%= %> is sugar for echo, so request data goes to the page verbatim — an
@@ -222,17 +259,97 @@ find www -name '*.cgi' -o -name '*.js' -o -name '*.html' | sort | while IFS= rea
 		done
 done
 
+# --- 7. the sender list, in the three files that carry it -----------------
+#
+# sbin/motion-notify.sh fans a movement capture out to the senders,
+# sbin/record.sh hands them a finished recording, and p/common.cgi's
+# clip_hook_wanted decides from the same names whether the camera's hooks are
+# wired at all. They are repeated rather than sourced from one file because the
+# failure is asymmetric: a shared file that went missing would have every
+# reader believe there are no senders, and for clip_hook_wanted that answer
+# clears records.onClose and removes the movement hook -- a camera unwiring
+# itself in silence. Three words in three files cost nothing; this is what
+# stops them drifting apart.
+sender_list_mn=$(sed -n "s/^SENDERS='\([a-z0-9_ ]*\)'.*/\1/p" sbin/motion-notify.sh | head -1)
+sender_list_rec=$(sed -n 's/^for name in \([a-z0-9_ ]*\); do$/\1/p' sbin/record.sh | head -1)
+sender_list_cgi=$(sed -n 's/^[[:space:]]*for _ch_name in \([a-z0-9_ ]*\); do$/\1/p' www/cgi-bin/p/common.cgi | head -1)
+
+# A check that matched nothing is a broken selector, not a clean tree — the
+# same rule the two counts below follow.
+if [ -z "$sender_list_mn" ] || [ -z "$sender_list_rec" ] || [ -z "$sender_list_cgi" ]; then
+	echo "lint: the sender list could not be read out of all three files, so the check did not run" >> "$FAILS"
+elif [ "$sender_list_mn" != "$sender_list_rec" ] ||
+	[ "$sender_list_mn" != "$sender_list_cgi" ]; then
+	printf 'the sender lists disagree: motion-notify.sh [%s], record.sh [%s], p/common.cgi [%s]\n' \
+		"$sender_list_mn" "$sender_list_rec" "$sender_list_cgi" >> "$FAILS"
+fi
+
+# And every name needs a program behind it in both scripts that run one.
+for sender in $sender_list_mn; do
+	grep -q "^	$sender) printf " sbin/motion-notify.sh ||
+		printf 'sbin/motion-notify.sh: sender %s has no program in sender_bin\n' \
+			"$sender" >> "$FAILS"
+	grep -q "^	$sender) bin=" sbin/record.sh ||
+		printf 'sbin/record.sh: sender %s has no program\n' "$sender" >> "$FAILS"
+done
+
+# --- 8. values that reach a shell a second time ---------------------------
+# Three shapes that each hand user input back to a shell to be parsed, and each
+# of which shipped here (#547). All three are banned flat, on the same grounds
+# as the yaml-cli check above: after the change that added this section the
+# legitimate count is zero, so a match is a regression and not a judgement.
+#
+# This does NOT ban eval. Several uses are correct and deliberate: an
+# assignment (`eval val=\$$v`) does not word-split its right-hand side, a
+# lookup by a name taken from a fixed in-script list is a lookup and nothing
+# more, and p/common.cgi's ex() exists precisely to run a command. What is
+# banned is the three ways a VALUE gets re-parsed.
+#
+# Each pattern is anchored with ^[^#]* so it reads code and not prose. Stating
+# any of these rules requires naming the construct it forbids, and the first
+# draft of this section was failed by its own explanation of itself.
+
+# 8a. `eval echo $x` reads a variable by splitting and globbing it. A stored
+# password of `p@ss  word` came back with one space; one of `*` came back as a
+# directory listing. p/common.cgi's t_value does the same read with a quoted
+# printf.
+if grep -rnE '^[^#]*\beval[[:space:]]+echo\b' www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ eval echo splits and globs the value it reads: use t_value (p/common.cgi)" >> "$FAILS"
+fi
+
+# 8b. A command assembled into a string and eval'd. The values pasted in are
+# parsed as shell, so a space truncates an argument, a quote aborts the whole
+# command and a semicolon starts another one. Build an argument list with
+# `set --` and run "$@" -- sbin/max never did this and is the model.
+if grep -rnE '^[^#]*\beval[[:space:]]+"?\$\{?(command|cmd)\}?"?' www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ a command built as a string and eval'd re-parses every value in it:" >> "$FAILS"
+	echo "  accumulate arguments with set -- and run \"\$@\" (see sbin/max)" >> "$FAILS"
+fi
+
+# 8c. A value written into one of the sourced config files inside DOUBLE
+# quotes. Those files are read back with `.`, so a quote in the value truncates
+# it and leaves the remainder to be run as a command, and a $(...) in it
+# executes on every read -- which for /etc/webui/*.conf means every page load.
+# p/common.cgi's shq wraps a value so that a shell reading it gets it back
+# unchanged.
+if grep -rnE '^[^#]*=\\"\$.*>>[[:space:]]*"?\$config_file' www sbin bin 2>/dev/null >> "$FAILS"; then
+	echo "^ a config file is sourced, so a double-quoted value in it is re-expanded" >> "$FAILS"
+	echo "  on every read: write it through shq (p/common.cgi)" >> "$FAILS"
+fi
+
 ntpl=$(grep -c '^t$' "$SEEN")
+nstub=$(grep -c '^e$' "$SEEN")
 nsh=$(grep -c '^s$' "$SEEN")
 
 # Nothing to check is a broken selector, not a clean tree — the repo always has
 # both kinds of file. Without this, a find or shebang test that stopped matching
 # would report a confident pass over zero files.
 [ "$ntpl" -gt 0 ] || echo "lint: no haserl templates matched, selection is broken" >> "$FAILS"
+[ "$nstub" -gt 0 ] || echo "lint: no template includes a stub, selection is broken" >> "$FAILS"
 [ "$nsh" -gt 0 ] || echo "lint: no shell scripts matched, selection is broken" >> "$FAILS"
 
 if [ -s "$FAILS" ]; then
 	cat "$FAILS"
 	exit 1
 fi
-echo "ok: $ntpl haserl templates, $nsh shell scripts"
+echo "ok: $ntpl haserl templates ($nstub again with empty stubs), $nsh shell scripts"

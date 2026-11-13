@@ -40,14 +40,67 @@
 	// and the last green it was given stands.
 	let mnt = '';
 	let recorder = null;     // null | {absent:true} | {v:…}, as the verdict wants
+	// Where the drop counter stood when this page opened, so the banner reports
+	// footage lost while somebody has been here rather than everything since
+	// the camera booted — a total from three days ago is not news, and a banner
+	// that cannot be made to go away is one people learn to ignore.
+	let droppedAt = null;
+	// Consecutive samples with a fragment waiting. The banner's early warning
+	// is a claim about a WINDOW, and this is the window: about four seconds
+	// (QUEUED_MS), the shortest thing that is not one sample's noise, and it
+	// resets the moment the queue drains so the banner can take itself down.
+	// The SD-card page counts the same way against the same heartbeat.
+	let queuedTicks = 0;
+	// Consecutive heartbeats in which the recorder wrote nothing.
+	//
+	// The dropping verdict is a claim in the PRESENT tense — "the card cannot
+	// keep up" — and it stops being true the moment the recorder stops asking
+	// anything of the card. records.enabled is read once, at startup, so a
+	// camera whose recording is switched off while this page is open would
+	// otherwise go on showing a loss that is no longer happening, with nothing
+	// able to clear it short of a reload.
+	//
+	// Several samples rather than one: a recorder between clips writes nothing
+	// for a moment, and a banner that blinks off and back on is read as a bug
+	// rather than as precision.
+	let idleTicks = 0;
+	// Thresholds in time, counted in heartbeats at whatever pace they run
+	// (main.js mjHeartbeatTicks); 2 s each where main.js is not there to ask.
+	const beats = (ms) => (typeof mjHeartbeatTicks === 'function'
+		? mjHeartbeatTicks(ms) : Math.max(1, Math.ceil(ms / 2000)));
+	const IDLE_MS = 16000;   // the recorder idle this long before its loss is history
+	const QUEUED_MS = 4000;  // a fragment waiting this long is the early warning
 	let shown = '';          // what the slot is currently saying
 
 	function slot() { return document.getElementById(SLOT); }
 
+	// Seconds of footage dropped since this page loaded, from the counter of
+	// presentation time lost — microseconds, as the Recordings page reads it.
+	// The fragment count beside it is not seconds: fragment length is
+	// configurable, so counting fragments and calling them seconds is right
+	// only at the default.
+	function droppedSeconds() {
+		const v = recorder && recorder.v;
+		if (!v || typeof v.records_dropped_ticks_total !== 'number') return 0;
+		if (droppedAt === null) return 0;
+		return Math.max(0, (v.records_dropped_ticks_total - droppedAt) / 1e6);
+	}
+
 	function render() {
 		const el = slot();
 		if (!el) return;
-		const v = V.of(card, recorder, '', where);
+		// The dropped figure, which this banner has never passed. The verdict
+		// has said "cannot keep up — footage is being lost" since it was
+		// written, but only the Recordings page ever supplied the evidence for
+		// it, so on every other page a card that was mounted, writable and
+		// reporting itself healthy while silently discarding clips drew nothing
+		// at all. That is the one storage fault with no other symptom
+		// (OpenIPC/firmware#1747).
+		// Suppressed, not forgotten: the counter keeps its baseline, so a
+		// recorder that starts writing again reports what it loses from then
+		// on rather than re-announcing what it lost before it paused.
+		const lost = idleTicks >= beats(IDLE_MS) ? 0 : droppedSeconds();
+		const v = V.of(card, recorder, lost > 0 ? V.duration(lost) : '', where, queuedTicks >= beats(QUEUED_MS));
 		// The Dashboard's SD badge is the other place a dead card was being
 		// drawn green, and it is drawn from df, which cannot see any of this.
 		badge(v);
@@ -91,7 +144,13 @@
 			const b = row.querySelector('.mj-sd-badge');
 			const why = row.querySelector('.mj-sd-why');
 			let cls = 'text-bg-secondary';
-			if (v) cls = v.level === 'danger' ? 'text-bg-danger' : 'text-bg-warning';
+			// A deliberate swap is not amber. Mapping anything that is not
+			// danger to warning painted the Dashboard row the colour of a
+			// fault while the operator was standing at the camera doing what
+			// the page told them to.
+			if (v && v.level === 'danger') cls = 'text-bg-danger';
+			else if (v && v.level === 'info') cls = 'text-bg-secondary';
+			else if (v) cls = 'text-bg-warning';
 			else if (V.writable(card, recorder, where)) cls = 'text-bg-success';
 			if (b) b.className = 'badge flex-shrink-0 mj-sd-badge ' + cls;
 			if (why) why.textContent = v ? ' — ' + v.short : '';
@@ -142,10 +201,27 @@
 				// A failed poll is not a reading. The heartbeat says so, and
 				// turning that into "the recorder is fine" is the one answer
 				// that must never be invented.
-				if (!s || !s.ok || !s.m) { recorder = null; render(); return; }
+				// A failed poll ends the run of consecutive samples, the same
+				// rule the SD-card page follows against the same heartbeat: the
+				// warning below is about a queue that has not drained over a
+				// window, and a window with a hole in it is not that window.
+				if (!s || !s.ok || !s.m) { recorder = null; queuedTicks = 0; render(); return; }
 				const v = s.m.v;
 				recorder = typeof v.records_state === 'number'
 					? { v: v } : { absent: true };
+				if (droppedAt === null &&
+					typeof v.records_dropped_ticks_total === 'number')
+					droppedAt = v.records_dropped_ticks_total;
+				const qn = v.records_queue_fragments;
+				queuedTicks = (typeof qn === 'number' && qn > 0) ? queuedTicks + 1 : 0;
+				// Is the recorder still writing? Absent counters leave this
+				// alone: a build that does not publish them is not a camera
+				// reporting that nothing is being written.
+				const pv = s.prev && s.prev.v;
+				const b = v.records_bytes_written_total;
+				const pb = pv && pv.records_bytes_written_total;
+				if (typeof b === 'number' && typeof pb === 'number')
+					idleTicks = b > pb ? 0 : idleTicks + 1;
 				render();
 			});
 

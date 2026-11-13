@@ -11,6 +11,10 @@
 	let tempAbsent = false;
 	let cfgFps0 = null;
 	let encSetMbit = null;
+	// What video0 was asked for, as rc-check.js wants it. The camera
+	// reaches the verdict; this is only the numbers its sentences quote
+	// back, and null until the config arrives.
+	let encCfg = null;
 	let mdEnabled = false;
 	let ispEls = null;    // metric name → value <span>, built on the first good sample
 	const ispSparks = {}; // metric name → sparkline in the same row
@@ -210,20 +214,81 @@
 		paintIrcut();
 	}).catch(() => {});
 
+	// What the IR-cut test found, if this browser has ever run one. Read on
+	// every paint rather than once: a test run in another tab takes effect on
+	// the next heartbeat, and a store that has been cleared since stops
+	// counting immediately.
+	//
+	// Unreadable reads as "never tested", never as "tested and fine" — the
+	// direction that keeps asking rather than the one that goes quiet. Some
+	// privacy configurations throw on the accessor itself.
+	//
+	// This is per browser, which is the honest limit of it: the fact is a
+	// measurement made here, and the only camera-side place to put it would be
+	// a second store of the kind #367 deleted. Someone opening the Dashboard
+	// from another machine is asked the question again, and answering it there
+	// is one press.
+	//
+	// And what the record is compared against has to be the wiring the camera
+	// has NOW. mjConfig() resolves once and is cached for the life of the
+	// page, which is fine for a finding that merely describes a snapshot and
+	// not fine for one that can be SILENCED by a record: change the coils from
+	// the settings page in another tab and this one would go on matching the
+	// verdict against the assignment it loaded with. So while a record exists
+	// the wiring is re-read on a slow beat of its own. Only while one exists —
+	// a browser that has never tested has nothing that could be silenced, and
+	// pays nothing.
+	//
+	// A refresh that fails leaves the last reading standing rather than
+	// counting as a change: a failed fetch is not a fact, and a camera that
+	// cannot be reached is already saying so through the stale banner.
+	const WIRING_REFRESH_MS = 30000;
+	const IRCUT_TESTED = 'mj-ircut-tested';
+	function ircutTested() {
+		try {
+			const v = JSON.parse(localStorage.getItem(IRCUT_TESTED) || 'null');
+			// Shape-checked rather than trusted: a record from a hand edit or
+			// an older key would otherwise be compared field by field against
+			// undefined, and `undefined === undefined` would silence the
+			// banner on a camera nobody has tested.
+			return (v && typeof v.id === 'string' && typeof v.wiring === 'string')
+				? v : null;
+		} catch (e) { return null; }
+	}
+
+	// Re-read the wiring a record is judged against. Driven from the
+	// heartbeat, so it stops on its own while the camera is unreachable rather
+	// than piling up fetches at something that is not answering.
+	let wiringAt = 0;
+	function refreshWiring() {
+		if (!IC || !nmCfg || !ircutTested()) return;
+		const now = Date.now();
+		if (now - wiringAt < WIRING_REFRESH_MS) return;
+		wiringAt = now;
+		apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
+			.then(r => (r.ok ? r.json() : null))
+			.then((c) => {
+				if (!c || !Object.keys(c).length) return;
+				nmCfg = c.nightMode || {};
+				paintIrcut();
+			})
+			.catch(() => {});
+	}
+
 	// There was a dismissal here — a × that recorded "this camera has no IR-cut
 	// filter" in /etc/webui/ircut.conf through a CGI of its own, so the banner
 	// would stop asking an owner to wire a filter they do not have.
 	//
-	// It was a second way to say something majestic already stores. "Drive the
-	// IR-cut filter" off IS that statement: the daemon holds it, Day / Night
-	// shows it, a config backup carries it, every browser reads the same value,
-	// and diagnose() has always fallen silent on a camera with it off and no
-	// pads — the finding below is in the `else` of that switch. So the × said
-	// the same thing in a place nothing else could see, and everything that
-	// went wrong with it followed from the duplication: a private claim has to
-	// be invalidated when the wiring contradicts it, that invalidation ran here
-	// on a page where nobody wires anything, and it therefore never ran at the
-	// moment that mattered (#367).
+	// It was a second way to say something majestic already stores. Setting
+	// "IR-cut filter" to off IS that statement: the daemon holds it, Day /
+	// Night shows it, a config backup carries it, every browser reads the same
+	// value, and diagnose() has always fallen silent on a camera with it off
+	// and no pads — the finding below is in the `else` of that branch. So the ×
+	// said the same thing in a place nothing else could see, and everything
+	// that went wrong with it followed from the duplication: a private claim
+	// has to be invalidated when the wiring contradicts it, that invalidation
+	// ran here on a page where nobody wires anything, and it therefore never
+	// ran at the moment that mattered (#367).
 	//
 	// One statement, in the camera's own configuration. Nothing to keep in
 	// step, and nothing left that can go stale.
@@ -253,7 +318,12 @@
 	function renderIrcut(s) {
 		if (!IC || !nmCfg) return;
 		ircutSample = s;
-		ircutTrackNow = ircutTrack.push(s, performance.now() / 1000);
+		// Whether a day/night disagreement means anything on this camera. A
+		// filter told not to follow day/night is SUPPOSED to differ from it,
+		// so the clock behind the conflict finding must not run — see the
+		// tracker's own note. Absent reads as following, which is the default.
+		ircutTrackNow = ircutTrack.push(s, performance.now() / 1000,
+			!nmCfg || IC.follows(nmCfg));
 		paintIrcut();
 	}
 
@@ -265,7 +335,7 @@
 		// is down is never. Every other caller already refused to paint here;
 		// this refuses centrally so a new one cannot forget.
 		if (!IC || !nmCfg) return;
-		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic)
+		const f = IC.diagnose(nmCfg, ircutSample, ircutTrackNow, ircutPic, ircutTested())
 			.filter(x => x.level !== 'info')[0];
 
 		if (f) {
@@ -370,10 +440,18 @@
 		},
 	};
 
-	// How many polls running a chosen measure may say nothing before the page
-	// stops believing in it. At the 2s heartbeat this is about a minute: far
-	// longer than a re-association, far shorter than sitting and watching.
-	const WIFI_LAPSE = 30;
+	// Heartbeats make thresholds in time, whichever pace they run at (main.js
+	// mjHeartbeatTicks); 2 s each where main.js is not there to ask.
+	const beats = (ms) => (typeof mjHeartbeatTicks === 'function'
+		? mjHeartbeatTicks(ms) : Math.max(1, Math.ceil(ms / 2000)));
+	// Failed polls before "not responding" shows: about four seconds' worth,
+	// so one dropped poll does not flap the banner -- two at the 2 s
+	// heartbeat, one at a guest's 10 s, which is already that long unanswered.
+	const failsShown = () => beats(4000);
+	// How long a chosen measure may say nothing before the page stops
+	// believing in it: about a minute, far longer than a re-association, far
+	// shorter than sitting and watching.
+	const WIFI_LAPSE_MS = 60000;
 	let wifiMissing = 0;
 
 	// A level wins the moment one appears, and the choice is otherwise kept —
@@ -459,7 +537,7 @@
 		}
 		const cur = WIFI_SCALE[wifiUnit];
 		wifiMissing = (cur && !(cur.key in v)) ? wifiMissing + 1 : 0;
-		const unit = wifiMeasure(v, wifiUnit, wifiMissing >= WIFI_LAPSE);
+		const unit = wifiMeasure(v, wifiUnit, wifiMissing >= beats(WIFI_LAPSE_MS));
 		if (unit !== wifiUnit) mountWifi(unit);
 		// A KPI tile is a headline number with a unit under a caption. An
 		// adapter that reports no signal reading has no headline to give it,
@@ -512,6 +590,65 @@
 			});
 		}
 		const sub = $('#st-wifi-sub');
+		if (sub) sub.textContent = parts.join(' · ');
+	}
+
+	// ── cellular modem ──────────────────────────────────────────────────────
+	// The modem_* gauges majestic reads over the modem's AT port; scale, grade
+	// and sentences are main.js's (MJ_LTE_SCALE, mjLteGrade, mjLteState),
+	// shared with the live player and the Network page. Mounted on the first
+	// sample that carries one and hidden again when they go — the modem
+	// powered off, or unplugged.
+	let chLte = null;
+
+	function mountLte() {
+		const sc = MJ_LTE_SCALE;
+		sparks.lte = makeSpark('#spark-lte', C1, null, null);
+		chLte = makeChart('#ch-lte', {
+			h: 110, lo: sc.lo, hi: sc.hi, colors: [C1],
+			bands: [
+				{ from: sc.good, to: sc.hi, color: 'rgba(47,182,115,.07)', label: 'good' },
+				{ from: sc.fair, to: sc.good, color: 'rgba(255,193,7,.06)', label: 'fair' },
+				{ from: sc.lo, to: sc.fair, color: 'rgba(224,84,78,.06)', label: 'weak' },
+			],
+		});
+	}
+
+	function updateLte(s, v) {
+		const st = mjLteState(v, s.m && s.m.info.modem_info);
+		const tile = $('#st-lte-tile'), panel = $('#st-lte-panel');
+		if (panel) panel.hidden = !st;
+		if (!st) {
+			if (tile) tile.hidden = true;
+			return;
+		}
+		if (!chLte) mountLte();
+		const r = (MJ_LTE_SCALE.key in v) ? v[MJ_LTE_SCALE.key] : null;
+		// No headline without a reading: a modem still searching has no RSRP,
+		// and a tile showing a dash under "LTE signal" says nothing true.
+		if (tile) tile.hidden = r == null;
+		const val = $('#st-lte-val'), gr = $('#st-lte-grade'), now = $('#st-lte-now');
+		if (val) val.textContent = r != null ? r : '–';
+		if (now) now.textContent = r != null ? r + ' dBm' : '';
+		const grade = mjLteGrade(v);
+		if (gr) {
+			gr.textContent = '';
+			if (grade) {
+				const d = document.createElement('span');
+				d.className = grade[1]; d.textContent = '● ';
+				gr.appendChild(d);
+				gr.appendChild(document.createTextNode(grade[0]));
+			}
+		}
+		if (r != null) { pushSpark(sparks.lte, r); pushChart(chLte, [r]); }
+		const state = $('#st-lte-state');
+		if (state) { state.textContent = st[0]; state.className = 'x-small ' + st[1]; }
+		const parts = [];
+		if ('modem_rsrq_db' in v) parts.push('RSRQ ' + v.modem_rsrq_db + ' dB');
+		if ('modem_sinr_db' in v) parts.push('SINR ' + v.modem_sinr_db + ' dB');
+		if ('modem_rssi_dbm' in v) parts.push('RSSI ' + v.modem_rssi_dbm + ' dBm');
+		if ('modem_earfcn' in v) parts.push('EARFCN ' + v.modem_earfcn);
+		const sub = $('#st-lte-sub');
 		if (sub) sub.textContent = parts.join(' · ');
 	}
 
@@ -608,6 +745,22 @@
 			: '';
 	}
 
+	// The encoder's own verdict on whether it is meeting its rate, in a line.
+	//
+	// The judgement is the camera's -- venc0_rc_state is reached over a thirty
+	// second window with its own hysteresis, and it is what the camera log
+	// says. Deriving a second opinion here from the byte counter would smooth
+	// an already-smoothed number and disagree with the log the moment the two
+	// drifted. Empty string on the negative branch rather than an early
+	// return, so a verdict that has been withdrawn clears the line.
+	function setEncNote(s) {
+		const note = $('#st-enc-note');
+		if (!note) return;
+		note.textContent = (s && window.MajesticRcCheck)
+			? window.MajesticRcCheck.note(s, encCfg, 0)
+			: '';
+	}
+
 	function onSample(s) {
 		if (!s.ok) {
 			// Tracking consumes EVERY sample, failures included, and is not
@@ -625,8 +778,9 @@
 			// With no current data there is no evidence the condition alerts
 			// still hold — clear them rather than presenting the last good
 			// sample's warnings as current next to "not responding".
-			if (s.fails >= 2) {
+			if (s.fails >= failsShown()) {
 				setLumaNote(null);
+				setEncNote(null);
 				renderNoVideo(s);
 				// Not cleared, narrowed: an unset irCutPin1 is still unset
 				// while the camera is unreachable, but a day/night
@@ -635,7 +789,7 @@
 				// findings that needed one.
 				renderIrcut(null);
 			}
-			setAlert('#st-alert-stale', s.fails >= 2);
+			setAlert('#st-alert-stale', s.fails >= failsShown());
 			// No new sample, but time still passes: redraw so the traces age
 			// toward the left edge instead of standing at "now" through an
 			// outage they know nothing about.
@@ -692,7 +846,7 @@
 		// absent on daemons that predate night_mode_source, and unsaid for 0
 		// (manual is the absence of a decider, not a decider).
 		const srcWord = ['', ' · sensor pin', ' · thresholds', ' · ADC',
-			' · auto'][v.night_mode_source] || '';
+			' · auto', ' · sun', ' · set times'][v.night_mode_source] || '';
 		// 2 is the camera saying it is deciding on the legacy thresholds. Asked
 		// of the gauge rather than of the config, because the gauge is the
 		// camera's own verdict about what it is actually running.
@@ -709,6 +863,7 @@
 				' · lamp ' + lampWord +
 				srcWord;
 		renderIrcut(s);
+		refreshWiring();
 		// Only SigmaStar reports the empty-wakeup run; a sustained one means
 		// the encoder has stopped producing frames while all else looks alive.
 		// The encoder tile and chart obey the same rule as Wi-Fi and
@@ -754,6 +909,7 @@
 		// left beside a banner saying the camera is not responding, which is
 		// the last good sample presented as current.
 		setLumaNote(v);
+		setEncNote(s);
 
 		if (s.prev && s.dt > 0) {
 			// A negative delta is a counter reset or an interface bounce, not
@@ -811,6 +967,7 @@
 		});
 
 		updateWifi(s, v);
+		updateLte(s, v);
 	}
 
 	// One element per value, textContent throughout — these strings come from
@@ -849,10 +1006,21 @@
 			// Encoder tile + chart learn the configured target.
 			if (main && br) {
 				encSetMbit = br / 1000;
+				encCfg = { bitrate: br, fps: cfgFps0 };
 				$('#st-enc-sub').textContent = 'of ' + encSetMbit.toFixed(1) + ' set · ' + codec;
 				if (chEnc) {
 					chEnc.cfg.hi = Math.max(MC.niceCeil(encSetMbit * 1.15), 2);
 					chEnc.cfg.ref = { v: encSetMbit, label: 'set ' + encSetMbit.toFixed(1) };
+					// Everything above the set rate, shaded, so a sustained
+					// overshoot reads as history rather than as a number that
+					// happens to be large right now. A band and not a second
+					// `ref`: cfg.ref is singular and sits outside the
+					// auto-scale pass, so a second level above the data would
+					// silently vanish, while bands are scaled with the series
+					// and `to: null` is the supported "and everything above".
+					chEnc.cfg.bands = [
+						{ from: encSetMbit, to: null, color: 'rgba(255,193,7,.10)' },
+					];
 				}
 			}
 			// The chip names the stream the play button opens — the picture

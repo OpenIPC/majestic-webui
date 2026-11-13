@@ -1,3 +1,45 @@
+// The settings page: majestic's own schema, rendered as a form.
+//
+// Nothing here knows what any particular setting means. camera.cgi hands over a
+// boot blob and /api/v1/config.schema.json, and the tree, the rail, the widget
+// for each row, the search and the reset all fall out of those — which is why a
+// key the daemon adds appears here without anyone editing this file, and why a
+// key it drops stops appearing. `docs/settings-page.md` carries that contract:
+// the boot blob, the widget dispatch, save and reset, the column deal and the
+// three tiers of field text.
+//
+// The exceptions are the panels a form row cannot be: Picture, the
+// Orientation group, the OSD template builder, the motion-region editor, the
+// Pins drawing and the Day / Night pad map and filter hunt. Each replaces
+// several rows, and each does it the same way — the rows it stands for are
+// rendered `{hidden: true}` and driven with setValue, so the save machinery,
+// the dirty tracking and the per-row reset know nothing about the control and
+// the fields are still there on a camera where it cannot mount.
+//
+// WHAT THIS FILE REFUSES:
+//
+// It never writes to majestic outside a Save. Every panel proposes into the
+// hidden fields and raises the ordinary save bar instead — including a find
+// from the IR-cut filter hunt it mounts, which is what lets the filter test go
+// on refusing to judge wiring the camera was never given (`docs/day-night.md`).
+//
+// It never reads configuration from anywhere but the daemon, and it holds no
+// second copy of a fact the daemon already keeps.
+//
+// Hold to compare never turns the picture over. It shows the Picture knobs at
+// stock, and mirror and flip are how the camera is mounted, not how the
+// picture looks: a camera hung upside down has them saved on, so "stock" for
+// it was the scene flashed upside down on every press. Reset-all keeps them
+// for the same reason. And a press too short to show anything says so — on a
+// phone the button's label is hidden and the stream runs most of a second
+// behind, so a tap ends before its own picture arrives and the button looked
+// dead; a short press raises the label as a bubble, which a title attribute
+// cannot do on a screen with no hover.
+//
+// And it stops what it started. A panel that put a listener on `document` or
+// left hardware moving — the pad map's key and pointer handlers, a filter sweep
+// driving pins — is torn down when the section goes, not when a replacement
+// happens to mount: leaving a section detaches the only Stop button there is.
 (() => {
 	'use strict';
 
@@ -5,6 +47,18 @@
 	// here, so a page served without it degrades the same way everywhere
 	// instead of throwing at the first conditional row.
 	const REQ = (typeof window === 'object' && window.MajesticRequires) || null;
+
+	// Which of a field's three texts goes where, and whether the row needs the
+	// "?" that opens the rest. Resolved the same way and for the same reason:
+	// without it the page keeps the two-tier hints it has always drawn, which
+	// is a page that is merely less helpful rather than one that has lost its
+	// search or grown a control that opens nothing.
+	const HELP = (typeof window === 'object' && window.MajesticHelp) || null;
+	// What a field the camera can run by itself says while nobody has set it,
+	// and its name in the mode the camera is in (#582). Without it the rows
+	// fall back to the plain number box they always were: less informative,
+	// never wrong.
+	const EXP = (typeof window === 'object' && window.MajesticExposure) || null;
 
 	const bootEl = document.getElementById('mj-settings-boot');
 	if (!bootEl) return;
@@ -18,7 +72,6 @@
 	}
 
 	const EXCLUDE = new Set(boot.exclude || []);
-	const SENSORS = boot.sensors || [];
 	const FONTS = boot.fonts || [];
 	// The part this camera is. Read from the boot blob, which camera.cgi fills
 	// from sysinfo — it used to be read from `window.mjSoc`, a global no file in
@@ -96,47 +149,42 @@
 		{ id: 'lowlight', label: 'Low light', v: { luminance: 60, contrast: 42, saturation: 38, hue: 50 } },
 	];
 
-	// The eight ways up a picture can be — every quarter turn of the frame, and
-	// the mirror image of each — drawn as the letter F, which the reporter of
-	// #316 asked for back after a spell of arrows: an F is asymmetric both
-	// ways, so each of the eight is a different shape, which is the whole
-	// reason image tooling draws its orientation chart with one. The config
-	// stores three switches — mirror, flip, a quarter turn — that reach twelve
-	// states for these eight pictures; each cell writes one canonical triple,
-	// and the lit cell is worked out from whatever the config holds, so a
-	// camera configured by hand lights the right picture too.
+	// The four ways up a picture that mirror and flip reach, drawn as the
+	// letter F, which the reporter of #316 asked for back after a spell of
+	// arrows: an F is asymmetric both ways, so each is a different shape, which
+	// is the whole reason image tooling draws its orientation chart with one.
 	//
-	// The arithmetic. The sensor mirrors and flips first; the VPSS then turns
-	// the result clockwise. A vertical flip is a mirror plus a half turn, so a
-	// picture is (mirrored k, turned a) with k = mirror + flip mod 2 and
-	// a = turn + 180·flip mod 360. Going back, a half turn is written as
-	// mirror + flip — the sensor does that for free — and everything else as
-	// a mirror and a quarter turn.
+	// Four, not the eight the pad once offered. The other four need a quarter
+	// turn, which the camera cannot apply live: it swaps the stream's width and
+	// height and waits for Save and a pipeline reload, so those cells staged a
+	// value the picture did not show (#583). The Live leaf holds only what
+	// moves the picture as it is pressed; the quarter turn is set under
+	// Rotation on ISP / Exposure, and the pad says so when one is in force.
+	//
+	// The arithmetic. The sensor mirrors and flips; a vertical flip is a
+	// mirror plus a half turn, so a picture is (mirrored k, turned a) with
+	// k = mirror + flip mod 2 and a = 180·flip. Going back, a half turn is
+	// written as mirror + flip, and the rest as a mirror alone.
 	const ORIENT = [
-		{ k: 0, a: 0,   label: 'Normal',      title: 'As the sensor sees it', home: true },
-		{ k: 0, a: 90,  label: '90°',         title: 'Turned a quarter clockwise' },
-		{ k: 0, a: 180, label: '180°',        title: 'Upside down' },
-		{ k: 0, a: 270, label: '270°',        title: 'Turned a quarter anticlockwise' },
-		{ k: 1, a: 0,   label: 'Mirror',      title: 'Mirrored left to right' },
-		{ k: 1, a: 90,  label: 'Mirror 90°',  title: 'Mirrored, then turned a quarter clockwise' },
-		{ k: 1, a: 180, label: 'Flip',        title: 'Flipped top to bottom' },
-		{ k: 1, a: 270, label: 'Mirror 270°', title: 'Mirrored, then turned a quarter anticlockwise' },
+		{ k: 0, a: 0,   label: 'Normal', title: 'As the sensor sees it', home: true },
+		{ k: 0, a: 180, label: '180°',   title: 'Upside down' },
+		{ k: 1, a: 0,   label: 'Mirror', title: 'Mirrored left to right' },
+		{ k: 1, a: 180, label: 'Flip',   title: 'Flipped top to bottom' },
 	];
-	const orientOf = (mirror, flip, turn) =>
-		({ k: ((mirror ? 1 : 0) + (flip ? 1 : 0)) % 2, a: (turn + (flip ? 180 : 0)) % 360 });
+	const orientOf = (mirror, flip) =>
+		({ k: ((mirror ? 1 : 0) + (flip ? 1 : 0)) % 2, a: flip ? 180 : 0 });
 	const configFor = (o) => (o.a === 180
-		? { mirror: o.k === 0, flip: true, turn: 0 }
-		: { mirror: o.k === 1, flip: false, turn: o.a });
+		? { mirror: o.k === 0, flip: true }
+		: { mirror: o.k === 1, flip: false });
 
-	// The glyph: the frame the stream comes back in — portrait after a quarter
-	// turn — and the F put through the same mirror-then-turn as the picture.
+	// The glyph: the frame, and the F put through the same mirror and half
+	// turn as the picture.
 	const GEO_FRAME = '<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>';
-	const GEO_FRAME_TALL = '<rect x="3.5" y="1.5" width="13" height="17" rx="1.8" opacity="0.4"></rect>';
 	function orientSvg(o) {
 		const tf = 'rotate(' + o.a + ' 10 10)' + (o.k ? ' translate(20,0) scale(-1,1)' : '');
 		return '<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" ' +
 			'stroke-width="1.3" stroke-linecap="round" aria-hidden="true">' +
-			(o.a % 180 ? GEO_FRAME_TALL : GEO_FRAME) +
+			GEO_FRAME +
 			'<g transform="' + tf + '"><path d="M7.6 6.8h5.2M7.6 10h3.7M7.6 6.8v6.4" stroke-width="1.7"></path></g>' +
 			'</svg>';
 	}
@@ -150,7 +198,7 @@
 		[3840, 2160, '4K'], [2592, 1944, '5 MP'], [2560, 1440, '4 MP'],
 		[2304, 1296, '3 MP'], [2048, 1536, '3 MP'], [1920, 1080, '1080p'],
 		[1600, 1200, '2 MP'], [1280, 960, '1.3 MP'], [1280, 720, '720p'],
-		[1024, 576, ''], [704, 576, 'D1'], [640, 480, 'VGA'],
+		[1024, 576, ''], [800, 448, ''], [704, 576, 'D1'], [640, 480, 'VGA'],
 		[640, 360, 'nHD'], [352, 288, 'CIF'],
 	];
 	const RES_CUSTOM = '__custom__';
@@ -194,6 +242,10 @@
 		schema: null,
 		config: null,
 		fields: [],
+		// Rows whose text depends on fields OTHER than their own, repainted
+		// by updateDirty(). Cleared with the fields, since the closures hold
+		// nodes from the section being replaced.
+		repaint: [],
 		initial: {},
 		// the mj-tree.js instance for state.schema, built on first use
 		tree: null,
@@ -216,6 +268,11 @@
 	// sections, but they are things you navigate to, so the tree carries them
 	const LIVE_ID = 'live';
 	const ROI_ID = 'roi';
+	// `pins` IS a config section, but its only key is hidden and the leaf draws
+	// the chip from /api/v1/pinmux rather than a form. The tree drops a section
+	// with nothing to draw, which is the right rule, so this is the exception
+	// named to it.
+	const PINS_ID = 'pins';
 	const ROI_DOT = 'motionDetect.roi';
 	const AF_ID = 'autofocus';
 	const MOTOR_ID = 'motorControls';
@@ -249,11 +306,16 @@
 			return;
 		}
 		buildNav();
+		wireRailToggle();
+		publishRailGap();
+		watchRailGap();
+		watchRailScroll();
 		wireSearch();
 		watchIrcut();
+		watchRc();
 		// the rail is a tree on >=md and an accordion below it; re-render rather
 		// than try to keep both shapes live at once
-		const onWidth = () => buildNav();
+		const onWidth = () => { buildNav(); publishRailGap(); };
 		if (WIDE.addEventListener) WIDE.addEventListener('change', onWidth);
 		else if (WIDE.addListener) WIDE.addListener(onWidth);
 		window.addEventListener('popstate', onPopState);
@@ -263,7 +325,10 @@
 		let rt = 0;
 		window.addEventListener('resize', () => {
 			clearTimeout(rt);
-			rt = setTimeout(layoutCols, 120);
+			// foldHints after layoutCols for the same reason it follows it at
+			// mount: the column's width is what decides how many lines a hint
+			// takes, and narrow-to-wide has to give back the cuts it made.
+			rt = setTimeout(() => { layoutCols(); foldHints(); publishRailGap(); }, 120);
 		});
 		await load(state.sec, /*push*/ false);
 	}
@@ -284,10 +349,18 @@
 	// once, here, like REQ — but there is no page without it, so load() says so
 	// rather than throwing at the first lookup.
 	const TREE = (typeof window === 'object' && window.MajesticTree) || null;
+
+	// Where the rail's list has to sit and whether a pick has to move the page —
+	// two pieces of rectangle arithmetic, in mj-rail.js so tests/rail.test.js can
+	// ask them. Unlike the tree there IS a page without it, so its absence
+	// degrades to the behaviour this page had before the rail had a scroller of
+	// its own rather than to a fatal.
+	const RAIL = (typeof window === 'object' && window.MajesticRail) || null;
 	function treeOf() {
 		if (!state.tree || state.tree.schema !== state.schema) {
 			state.tree = TREE.build(state.schema, {
 				exclude: EXCLUDE, liveOrder: LIVE_ORDER, liveId: LIVE_ID, liveLabel,
+				custom: [PINS_ID],
 				extracted: [{ id: AF_ID, from: 'isp.autofocus' }],
 				customGroups: [{ id: 'motor', label: 'Motors',
 					sections: [AF_ID, MOTOR_ID], customLeaves: [MOTOR_ID] }],
@@ -317,19 +390,32 @@
 	// saved config and then the schema default for sections that are not
 	// rendered. Reading only the config made the count disagree with the page
 	// as soon as someone touched a controller.
+	// A visibleWhen is one condition on a sibling (`field`), or a list of
+	// them any one of which shows the row (`any`) -- the shape x-requires
+	// already speaks, for a row two settings can each call for. Anything
+	// else shows the row: a schema newer than this page must never hide one.
+	function visConds(vw) {
+		if (!vw) return [];
+		if (vw.field) return [vw];
+		return Array.isArray(vw.any) ? vw.any.filter((c) => c && c.field) : [];
+	}
+
 	function fieldVisible(f) {
 		const vw = f.sub && f.sub.visibleWhen;
-		if (!vw || !vw.field) return true;
+		const conds = visConds(vw);
+		if (!conds.length) return true;
 		const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
-		const sibDot = parent + '.' + vw.field;
-		const mounted = (state.fields || []).find(x => x.dot === sibDot);
-		if (mounted) return visMatches(vw, mounted.getValue());
-		let v = getDotted(state.config, sibDot);
-		if (v === undefined) {
-			const sib = sectionFields(f.dot.split('.')[0]).find(x => x.dot === sibDot);
-			v = sib && sib.sub ? sib.sub.default : undefined;
-		}
-		return visMatches(vw, v);
+		return conds.some((c) => {
+			const sibDot = parent + '.' + c.field;
+			const mounted = (state.fields || []).find(x => x.dot === sibDot);
+			if (mounted) return visMatches(c, mounted.getValue());
+			let v = getDotted(state.config, sibDot);
+			if (v === undefined) {
+				const sib = sectionFields(f.dot.split('.')[0]).find(x => x.dot === sibDot);
+				v = sib && sib.sub ? sib.sub.default : undefined;
+			}
+			return visMatches(c, v);
+		});
 	}
 
 	// The navigable leaves of one group, in the order the rail lists them: the
@@ -337,7 +423,7 @@
 	// something left to draw — a section the Live leaf absorbed has none.
 	function groupSections(g) {
 		return treeOf().leafIds(g).map(id =>
-			({ id, label: id === LIVE_ID ? 'Live adjustments' : label(id) }));
+			({ id, label: id === LIVE_ID ? 'Picture' : label(id) }));
 	}
 
 	function tree() {
@@ -416,13 +502,100 @@
 		return /^osd\.overlays\./.test(dot) || /^osd\.mark\./.test(dot);
 	}
 
+	// The predicate lives in mj-help.js so a test can ask it, and so the three
+	// tiers are named in one place rather than two. It matters most for `help`:
+	// the daemon's split moves the most identifying words in the schema out of
+	// `hint`, and a search that did not follow would simply return fewer rows —
+	// which reads as the setting not existing.
+	//
+	// The inline form is kept as the fallback, matching what the page did
+	// before the module existed. A file that failed to load should cost the
+	// long text, never the search.
 	function matchCount(secId, q) {
 		return leafFields(secId).filter(f => !isOverlayMember(f.dot) && fieldVisible(f) &&
-			((f.title || '').toLowerCase().includes(q) ||
-				(f.hint || '').toLowerCase().includes(q) ||
-				// four of ~170 fields ship no title; renderField falls back to the
-				// key for display, so the search matches it too
-				f.dot.split('.').pop().toLowerCase().includes(q))).length;
+			(HELP ? HELP.matches(f, q)
+				: ((f.title || '').toLowerCase().includes(q) ||
+					(f.hint || '').toLowerCase().includes(q) ||
+					// four of ~170 fields ship no title; renderField falls back to the
+					// key for display, so the search matches it too
+					f.dot.split('.').pop().toLowerCase().includes(q)))).length;
+	}
+
+	// How much of the window the rail has to leave free, handed to the
+	// stylesheet, which caps the rail at the window less that much so the whole
+	// of it — scrollport included — is on screen at whatever offset the page is
+	// scrolled to. The arithmetic, and why the answer changes as the page
+	// scrolls, are MajesticRail.railGap's.
+	//
+	// Measured rather than written into the stylesheet because what stands above
+	// the row is not a constant: 110px from 992 up, 130px at 768, and a flash
+	// message or the restart banner adds its own. Read off the COLUMN, never off
+	// the rail: the rail is the sticky one, so once it has stuck its own box is
+	// no longer where the document put it.
+	let railGap = null;
+	function publishRailGap() {
+		const col = document.querySelector('#page-camera .row > .col-md-3');
+		if (!col || !window.MajesticRail) return;
+		const r = col.getBoundingClientRect();
+		const top = r.top, end = r.bottom;
+		const gap = window.MajesticRail.railGap(top + window.scrollY, top, end, window.innerHeight);
+		// Written only when it has actually moved. Scrolling and the observer
+		// below both fire far more often than that: once the rail has stuck the
+		// answer is 0 for the rest of the page, and a property the stylesheet
+		// reads is not a free thing to set.
+		if (gap === railGap) return;
+		railGap = gap;
+		document.documentElement.style.setProperty('--mj-rail-gap', gap + 'px');
+	}
+
+	// The answer moves through the first scroll of the page — the strip the
+	// navbar takes going away — and again as the end of the page comes up. A frame at a
+	// time: a wheel delivers scroll events faster than the screen draws.
+	function watchRailScroll() {
+		let queued = false;
+		window.addEventListener('scroll', () => {
+			if (queued) return;
+			queued = true;
+			requestAnimationFrame(() => { queued = false; publishRailGap(); });
+		}, { passive: true });
+	}
+
+	// A banner arriving after the page has loaded moves the row down, and the
+	// gap published above does not know. Then the rail is capped as though it
+	// still began where it did, its own last rows hang below the fold, and the
+	// fault this rail exists to have fixed is back one layer down — measured with
+	// the card warning that /a/storage-check.js raises on a heartbeat: the rail's
+	// scrollport ended 74px past the bottom of the window.
+	//
+	// Both notice slots are filled from something that arrives — a release feed,
+	// a heartbeat verdict — and both are emptied again when the camera recovers,
+	// so a watcher rather than a list of moments. The body rather than the slots:
+	// a list of the things that can move the row is a second copy of the page's
+	// own structure, and it would be wrong the first time a page grew a third
+	// banner. Everything else it fires for costs a few rects and no write at all.
+	function watchRailGap() {
+		if (typeof ResizeObserver !== 'function') return;
+		try {
+			new ResizeObserver(() => publishRailGap()).observe(document.body);
+		} catch (e) { /* the resize handler below is the fallback */ }
+	}
+
+	// Put the section you are on in front of the eye looking for it, inside the
+	// rail's own scroller and NOWHERE else. From md up the tree is taller than
+	// its pane, so the section arrived at from a bookmark, from the back button,
+	// or from a search that has just rebuilt the list — which resets the pane to
+	// its top — can sit below the fold of a list nobody has scrolled yet.
+	//
+	// The offset itself is mj-rail.js's, along with every boundary it has — a row
+	// flush against an edge is inside, a row taller than the pane shows its
+	// beginning, a pane with nothing to scroll is left alone — because all of
+	// that fails silently and a fixture can hold it still where a camera cannot.
+	function revealInRail(link) {
+		const nav = document.getElementById('mj-settings-nav');
+		if (!RAIL || !nav || !link) return;
+		nav.scrollTop = RAIL.scrollTopFor(
+			nav.getBoundingClientRect(), link.getBoundingClientRect(),
+			nav.scrollTop, nav.scrollHeight - nav.clientHeight);
 	}
 
 	function buildNav() {
@@ -508,9 +681,10 @@
 				// Picking the section that is already open is still a deliberate
 				// pick: below md it means "take me back down to it", and a control
 				// that does nothing at all reads as a dead one.
-				if (newTab === state.sec) { revealSection(byPointer); return; }
+				if (newTab === state.sec) { railShut(true); revealSection(byPointer); return; }
 				// Answering "no" to the prompt is choosing to stay, so nothing moves.
 				if (hasDirty() && !confirm('You have unsaved changes. Discard and switch sections?')) return;
+				railShut(true);
 				// After load(), never inside it: the section has to be in the document
 				// first, and buildNav() — which load() re-runs while a search is
 				// active, resizing the rail *above* the form — has to have finished.
@@ -522,8 +696,10 @@
 	// Put the person in front of the section they just picked. Below md the rail
 	// is stacked *above* the form rather than beside it, so a tap left them
 	// looking at navigation with the fields they asked for below the fold (#199).
-	// On >=md the rail is sticky-md-top and stays on screen at every offset, so
-	// there is nothing there to correct and nothing worth jumping for.
+	//
+	// From md up the rail is beside the form and scrolls inside itself, so a pick
+	// moves nothing and there is usually nothing to correct — usually, and
+	// mj-rail.js's revealsForm() holds both the exception and why.
 	//
 	// The whole column rather than the section's card: the live leaf renders a
 	// row of two panels and no card at all, so there is no single card to aim at
@@ -570,7 +746,12 @@
 		// bare scrollIntoView() animates like every other scroll on the site and
 		// stops animating for anyone who asked it to. Naming 'smooth' or 'instant'
 		// here would opt this one navigation out of both.
-		if (!WIDE.matches) col.scrollIntoView();
+		// Without mj-rail.js, the rule this page had before it: travel below md,
+		// and never above it.
+		const move = RAIL
+			? RAIL.revealsForm(WIDE.matches || railFolded(), col.getBoundingClientRect().top)
+			: !WIDE.matches;
+		if (move) col.scrollIntoView();
 	}
 
 	function onPopState(ev) {
@@ -605,10 +786,18 @@
 		const input = document.getElementById('mj-search');
 		if (!wrap || !input) return;
 		wrap.classList.remove('d-none');
+		let requiz = 0;
 		input.addEventListener('input', () => {
 			state.q = input.value;
 			buildNav();
 			highlightPanel();
+			// A <mark> carries padding, so adding or removing one can move a
+			// hint across the four-line boundary and make the clamp verdict
+			// taken at mount wrong. Re-measured, but on a debounce rather than
+			// per keystroke: the reading costs a layout flush, and the answer
+			// only matters once somebody has stopped typing.
+			clearTimeout(requiz);
+			requiz = setTimeout(foldHints, 120);
 		});
 	}
 
@@ -620,7 +809,170 @@
 			n.textContent = '';
 			n.appendChild(hi(n.dataset.hl));
 		});
+		// The marks have just been rebuilt, so this is the moment the answer to
+		// "is the hit inside something folded away" is current.
+		revealFolds();
 	}
+
+	// ── the "?" that opens a field's long explanation ───────────────────────
+	//
+	// Two worlds behind one control, and the invariant is that it means the
+	// same thing in both: THERE IS MORE TEXT HERE. Where the daemon authored a
+	// `help`, the mark reveals it. Where it did not and the hint itself runs
+	// past four lines, the mark un-cuts the hint. No camera emits `help` yet,
+	// so the second is the only one anybody sees today — which is why the cut
+	// is decided by MEASURING the box rather than by counting characters, and
+	// why a box that cannot be measured is left alone rather than guessed at.
+
+	// The long text this row folds away, if it has one.
+	function foldBody(hint) {
+		const p = hint.parentNode;
+		return p ? p.querySelector(':scope > .mj-help-body') : null;
+	}
+
+	// Open or shut one fold, and say which in the mark's own name.
+	//
+	// A row can have both things to open -- a hint past the cut and a help
+	// underneath -- and one press means both. Two marks for one intent would
+	// be a reader deciding which half of an explanation they wanted.
+	function setFold(hint, open) {
+		const more = hint.querySelector(':scope > .mj-help');
+		if (!more) return;
+		const body = foldBody(hint);
+		if (body) {
+			if (open) body.removeAttribute('hidden');
+			else body.setAttribute('hidden', 'until-found');
+		}
+		const txt = hint.querySelector(':scope > .mj-hint-txt');
+		// Only a hint that was measured to overflow carries the clamp, so this
+		// never cuts one that fits.
+		if (txt) txt.classList.toggle('mj-clamp',
+			!open && hint.dataset.mjClamped === '1');
+		more.setAttribute('aria-expanded', open ? 'true' : 'false');
+		const name = open ? more.dataset.nameOpen : more.dataset.nameShut;
+		if (name) {
+			more.title = name;
+			more.setAttribute('aria-label', name);
+		}
+	}
+
+	// The "?" mark's two names, for the field called `desc`. Its own function
+	// because a row can be renamed after mount -- an exposure row takes
+	// another name when the mode changes -- and a mark still announcing the old
+	// one tells a screen-reader user about a setting no longer on screen. The
+	// name in force is re-applied when the mark already carries one.
+	function nameHelpMark(more, desc) {
+		const help = more.dataset.nameKind === 'more';
+		more.dataset.nameOpen = help ? 'Less about ' + desc : 'Shorten the explanation for ' + desc;
+		more.dataset.nameShut = help ? 'More about ' + desc : 'Show the whole explanation for ' + desc;
+		if (more.hasAttribute('aria-label')) {
+			const name = more.getAttribute('aria-expanded') === 'true'
+				? more.dataset.nameOpen : more.dataset.nameShut;
+			more.title = name;
+			more.setAttribute('aria-label', name);
+		}
+	}
+
+	// A fold is open when the reader opened it OR the search found something
+	// inside it. The OR is the whole point: deciding on the hit alone — the
+	// obvious implementation — slams every hand-opened fold shut the moment
+	// somebody types a character.
+	function revealFolds() {
+		openGroupFolds();
+		document.querySelectorAll('#mj-settings-form .mj-hint-fold').forEach(hint => {
+			const more = hint.querySelector(':scope > .mj-help');
+			if (!more || more.hidden) return;
+			// A match in EITHER region opens the row, including one on the
+			// first line of a clamped hint that was never hidden. Deliberate
+			// over-reaction: "a search shows you the whole of what matched" is
+			// one rule, and telling a visible mark from a cut-off one needs a
+			// wrap position that cannot be computed.
+			const body = foldBody(hint);
+			const hit = !!((body && body.querySelector('mark')) ||
+				(hint.dataset.mjClamped === '1' && hint.querySelector('mark')));
+			setFold(hint, HELP ? HELP.foldState(hint.dataset.mjOpen === '1', hit)
+				: (hint.dataset.mjOpen === '1' || hit));
+		});
+	}
+
+	// Measure every hint on the page and decide which ones need cutting.
+	//
+	// The box is measured BEFORE it is clamped, so its rendered height is its
+	// content height — no scrollHeight/clientHeight dance with -webkit-box,
+	// which is the least portable part of this. Reads first, writes after, so
+	// thirty rows cost one reflow rather than thirty.
+	//
+	// It must run after layoutCols(), which toggles .mj-solo and so decides how
+	// wide a column is, and after highlightPanel(), because <mark> carries
+	// padding and an active query can change a hint's line count. It must NOT
+	// call layoutCols() itself — re-dealing the columns moves the control the
+	// reader is pointing at, which is the whole of #189.
+	function foldHints() {
+		if (!HELP) return;
+		const form = document.getElementById('mj-settings-form');
+		if (!form) return;
+		const rows = [];
+		form.querySelectorAll('.mj-hint-fold').forEach(hint => {
+			const more = hint.querySelector(':scope > .mj-help');
+			const txt = hint.querySelector(':scope > .mj-hint-txt');
+			if (!more || !txt) return;
+			// Measured whether or not the row has authored help. A hint is not
+			// guaranteed short just because a help exists beside it -- a
+			// daemon can ship both long -- and a row that cut one and not the
+			// other would answer half of what its mark promises.
+			txt.classList.remove('mj-clamp');
+			const cs = getComputedStyle(txt);
+			rows.push({ hint, more, txt, hasHelp: !!foldBody(hint),
+				h: txt.getBoundingClientRect().height,
+				lh: parseFloat(cs.lineHeight) });
+		});
+		rows.forEach(r => {
+			const over = HELP.overflows(r.h, r.lh, HELP.LINES);
+			if (over === null) {
+				// Not "it fits" — a display:none row measures zero and a
+				// stylesheet that has not arrived measures nothing either.
+				// Leave the row exactly as it renders and ask again when
+				// something reveals it. A help row keeps its mark: the long
+				// text is there to open whether or not the hint could be read.
+				delete r.hint.dataset.mjClamped;
+				r.more.hidden = !r.hasHelp;
+				return;
+			}
+			r.hint.dataset.mjClamped = over ? '1' : '0';
+			r.more.hidden = !(over || r.hasHelp);
+			if (!r.more.hidden) setFold(r.hint, r.hint.dataset.mjOpen === '1');
+		});
+		revealFolds();
+	}
+
+	// The browser's own find-in-page reached inside a folded body and is about
+	// to reveal it. Record that as the reader having opened it, or the next
+	// keystroke in the page's own search box would shut it again over the hit
+	// they were just taken to -- and the mark beside it would still read
+	// "more" while the text was on screen.
+	//
+	// Delegated on `document` because beforematch does not bubble past its own
+	// tree in every build, and captured for the same reason.
+	document.addEventListener('beforematch', (e) => {
+		const body = e.target && e.target.closest
+			? e.target.closest('.mj-help-body') : null;
+		if (!body || !body.parentNode) return;
+		const hint = body.parentNode.querySelector(':scope > .mj-hint-fold');
+		if (!hint) return;
+		hint.dataset.mjOpen = '1';
+		setFold(hint, true);
+	}, true);
+
+	// One handler for the whole form rather than one per row: the rows are
+	// rebuilt on every section change, and a delegated listener outlives them.
+	document.addEventListener('click', (e) => {
+		const more = e.target.closest && e.target.closest('.mj-hint-fold > .mj-help');
+		const form = document.getElementById('mj-settings-form');
+		if (!more || !form || !form.contains(more)) return;
+		const hint = more.parentNode;
+		hint.dataset.mjOpen = hint.dataset.mjOpen === '1' ? '0' : '1';
+		revealFolds();
+	});
 
 	function liveLabel(key, sub) {
 		const meta = LIVE_META[key];
@@ -651,6 +1003,16 @@
 			state.ircutRoles = null;
 		}
 
+		// And the sweep, which outlives its own Stop button: that button lives
+		// in a card this section throws away, while the run is hundreds of
+		// requests that each drive hardware. Leaving the page without this
+		// detaches the only control and leaves it working through the chip
+		// with nobody watching it.
+		if (state.ircutHunt && state.ircutHunt.stop) {
+			try { state.ircutHunt.stop(); } catch (e) { /* best-effort */ }
+			state.ircutHunt = null;
+		}
+
 		// The stage closes its own transports — including a trial still being
 		// judged, which is the leak this has always been about: a live socket
 		// nobody holds a handle to, left behind on every visit.
@@ -658,12 +1020,30 @@
 			try { state.preview.destroy(); } catch (e) { /* best-effort */ }
 			state.preview = null;
 		}
+
+		// And the pins page holds a heartbeat that keeps a pad change alive.
+		// Leaving it running past the section would hold pads open with nobody
+		// watching, which is the one state the thirty-second window exists to
+		// end; its destroy() puts them back.
+		if (state.pins) {
+			try { state.pins.destroy(); } catch (e) { /* best-effort */ }
+			state.pins = null;
+		}
 	}
 
 	// What one x-live field is worth right now, and what the schema says it
 	// should be. Sliders send their number; booleans send 1/0.
 	function liveValue(f) {
-		return f.type === 'boolean' ? (f.control.checked ? 1 : 0) : f.control.value;
+		if (f.type === 'boolean') return f.control.checked ? 1 : 0;
+		// A list (the metering area) has no .value; its field joins it.
+		if (f.type === 'array') return f.getValue();
+		// An empty exposure box is Auto, which majestic spells 0 for these keys
+		// (#582). Sent as the empty string it would be the preview's DROP and
+		// show the saved value instead -- emptying a box set to 8x would keep
+		// 8x on the picture rather than the automatic limit it asked for.
+		if (f.control.value === '' && f.dot.indexOf('isp.') === 0 &&
+			(f.type === 'number' || f.type === 'integer')) return '0';
+		return f.control.value;
 	}
 
 	function liveDefault(f) {
@@ -672,7 +1052,14 @@
 		return f.type === 'boolean' ? (toBool(d) ? 1 : 0) : d;
 	}
 
-	// What the config says this knob is, as /api/v1/image wants it. state.initial
+	// What hold-to-compare shows a knob at: stock, except mirror and flip,
+	// which stay as saved (see the file header).
+	function liveStock(f) {
+		if (f.key === 'mirror' || f.key === 'flip') return liveValue(f);
+		return liveDefault(f);
+	}
+
+	// What the config says this knob is, as /api/v1/live wants it. state.initial
 	// is snapshotted from config.json at mount, so it is at once what the
 	// controls will read after a re-render and what the camera has to be put
 	// back to. It holds getValue()'s strings — 'true'/'false' for a switch —
@@ -716,7 +1103,7 @@
 		// a fast navigation right after a drag would have undone the undo.
 		if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
 		if (!state.fields.length || !liveDrift()) return;
-		postLive(liveQuery(liveSaved));
+		postKnobs(liveDocOf(null));
 	}
 
 	// A reload, or a closed tab, abandons the edit exactly as a section switch
@@ -741,26 +1128,72 @@
 			if (ev.persisted) return;
 			beaconOsdDrop();
 			if (!state.fields.length || !liveDrift()) return;
-			const q = liveQuery(liveSaved);
-			if (q && navigator.sendBeacon) navigator.sendBeacon('/api/v1/image?' + q);
+			const doc = liveDocOf(null);
+			if (doc && navigator.sendBeacon) {
+				try {
+					navigator.sendBeacon('/api/v1/live', new Blob([JSON.stringify(doc)],
+						{ type: 'application/json' }));
+				} catch (e) { /* the tab is going; there is nothing to report to */ }
+			}
 		};
 		window.addEventListener('pagehide', onHide);
 		return () => window.removeEventListener('pagehide', onHide);
 	}
 
-	// The query string /api/v1/image takes, over ALL the wired-live fields —
-	// sending them together is what lets the backend apply combined settings
-	// (mirror and flip need each other). `valueOf` picks what each field
-	// contributes, so hold-to-compare can post the defaults through the same
-	// builder rather than growing a second copy of it.
-	function liveQuery(valueOf) {
-		const parts = [];
+	// The document /api/v1/live takes, by the fields' real dotted paths.
+	//
+	// The image knobs go in whole, every time, by value: the backend applies
+	// them as combined settings (mirror and flip need each other; the four
+	// colour knobs are one call), and they have no "drop".
+	//
+	// The isp keys go in only when they have something to say. The camera
+	// previews them through a table it reads before the config, and a key named
+	// in a document is a key that table now holds -- so sending all of them on
+	// every drag would pin the untouched ones too, and dehaze among them would
+	// fight the tone controller that drives it. A key goes in with its value
+	// when it differs from what is saved, and ONCE more as the empty "drop" when
+	// it comes back, which empties its entry and hands it back to the config.
+	// `want(f)` is the value the caller wants shown (the control, or the default
+	// for hold-to-compare); `null` means "put everything back".
+	//
+	// It used to be /api/v1/image's query string, which names every key by its
+	// LAST segment and knows the image knobs and nothing else -- so the
+	// exposure rows beside the picture were pushed as `aGain=4` and silently
+	// dropped, and the page believed a picture had moved that never had.
+	const livePreviewed = new Set();
+	function liveDocOf(want) {
+		const doc = {};
+		let any = false;
 		for (const f of state.fields) {
 			if (!isLive(f)) continue;
-			parts.push(encodeURIComponent(f.dot.split('.').pop()) + '=' +
-				encodeURIComponent(valueOf(f)));
+			let v;
+			if (f.dot.indexOf('isp.') !== 0) {
+				v = want ? want(f) : liveSaved(f);
+			} else if (want && !liveIsSaved(f, want)) {
+				livePreviewed.add(f.dot);
+				v = want(f);
+			} else if (livePreviewed.has(f.dot)) {
+				livePreviewed.delete(f.dot);
+				v = '';
+			} else {
+				continue;
+			}
+			setDotted(doc, f.dot, String(v));
+			any = true;
 		}
-		return parts.join('&');
+		return any ? doc : null;
+	}
+
+	// Whether `want` asks for what is already saved. Compared as the control
+	// reads, not as the wire spells it: an Auto box is "" to the control and
+	// "0" on the wire, and a saved Auto must not read as a change.
+	function liveIsSaved(f, want) {
+		if (want === liveValue) return f.getValue() === state.initial[f.dot];
+		return String(want(f)) === String(liveSaved(f));
+	}
+
+	function postKnobs(doc) {
+		return doc ? postLiveJson(doc) : Promise.resolve(true);
 	}
 
 	// Live writes go through mj-queue.js: one in flight, and at most one
@@ -796,7 +1229,7 @@
 	let liveTimer = null;
 	function pushLive() {
 		if (liveTimer) clearTimeout(liveTimer);
-		liveTimer = setTimeout(() => { liveTimer = null; postLive(liveQuery(liveValue)); }, 120);
+		liveTimer = setTimeout(() => { liveTimer = null; postKnobs(liveDocOf(liveValue)); }, 120);
 	}
 
 	function preference(key, fallback) {
@@ -1294,13 +1727,21 @@
 		form.appendChild(err);
 
 		state.fields = [];
+		state.repaint = [];
+		state.expRows = [];
 		state.initial = {};
-		state.cols = null;
+		state.cols = [];
 		state.liveSync = [];
 		// dropped with the fields they paint: a stale closure would keep
 		// writing into a row that is no longer in the document
 		state.reqUpdaters = [];
 		state.legacyBox = null;
+		// The sun panel likewise: it asks the camera about the place on a
+		// timer, and a save on another section would otherwise still sync it.
+		if (state.sunPanel) {
+			state.sunPanel.destroy();
+			state.sunPanel = null;
+		}
 		// Same reason as legacyBox above: a save re-asks the soundcheck's gate
 		// through this reference, and every section that is not Audio has to
 		// leave it empty or that ask lands on a node no longer in the document.
@@ -1315,10 +1756,14 @@
 			renderAutofocus(form);
 		} else if (sec === MOTOR_ID) {
 			renderMotorControls(form);
+		} else if (sec === PINS_ID) {
+			renderPins(form);
 		} else if (sec === 'osd') {
 			renderOsd(form);
 		} else if (sec === 'motionDetect') {
 			renderMotion(form);
+		} else if (sec === 'counting') {
+			renderCounting(form);
 		} else {
 			const card = el('div', 'card');
 			const body = el('div', 'card-body');
@@ -1348,10 +1793,15 @@
 			if (ipeye) body.appendChild(ipeye);
 			const audio = audioPanel(sec);
 			if (audio) body.appendChild(audio);
+			// Same placement and the same reason as the two above: on a video
+			// section the verdict is what someone came to read, and maxQp and
+			// bitrate are the fields they will change because of it.
+			const rcv = rcPanel(sec);
+			if (rcv) body.appendChild(rcv);
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
-			state.cols = cols;
+			state.cols.push(cols);
 			body.appendChild(cols);
 			card.appendChild(body);
 			form.appendChild(card);
@@ -1360,6 +1810,17 @@
 			// into the second once applyVisibility() has settled what is on screen
 			const moved = sec === 'isp' ? new Set(['isp.autofocus']) : undefined;
 			renderProps(cols.firstElementChild, sec, props, moved);
+			// The leftovers of an absorbed section whose home is this leaf
+			// (mj-tree.js rule 3) — on this build, image's Rotate on ISP /
+			// Exposure — under their own heading, as the ordinary rows they are:
+			// saved by their own dotted keys, with Save and Apply saying what a
+			// reload costs as they do for every row here. renderProps() already
+			// skips the lifted keys, so only the leftovers are drawn.
+			for (const hs of treeOf().homedAt(sec)) {
+				groupHead(cols.firstElementChild, treeOf().leftoverHome(hs).label);
+				renderProps(cols.firstElementChild, hs,
+					((state.schema.properties || {})[hs] || {}).properties || {});
+			}
 			// The destinations board is the section, not a field in it. Dealt
 			// into one of two columns it gets half the card — which is the
 			// narrow strip the board exists to replace — so it is lifted out
@@ -1372,6 +1833,7 @@
 			// switch is dealt with everything else and the hidden set is
 			// already settled when the cut is chosen.
 			if (sec === 'nightMode') mountLegacy(cols.firstElementChild);
+			if (sec === 'nightMode') mountSun(cols.firstElementChild);
 		}
 
 		// Save and Apply share this bar, and each is present only while its own
@@ -1389,16 +1851,25 @@
 		document.getElementById('mj-apply-btn').addEventListener('click', applyReload);
 
 		applyVisibility();
+		paintEnumHolds();
 		layoutCols();
 		paintStock();
 		// Paints from whatever the heartbeat has already published; the
 		// subscription keeps it current from there.
 		paintFindings();
+		// Same moment, same reason: the panel is in the document now.
+		paintRcFindings();
 
 		// renderField writes labels as plain text; with a query already active,
 		// the section just mounted has to pick up the marks too, or navigating
 		// to a hit highlights its hints and not its field names.
 		highlightPanel();
+
+		// And only now can a hint be measured. layoutCols() above has settled
+		// how wide a column is (.mj-solo switches the basis), and highlightPanel
+		// has just added whatever <mark> padding the live query costs — measure
+		// before either and the line count is of a box that does not exist.
+		foldHints();
 
 		// Counts are read off the mounted controls, so swapping sections changes
 		// what they are read from — including when the swap discarded unsaved
@@ -1408,15 +1879,63 @@
 		updateDirty();
 	}
 
+	// ── the rail on a phone ─────────────────────────────────────────────────
+	//
+	// Below md the rail stacks above the section, and open it was most of the
+	// first screen: at 390x844 the title, the search box, every category and
+	// the open group's sections, with the Picture preview starting at the
+	// bottom edge (#587). So there it folds behind one button that says where
+	// you are, and the section comes first. Picking a section folds it again,
+	// search or no search: the pick is the reader choosing a result, and the
+	// query survives, so one tap brings the same results back for the next
+	// one. What a search keeps open is a page LOADED mid-search. From md
+	// up the rail sits beside the form, and the stylesheet ignores the fold.
+	function railShut(shut) {
+		const rail = document.getElementById('mj-rail');
+		const btn = document.getElementById('mj-rail-toggle');
+		if (!rail || !btn || btn.hidden) return;
+		rail.classList.toggle('mj-rail-shut', shut);
+		btn.setAttribute('aria-expanded', String(!shut));
+	}
+
+	function railFolded() {
+		const rail = document.getElementById('mj-rail');
+		return !!rail && rail.classList.contains('mj-rail-shut');
+	}
+
+	function wireRailToggle() {
+		const btn = document.getElementById('mj-rail-toggle');
+		if (!btn) return;
+		btn.hidden = false;
+		railShut(!state.q.trim());
+		nameRailToggle(state.sec);
+		btn.addEventListener('click', () => {
+			const rail = document.getElementById('mj-rail');
+			railShut(!rail.classList.contains('mj-rail-shut'));
+		});
+	}
+
+	// "Image › Picture": the group and the section, the words the rail uses.
+	function nameRailToggle(sec) {
+		const where = document.querySelector('#mj-rail-toggle .mj-rail-where');
+		if (!where) return;
+		const g = groupOf(sec);
+		const s = g && g.sections.find(x => x.id === sec);
+		where.textContent = g && s ? g.label + ' › ' + s.label : 'Sections';
+	}
+
 	function setActiveNav(tab) {
+		nameRailToggle(tab);
+		let active = null;
 		document.querySelectorAll('#mj-settings-nav .nav-link').forEach(link => {
 			const u = new URL(link.href);
 			const t = u.searchParams.get('tab');
-			const active = t === tab;
-			link.classList.toggle('active', active);
-			if (active) link.setAttribute('aria-current', 'page');
+			const on = t === tab;
+			link.classList.toggle('active', on);
+			if (on) { link.setAttribute('aria-current', 'page'); active = link; }
 			else link.removeAttribute('aria-current');
 		});
+		revealInRail(active);
 	}
 
 	function hasDirty() {
@@ -1425,7 +1944,7 @@
 
 	function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-	// ── The Live adjustments leaf ─────────────────────────────────────────
+	// ── The Picture leaf ─────────────────────────────────────────
 	//
 	// The picture is the hero and it owns the column; everything else is either
 	// overlaid on it or in the deck below, so nothing a control does can move
@@ -1456,6 +1975,12 @@
 			one('toggle-night', ICON.night, 'Night') +
 			one('toggle-ircut', ICON.ircut, 'IR&#8209;cut') +
 			one('toggle-light', ICON.lamp, 'Lamp', 'mj-hrt-amber') +
+			// The white lamp has a switch of its own only where it is a lamp
+			// of its own: a pin or a PWM channel beside backlightPin. Hidden
+			// until wireRuntime() has read the config and found one; no
+			// wrapper, because the group is a flex row of input+label pairs.
+			one('toggle-white', ICON.lamp, 'White', 'mj-hrt-amber')
+				.replace('<label ', '<label hidden ') +
 			'</span>' +
 			// A sentence in a bar that cannot wrap: on the picture it truncates
 			// with the title carrying the rest, and below md dockRuntime moves
@@ -1464,6 +1989,190 @@
 			' title="Automatic day/night is driving night, IR-cut and the lamp">' +
 			'<a href="camera.cgi?tab=nightMode">Automatic day/night is driving night, IR&#8209;cut and the lamp</a>' +
 			'</span>';
+	}
+
+	// The picture follows the page down (#580). It is sized to fill the window
+	// above the knob strip, so everything under the deck (ISP / Exposure is 13
+	// fields and 828px at 1440x900) used to be reachable only by scrolling
+	// the picture off the top of a page that is about the picture.
+	//
+	// Once the picture's top reaches the top of the window it stays there and
+	// shrinks as the page scrolls, a pixel of height for each pixel of scroll,
+	// until the band holds 42% of the window; after that the page scrolls
+	// under it. It shrinks WITH the scroll rather than in one step because a
+	// step leaves the height it gave up as an empty strip between the band and
+	// the controls, which then took the next 160px of scrolling to close.
+	//
+	// Nothing below the band moves on its own account. The height the band
+	// gives up goes to a spacer in flow after it, so the document is the same
+	// height at every offset and the offset that decides the band's size never
+	// moves under it. The full height is read while unpinned, and a window
+	// resized while pinned (a phone turned on its side) is measured again for
+	// it: kept, the old figure turned a 1440px window into a 390px one with
+	// the toggle column still beside a 170px picture and 400px of nothing
+	// under the band.
+	//
+	// The runtime toggles stop fitting on the picture's bar as it narrows and
+	// dock (dockRuntime). Where the window leaves room beside the compact
+	// picture they dock BESIDE it, into space the band has anyway; under it
+	// they would add a row partway through the shrink, and the picture would
+	// have to jump smaller to pay for it. Where there is no room — a phone,
+	// where the picture is already as wide as the column — they stay under it,
+	// and the picture is sized to leave them the room.
+	//
+	// Covering what scrolls under it is this design's price, so while pinned
+	// every element of the form but the band's own carries the band's height
+	// as its scroll-margin: a field reached by Tab, by search or by
+	// scrollIntoView stops below the band and not behind it. Not the page's
+	// scroll-padding, which it was at first: that reserves the strip for
+	// everything, the band's own controls included, and they sit inside it
+	// for good — so every press of Night focused a checkbox the browser then
+	// "revealed" by scrolling the page up, a band's height per click, until
+	// the band unpinned.
+	function pinStage(stage, rtMount, dock) {
+		const pin = el('div', 'mj-live-pin');
+		const at = el('div', 'mj-live-pin-at');
+		const gap = el('div', 'mj-live-pin-gap');
+		stage.parentNode.insertBefore(at, stage);
+		at.after(pin);
+		// A move within one task: the media element is back in the document
+		// before the platform would pause a removed one.
+		pin.appendChild(stage);
+		if (rtMount) pin.appendChild(rtMount);
+		pin.after(gap);
+
+		const host = pin.parentNode;
+		// The room the docked toggles need beside the picture: .mj-pin-side
+		// gives the mount this as its minimum width, plus the column gap.
+		const SIDE = 10.5;
+		let pinned = false;
+		let full = 0;
+		let resized = false;
+		let pending = false;
+
+		const rem = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+		const docked = () => !!rtMount && !rtMount.hidden;
+
+		// The size the band would have unpinned, read while it is pinned.
+		// Everything the band changed comes off for one synchronous read and
+		// goes straight back, so nothing is painted in between; the page's
+		// scroll anchoring is off for it, or the browser could move the page
+		// to follow content the band pushed down for no frame at all.
+		//
+		// Whether the toggles sit under the full-size picture is asked of
+		// dockRuntime rather than carried over from before the resize: it is
+		// the one thing a resize is most likely to change (they fit on the
+		// bar at 1440px and not at 390), and a stale answer is a row's height
+		// of gap, or of overlap, under the band. The compact picture has
+		// docked them by now, so when they would dock at full size they are
+		// already in the row being measured; when they would not, it is hidden.
+		const remeasure = () => {
+			const root = document.documentElement;
+			const anchor = root.style.overflowAnchor;
+			const cls = pin.className;
+			const width = stage.style.width;
+			const wasDocked = stage.classList.contains('mj-live-docked');
+			const wasHidden = rtMount ? rtMount.hidden : true;
+			root.style.overflowAnchor = 'none';
+			pin.className = 'mj-live-pin';
+			stage.style.width = '';
+			stage.classList.remove('mj-live-docked');
+			if (rtMount) rtMount.hidden = true;
+			if (rtMount && rtMount.children.length && dock && !dock.fits()) {
+				stage.classList.add('mj-live-docked');
+				rtMount.hidden = false;
+			}
+			full = pin.offsetHeight;
+			pin.className = cls;
+			stage.style.width = width;
+			stage.classList.toggle('mj-live-docked', wasDocked);
+			if (rtMount) rtMount.hidden = wasHidden;
+			root.style.overflowAnchor = anchor;
+		};
+
+		// Beside the picture or under it, judged on the compact size. Made
+		// when a trip down the page begins and again after a resize, and never
+		// by scrolling alone, so the toggles do not change sides partway
+		// through the shrink.
+		const decide = (room, floor) => {
+			pin.classList.toggle('mj-pin-side',
+				room - floor * 16 / 9 >= SIDE * rem() + 12);
+		};
+
+		const unpin = () => {
+			pinned = false;
+			pin.classList.remove('mj-live-pinned', 'mj-pin-side');
+			stage.style.width = '';
+			gap.style.height = '';
+			host.style.removeProperty('--mj-pin-reach');
+		};
+
+		const place = () => {
+			pending = false;
+			// How far past its sticking point the band has been carried: the
+			// sentinel sits where the band's top would be, and the band sticks
+			// at its own `top`.
+			const stick = parseFloat(getComputedStyle(pin).top) || 0;
+			const s = stick - at.getBoundingClientRect().top;
+			if (s <= 0) {
+				if (pinned) unpin();
+				resized = false;
+				full = pin.offsetHeight;
+				return;
+			}
+			const room = pin.clientWidth;
+			if (!pinned) {
+				resized = false;
+				full = pin.offsetHeight;
+				pinned = true;
+				pin.classList.add('mj-live-pinned');
+				decide(room, Math.min(full, Math.round(window.innerHeight * 0.42)));
+			} else if (resized) {
+				resized = false;
+				remeasure();
+				decide(room, Math.min(full, Math.round(window.innerHeight * 0.42)));
+			}
+			const floor = Math.min(full, Math.round(window.innerHeight * 0.42));
+			const side = pin.classList.contains('mj-pin-side');
+			const band = Math.max(floor, full - s);
+			// What of the band the picture may have: all of it beside the
+			// toggles, all but their row under them.
+			const under = !side && docked() ? pin.offsetHeight - stage.offsetHeight : 0;
+			const beside = side && docked() ? SIDE * rem() + 12 : 0;
+			const w = Math.min(room - beside, (band - under) * 16 / 9);
+			stage.style.width = Math.max(0, Math.floor(w)) + 'px';
+			const h = pin.offsetHeight;
+			gap.style.height = Math.max(0, full - h) + 'px';
+			// Plus the 0.5rem the band is pinned below the top, and the 0.5rem
+			// of surface it draws under itself.
+			host.style.setProperty('--mj-pin-reach', 'calc(' + h + 'px + 1rem)');
+		};
+
+		const later = () => {
+			if (pending) return;
+			pending = true;
+			requestAnimationFrame(place);
+		};
+		const onResize = () => {
+			resized = true;
+			later();
+		};
+		window.addEventListener('scroll', later, { passive: true });
+		window.addEventListener('resize', onResize);
+		// Docking and undocking land a frame after the bar is measured, and
+		// the save bar arriving changes the unpinned stage's reserve.
+		let ro = null;
+		if (window.ResizeObserver) {
+			ro = new ResizeObserver(later);
+			ro.observe(pin);
+		}
+		later();
+		return () => {
+			window.removeEventListener('scroll', later);
+			window.removeEventListener('resize', onResize);
+			if (ro) ro.disconnect();
+			host.style.removeProperty('--mj-pin-reach');
+		};
 	}
 
 	// The bar does not wrap any more — wrapping took 42% of a 290px picture on a
@@ -1519,6 +2228,22 @@
 		let cost = 0;
 		let docked = false;
 		let pending = false;
+		// Hidden from the start and not only after the first undock: empty,
+		// it still carried its 0.6rem margin, so the first undock moved
+		// everything under the picture up 10px. Pinning (pinStage) docks and
+		// undocks on every trip down the page and back, so that shift landed
+		// the first time the band let go.
+		mount.hidden = true;
+
+		// What the bar needs to hold everything, the toggles included at
+		// their remembered cost.
+		const needed = () => {
+			const extras = movable();
+			if (!docked) cost = widthOf(extras.filter(n => !n.hidden));
+			const rest = [...bar.children].filter(n => !n.hidden && extras.indexOf(n) < 0);
+			return rest.reduce((w, n) => w + n.scrollWidth, 0) +
+				gap * Math.max(0, rest.length - 1) + cost;
+		};
 
 		const place = () => {
 			pending = false;
@@ -1526,11 +2251,7 @@
 			// A stage that has not been laid out yet answers 0 and would dock
 			// everything; the observers below fire again with a real width.
 			if (!room) return;
-			const extras = movable();
-			if (!docked) cost = widthOf(extras.filter(n => !n.hidden));
-			const rest = [...bar.children].filter(n => !n.hidden && extras.indexOf(n) < 0);
-			const need = rest.reduce((w, n) => w + n.scrollWidth, 0) +
-				gap * Math.max(0, rest.length - 1) + cost;
+			const need = needed();
 			// Hysteresis, and it is load-bearing rather than polish: docking
 			// adds a row under the picture, the stage's reserve grows to hold
 			// it (.mj-live-docked) and the stage therefore NARROWS — so the
@@ -1582,10 +2303,18 @@
 		} else {
 			window.addEventListener('resize', later);
 		}
-		return () => {
-			if (mo) mo.disconnect();
-			if (ro) ro.disconnect();
-			else window.removeEventListener('resize', later);
+		return {
+			stop: () => {
+				if (mo) mo.disconnect();
+				if (ro) ro.disconnect();
+				else window.removeEventListener('resize', later);
+			},
+			// Whether the toggles would fit on the bar at its width as laid
+			// out right now, by the rule that docks them. pinStage asks it
+			// with the picture put back to full size for one read, to learn
+			// what the band would be unpinned without the frame this needs
+			// to find out by moving them.
+			fits: () => needed() <= bar.clientWidth,
 		};
 	}
 
@@ -1599,59 +2328,181 @@
 		const lbl = id => root.querySelector('label[for="' + id + '"]');
 		const night = byId('toggle-night'), ircut = byId('toggle-ircut');
 		const light = byId('toggle-light'), lightmon = byId('mj-lightmon');
+		const white = byId('toggle-white');
 		if (!night) return;
 		const active = v => v !== false && v != null;
 		const lm = active(getDotted(state.config, 'nightMode.lightMonitor'));
+		// What may drive each actuator, from the one key that says it: off
+		// (the pad is not claimed at all), manual (held, moved from here,
+		// dusk leaves it alone) or auto. Anything else reads as auto — the
+		// default, and the state every camera was in before the key existed.
+		// An unquoted `off` in a hand-edited file arrives as YAML's boolean
+		// false, so that spelling comes in too.
+		const modeOf = (k) => {
+			const v = getDotted(state.config, 'nightMode.' + k);
+			return (v === 'off' || v === false || v === 'false') ? 'off'
+				: v === 'manual' ? 'manual' : 'auto';
+		};
+		const ircutMode = modeOf('irCut'), lightMode = modeOf('backlight');
+		// A white lamp beside the night's own -- an IR lamp on backlightPin
+		// and a white one on its own pin or PWM channel, which one Lamp switch
+		// cannot tell apart. It is somebody's to switch here only under
+		// whiteLight: manual; every other mode drives it itself.
+		const pwmSet = (v) => active(v) && v !== 'none' && v !== '';
+		const whiteWired = active(getDotted(state.config, 'nightMode.whiteLightPin'))
+			|| pwmSet(getDotted(state.config, 'nightMode.whiteLightPwmChannel'));
+		const whiteModeRaw = getDotted(state.config, 'nightMode.whiteLight');
+		const whiteMode = (whiteModeRaw === false || whiteModeRaw === 'false')
+			? 'off' : (whiteModeRaw || 'auto');
+		const whiteManual = whiteWired && whiteMode === 'manual';
+		if (white && lbl('toggle-white')) lbl('toggle-white').hidden = !whiteWired;
+		// Distinct from off: an actuator that does not follow dusk is still
+		// the daemon's to drive, and the switch below still moves it, which is
+		// the whole point of that mode.
+		const ircutFollows = ircutMode === 'auto';
+		const lightFollows = lightMode === 'auto';
 
-		// The monitor is driving all three, so three dead switches say less than
-		// one sentence naming what has the wheel — and where to go to take it
-		// back. The old panel showed the switches anyway with a small link
-		// beside them.
+		// The monitor drives what it drives, and that is no longer always all
+		// three. Where it has everything, three dead switches say less than
+		// one sentence naming what has the wheel and where to take it back.
+		// Where an actuator has been told not to follow day/night, its switch
+		// is the only way to move it, so the group stays and the monitor's own
+		// switches are the dead ones.
 		if (lm) {
-			const grp = root.querySelector('.mj-hud-rt');
-			if (grp) grp.hidden = true;
-			if (lightmon) lightmon.hidden = false;
-			return;
+			const drives = ['night'].concat(
+				ircutFollows ? ['IR\u2011cut'] : [],
+				lightFollows ? ['the lamp'] : []);
+			const named = drives.length > 1
+				? drives.slice(0, -1).join(', ') + ' and ' + drives[drives.length - 1]
+				: drives[0];
+			if (lightmon) {
+				const say = 'Automatic day/night is driving ' + named;
+				const a = lightmon.querySelector('a');
+				if (a) a.textContent = say;
+				lightmon.title = say.replace(/\u2011/g, '-');
+				lightmon.hidden = false;
+			}
+			// The group earns its place only if something in it is live, and
+			// that is MANUAL rather than merely not-auto: an actuator set to
+			// off is not the operator's to move either, so keeping the group
+			// open for it shows three dead switches — which is the thing the
+			// sentence above replaced.
+			if (ircutMode !== 'manual' && lightMode !== 'manual' && !whiteManual) {
+				const grp = root.querySelector('.mj-hud-rt');
+				if (grp) grp.hidden = true;
+				return;
+			}
 		}
 
-		// Parked (nightMode.*Enabled: false) outranks wired: the daemon
-		// refuses the toggle, so a live-looking switch would move and snap
-		// back. Explicit === false, because absent is not off: a key the page
-		// was never given is one it knows nothing about, and reading that as
-		// "switched off" would grey out the control on a camera whose filter
-		// is working perfectly.
-		const ircutParked =
-			getDotted(state.config, 'nightMode.irCutEnabled') === false;
-		const lightParked =
-			getDotted(state.config, 'nightMode.backlightEnabled') === false;
-		ircut.disabled = ircutParked ||
+		// An actuator set to off outranks wired: the daemon refuses the
+		// toggle, so a live-looking switch would move and snap back. Only an
+		// explicit off, because absent is not off: a key the page was never
+		// given is one it knows nothing about, and reading that as off would
+		// grey out the control on a camera whose filter is working perfectly.
+		const ircutParked = ircutMode === 'off';
+		const lightParked = lightMode === 'off';
+		// Reached only where something is still the operator's, so anything
+		// the monitor does drive is dead here — pressing it would move and
+		// snap back on the monitor's next tick.
+		const monNight = lm, monIrcut = lm && ircutFollows,
+			monLight = lm && lightFollows;
+		night.disabled = monNight;
+		ircut.disabled = monIrcut || ircutParked ||
 			!active(getDotted(state.config, 'nightMode.irCutPin1'));
-		light.disabled = lightParked ||
+		light.disabled = monLight || lightParked ||
 			!active(getDotted(state.config, 'nightMode.backlightPin'));
 		// A control that cannot work should say which pin is missing — or that
-		// the actuator is deliberately parked — rather than just refusing.
+		// the actuator is deliberately parked, or that the monitor has it —
+		// rather than just refusing.
+		const MON = 'Automatic day/night is driving this one.';
+		// Which way is "on" is not obvious for a filter: on is the night
+		// position, out of the light path, and a daylight picture turns pink.
+		if (!ircut.disabled && lbl('toggle-ircut'))
+			lbl('toggle-ircut').title = 'On: the IR-cut filter is out of the light path (night). '
+				+ 'Off: it is in, for daytime colour.';
+		if (!light.disabled && lbl('toggle-light'))
+			lbl('toggle-light').title = whiteWired
+				? 'The night illuminator, usually the infrared one. The white lamp is the White switch.'
+				: 'The night illuminator.';
+		if (white) {
+			white.disabled = !whiteManual;
+			const wl = lbl('toggle-white');
+			if (wl) wl.title = whiteManual ? 'The white lamp.'
+				: whiteMode === 'auto'
+					? 'The white lamp lights a colour night by itself. Set White light to manual in Day / Night settings to switch it here.'
+					: 'The white lamp follows its White light mode (' + whiteMode
+						+ '). Set it to manual in Day / Night settings to switch it here.';
+		}
+		if (night.disabled && lbl('toggle-night'))
+			lbl('toggle-night').title = MON;
 		if (ircut.disabled && lbl('toggle-ircut'))
-			lbl('toggle-ircut').title = ircutParked
-				? 'The IR-cut filter is switched off in Day / Night settings; its wiring is kept.'
+			lbl('toggle-ircut').title = monIrcut ? MON : ircutParked
+				? 'The IR-cut filter is set to off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the IR-cut filter.';
 		if (light.disabled && lbl('toggle-light'))
-			lbl('toggle-light').title = lightParked
-				? 'The lamp is switched off in Day / Night settings; its wiring is kept.'
+			lbl('toggle-light').title = monLight ? MON : lightParked
+				? 'The camera light is set to off in Day / Night settings; its wiring is kept.'
 				: 'Nothing is connected to the night illuminator.';
 
-		[['night', night], ['ircut', ircut], ['light', light]].forEach(([n, el2]) =>
-			apiFetch('/metrics/night?value=' + n + '_enabled', { credentials: 'same-origin' })
-				.then(r => r.text()).then(v => { el2.checked = +v > 0; })
-				.catch(() => {}));
+		// Where each of the three actually is, from the camera. Used again
+		// after a night toggle, for the reason below.
+		//
+		// A reading that did not arrive leaves the switch alone rather than
+		// showing it off: a failed fetch is not a fact, and an empty or
+		// unparseable body coerces to 0 — which would report a lit lamp dark
+		// on a camera that simply did not answer.
+		//
+		// And the batches are generation-stamped, because there are two of
+		// them now: the one at mount and one after every toggle. Responses can
+		// land in any order, and an older one assigning last would put the
+		// pre-toggle reading back on the switch.
+		//
+		// One read of the whole night group, parsed here, rather than one
+		// `?value=` query per switch. That query finds the first occurrence of
+		// the name anywhere in the text, which is the `# HELP` line, and takes
+		// the first digit after it: night_white_light's help mentions a
+		// number, so the white switch read lit whatever the lamp was doing
+		// (measured on an SSC377QE). A gauge that is absent -- the white lamp
+		// where it is the colour night's own -- leaves its switch alone.
+		let gen = 0;
+		// The white lamp's last state the camera confirmed, to put back when a
+		// click is not confirmed: a checkbox has already flipped by the time
+		// the handler runs. null until a reading arrives.
+		let whiteSeen = null;
+		const readGauges = () => {
+			const mine = ++gen;
+			const want = [['night_enabled', night], ['ircut_enabled', ircut],
+				['light_enabled', light]]
+				.concat(white && whiteWired ? [['night_white_light', white]] : []);
+			apiFetch('/metrics/night', { credentials: 'same-origin' })
+				.then(r => (r.ok ? r.text() : Promise.reject(r.status)))
+				.then(body => {
+					if (mine !== gen) return;
+					const seen = {};
+					String(body).split('\n').forEach((line) => {
+						const m = /^([A-Za-z_][A-Za-z0-9_]*)\s+(-?[0-9.]+)\s*$/.exec(line);
+						if (m) seen[m[1]] = Number(m[2]);
+					});
+					want.forEach(([n, el2]) => {
+						if (!(n in seen) || isNaN(seen[n])) return;
+						el2.checked = seen[n] > 0;
+						if (el2 === white) whiteSeen = el2.checked;
+					});
+				})
+				.catch(() => {});
+		};
+		readGauges();
 
 		night.addEventListener('click', () => {
 			apiFetch('/night/toggle', { credentials: 'same-origin' })
 				.then(r => r.json()).then(data => {
 					night.checked = data;
-					// Night mode drives the filter and the light where they are
-					// not independently pinned, so the controls follow it.
-					if (!ircut.disabled) ircut.checked = data;
-					if (!light.disabled) light.checked = data;
+					// What the mode did to the other two is the camera's
+					// answer, not this page's guess. It used to assume both
+					// followed; an actuator told not to follow day/night does
+					// not move with it, and the switch would then show a
+					// filter somewhere it had not gone.
+					readGauges();
 				}).catch(() => {});
 		});
 		ircut.addEventListener('click', () => {
@@ -1664,6 +2515,24 @@
 				.then(r => r.json()).then(data => { light.checked = data; })
 				.catch(() => {});
 		});
+		// A POST, unlike the older switches beside it: this one moves
+		// hardware, and a GET can be replayed by a prefetch or a restored tab.
+		// -1 is the camera saying there is no white lamp it may switch; that
+		// and a failed request put back the last confirmed state, or the
+		// state before the click when nothing was ever confirmed.
+		if (white) white.addEventListener('click', () => {
+			const before = whiteSeen != null ? whiteSeen : !white.checked;
+			const undo = () => { white.checked = before; readGauges(); };
+			apiFetch('/night/white', { method: 'POST', credentials: 'same-origin' })
+				.then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+				.then(data => {
+					if (typeof data === 'number' && data >= 0) {
+						white.checked = data > 0;
+						whiteSeen = white.checked;
+					} else undo();
+				})
+				.catch(undo);
+		});
 	}
 
 	// Hold to compare: post the schema defaults while the button is held, then
@@ -1673,25 +2542,41 @@
 	// restore is guarded on every way a press can end, not just pointerup. If
 	// the browser dies mid-hold the camera stays at stock; the form is still
 	// dirty, so Save puts it right.
+	// A press shorter than COMPARE_TAP_MS shows the label instead (see the
+	// file header for why).
+	const COMPARE_TAP_MS = 500;
 	function wireCompare(btn) {
 		if (!btn) return;
 		let held = false;
+		let downAt = 0;
+		let tipTimer = null;
+		const tip = () => {
+			const lbl = btn.querySelector('span');
+			if (!lbl || getComputedStyle(lbl).display !== 'none') return;
+			btn.dataset.tip = lbl.textContent;
+			btn.classList.add('mj-cmp-tip');
+			clearTimeout(tipTimer);
+			tipTimer = setTimeout(() => btn.classList.remove('mj-cmp-tip'), 2000);
+		};
 		const down = (e) => {
 			if (held || btn.disabled) return;
 			held = true;
+			downAt = Date.now();
+			btn.classList.remove('mj-cmp-tip');
 			btn.classList.add('mj-hud-on');
 			// A queued push would land 120 ms later and undo the comparison.
 			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
 			if (e && e.pointerId != null && btn.setPointerCapture) {
 				try { btn.setPointerCapture(e.pointerId); } catch (_) { /* the guards below still restore */ }
 			}
-			postLive(liveQuery(liveDefault));
+			postKnobs(liveDocOf(liveStock));
 		};
 		const up = () => {
 			if (!held) return;
 			held = false;
 			btn.classList.remove('mj-hud-on');
-			postLive(liveQuery(liveValue));
+			postKnobs(liveDocOf(liveValue));
+			if (Date.now() - downAt < COMPARE_TAP_MS) tip();
 		};
 		btn.addEventListener('pointerdown', down);
 		btn.addEventListener('pointerup', up);
@@ -1714,6 +2599,7 @@
 		state.liveCleanup.push(() => {
 			document.removeEventListener('visibilitychange', up);
 			window.removeEventListener('blur', up);
+			clearTimeout(tipTimer);
 			up();
 		});
 	}
@@ -1741,6 +2627,17 @@
 		f.control.dispatchEvent(new Event('input', { bubbles: true }));
 	}
 
+	// The Automatic mode, through the field rather than at its checkbox.
+	// setValue is where a boolean field's own normalisation lives and where
+	// refresh() and the reset paths already go; writing `.checked` beside
+	// them is a second way to set the same field that would quietly stop
+	// matching the first. `change` is what the lock and the mode row hang
+	// off, and setValue fires nothing.
+	function setAuto(f, on) {
+		f.setValue(on ? 'true' : 'false');
+		f.control.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
 	// The strip's knobs back to their schema defaults — staged, exactly like the
 	// per-row ↺ and for the same reason. This used to call /api/v1/reset, which
 	// wrote the camera the moment it was pressed while the sliders beside it
@@ -1765,25 +2662,19 @@
 		}
 	}
 
-	// Mirror, flip and the quarter turn are three switches in the config and
-	// eight pictures to a person, so the group is the eight pictures. The three
-	// fields stay real — hidden — so Save, dirty tracking, the reset arrow and
-	// refresh() never learn that a pad exists. The quarter turn is the one of
-	// them that is not live: a VPSS operation that swaps the stream's width and
-	// height, hence a pipeline reload rather than a knob, and that difference
-	// in cost once decided where it was drawn — on a page of its own, each
-	// page pointing at the other (#316). Which way up the camera is mounted is
-	// one decision, and this is the picture it is judged against; the save bar
-	// that appears on a press says what the press costs, so the group carries
-	// no note. Only the pictures this camera can reach are offered: a build
-	// without a quarter turn has four, in one row, and one whose enum lists a
-	// single turn has six — a cell for a turn the enum lacks would write a
-	// value the hidden select cannot hold, and stage an empty one for Save.
-	function renderOrientation(body, mirrorField, flipField, turn) {
-		const turnField = turn ? turn.field : null;
-		const cells = ORIENT.filter(o => o.a % 180 === 0 || (turn && turn.has.has(String(o.a))));
-		const rows = [el('div', 'mj-geo-row'), el('div', 'mj-geo-row')];
-		const btns = cells.map((o, i) => {
+	// Mirror and flip are two switches in the config and four pictures to a
+	// person, so the group is the four pictures. Both fields stay real —
+	// hidden — so Save, dirty tracking, the reset arrow and refresh() never
+	// learn that a pad exists. Both are live, so a press turns the picture
+	// over as it is pressed, which is the one promise this leaf makes.
+	//
+	// A quarter turn in force is said under the pad rather than offered on it:
+	// it is set on ISP / Exposure (see ORIENT), and without the line the lit
+	// cell would read as the whole of the orientation when the stream is also
+	// turned. Read from the config, so it follows a save there and refresh().
+	function renderOrientation(body, mirrorField, flipField, sec) {
+		const row = el('div', 'mj-geo-row');
+		const btns = ORIENT.map((o) => {
 			const b = el('button', 'mj-geo' + (o.home ? ' mj-geo-home' : ''));
 			b.type = 'button';
 			b.title = o.title;
@@ -1792,28 +2683,32 @@
 				const c = configFor(o);
 				setLive(mirrorField, c.mirror);
 				setLive(flipField, c.flip);
-				if (turnField) setLive(turnField, String(c.turn));
 			});
-			rows[i < 4 ? 0 : 1].appendChild(b);
+			row.appendChild(b);
 			return b;
 		});
-		rows.forEach(r => { if (r.childElementCount) body.appendChild(r); });
+		body.appendChild(row);
+		const turned = el('p', 'mj-live-hint mj-geo-turned');
+		turned.hidden = true;
+		body.appendChild(turned);
 
 		const sync = () => {
-			let turn = 0;
-			if (turnField) {
-				const t = Number(turnField.getValue());
-				if (Number.isFinite(t)) turn = t;
-			}
-			const cur = orientOf(toBool(mirrorField.getValue()), toBool(flipField.getValue()), turn);
-			cells.forEach((o, i) => {
+			const cur = orientOf(toBool(mirrorField.getValue()), toBool(flipField.getValue()));
+			ORIENT.forEach((o, i) => {
 				const on = o.k === cur.k && o.a === cur.a;
 				btns[i].classList.toggle('mj-geo-on', on);
 				btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
 			});
+			const t = Number(getDotted(state.config, sec + '.rotate'));
+			const home = treeOf().leftoverHome(sec);
+			turned.hidden = !home || !(t === 90 || t === 270);
+			if (!turned.hidden) {
+				turned.innerHTML = 'The picture is also turned ' + t + '° clockwise, ' +
+					'set under ' + esc(home.label) + ' on <a href="?tab=' + esc(home.home) +
+					'">' + esc(label(home.home)) + '</a>.';
+			}
 		};
-		[mirrorField, flipField, turnField].forEach(f => {
-			if (!f) return;
+		[mirrorField, flipField].forEach(f => {
 			f.control.addEventListener('input', sync);
 			f.control.addEventListener('change', sync);
 		});
@@ -1821,27 +2716,6 @@
 		// pad has to be told to re-read after a save or a reset.
 		state.liveSync.push(sync);
 		sync();
-	}
-
-	// The quarter turn's field, mounted hidden under the pad — pin-map style —
-	// where the schema has one, handed back with the set of turns its enum
-	// actually lists so the pad offers no other. The enum is deliberately
-	// ["0","90","270"]: 180 is absent because mirror+flip already give it, at
-	// sensor level and for free, which is exactly how configFor() writes it.
-	function mountTurnField(body, sec) {
-		const dot = sec + '.rotate';
-		if (EXCLUDE.has(dot)) return null;
-		const sub = (((state.schema.properties || {})[sec] || {}).properties || {}).rotate;
-		if (!sub || sub.type !== 'string' || !Array.isArray(sub.enum)) return null;
-		// Whole degrees only, and at least one that is not zero: a value the
-		// pad could not turn by would be a cell that draws nothing.
-		const turns = sub.enum.map(String).filter(v => /^\d+$/.test(v));
-		if (!turns.some(v => v !== '0')) return null;
-		const field = renderField(body, dot, 'rotate', sub, getDotted(state.config, dot), { hidden: true });
-		if (!field) return null;
-		state.fields.push(field);
-		state.initial[dot] = field.getValue();
-		return { field, has: new Set(turns) };
 	}
 
 	// Scene presets. Which one is "on" is DERIVED by comparing the current tone
@@ -1856,7 +2730,46 @@
 		// of the four knobs would otherwise get a control that half-works.
 		if (!LIVE_PRESETS.every(p => Object.keys(p.v).every(k => byKey[k]))) return;
 
+		// The mode is NOT one of these chips. Automatic and Indoor are not
+		// alternatives on one axis: one says who is driving, the others say
+		// what look to apply — and a row offering both invites the reading
+		// that the camera is following the scene AND running Outdoor, which
+		// is not a state it has.
+		//
+		// This row keeps its own rule, which is the right one: every chip in
+		// it stays actionable. That is why the presets are not disabled under
+		// Automatic but taken off the page with the rest of the manual side —
+		// the principle this file already states about the Stock button,
+		// "a control which cannot be used is not left on the page looking as
+		// though it can", applied to the other two controls it owns.
+		const autoField = state.fields.find(f => f.dot === 'image.tuning');
+
+		// Who is driving, above what they chose. Two options rather than a
+		// switch, because "Automatic / Manual" names both states and a switch
+		// labelled Automatic only names one — and the half you are not in has
+		// to read as somewhere to go, since in Automatic it is the only way
+		// back to the knobs.
+		if (autoField && autoField.control) {
+			const mode = el('div', 'mj-tone-mode');
+			[['Automatic', true], ['Manual', false]].forEach(([label, on]) => {
+				const b = el('button', 'mj-tone-mode-opt');
+				b.type = 'button';
+				b.textContent = label;
+				b.addEventListener('click', () => {
+					if (!!autoField.control.checked === on) return;
+					// Manual takes the picture over, so it starts from what
+					// the camera is holding rather than from the saved
+					// numbers: see handOver().
+					if (on) setAuto(autoField, true); else handOver(autoField);
+				});
+				mode.appendChild(b);
+				(on ? toneModeAuto : toneModeManual).push(b);
+			});
+			container.appendChild(mode);
+		}
+
 		const row = el('div', 'mj-scene-row');
+
 		const chips = LIVE_PRESETS.map(p => {
 			const b = el('button', 'mj-scene-chip');
 			b.type = 'button';
@@ -1868,20 +2781,44 @@
 			return b;
 		});
 		container.appendChild(row);
+		toneModeRow = !!(autoField && autoField.control);
+		// Manual's own row, so the mode can take it off the page whole.
+		toneManual.push(row);
+
+		// What Automatic is doing right now, and what it measured, where the
+		// presets are when the operator is the one driving: the same place
+		// either way, because it answers the same question — what is this
+		// picture, and who chose it.
+		//
+		// And nothing else. An earlier revision put an "Adjust the picture"
+		// button under the status, reasoning that somebody who came to change
+		// the picture should get a thing to press rather than a thing to
+		// notice. It called handOver() -- the same function, with the same
+		// argument -- ten pixels below the Manual option that calls it. Two
+		// controls doing one job on one card is not a second affordance, it
+		// is a question about what the difference is; the unlit half of a
+		// two-state control is already the answer.
+		if (toneModeRow) renderAutoStatus(container);
 
 		const status = el('div', 'mj-scene-status');
 		status.innerHTML = '<span class="mj-pip"></span><span></span>';
 		container.appendChild(status);
 		const pip = status.querySelector('.mj-pip');
 		const text = status.querySelector('span:last-child');
+		// A claim about the operator's own values, so it belongs to Manual.
+		toneManual.push(status);
 
 		const sync = () => {
+			const auto = !!(autoField && autoField.control &&
+				autoField.control.checked);
 			const cur = {};
 			Object.keys(byKey).forEach(k => { cur[k] = Number(byKey[k].getValue()); });
 			const hit = LIVE_PRESETS.find(p =>
 				Object.keys(p.v).every(k => cur[k] === p.v[k]));
 			chips.forEach((b, i) => {
-				const on = !!hit && LIVE_PRESETS[i].id === hit.id;
+				// Under Automatic this row is not on the page at all, so the
+				// only question left is which look the operator picked.
+				const on = !auto && !!hit && LIVE_PRESETS[i].id === hit.id;
 				b.classList.toggle('mj-scene-chip-on', on);
 				b.setAttribute('aria-pressed', on ? 'true' : 'false');
 			});
@@ -1914,8 +2851,289 @@
 			f.control.addEventListener('input', sync);
 			f.control.addEventListener('change', sync);
 		});
+		// The mode is one of the things this row draws, so a change of mode
+		// has to re-read it. Without this, pressing Automatic locked the
+		// sliders -- which is a different listener -- while the row went on
+		// showing Indoor as the one in force.
+		if (autoField && autoField.control)
+			autoField.control.addEventListener('change', sync);
 		state.liveSync.push(sync);
 		sync();
+	}
+
+	// What the camera's own tone controller is doing, directly under the
+	// switch that turns it on. Shaped like the Scene line — bold head, em
+	// dash, tail — because it is the same kind of statement about the same
+	// knobs.
+	//
+	// Under the SWITCH, and not beside the knobs it moves, because the first
+	// question anyone asks of a control is whether pressing it did anything.
+	// It lived in the Scene column for one revision and the answer to
+	// switching the feature off was that a line in a different column
+	// silently vanished, which is indistinguishable from a page that never
+	// had one.
+	//
+	// So OFF is a state this draws rather than a reason to disappear. The one
+	// thing it stays silent about is not knowing: until a metrics poll has
+	// actually landed, "off" would be a guess, and a wrong guess sitting
+	// under the switch is worse than a blank line for two seconds.
+	function renderAutoStatus(container) {
+		if (!window.MajesticToneCheck || !container ||
+			typeof window.mjMetricsSubscribe !== 'function') return;
+
+		const row = el('div', 'mj-scene-status mj-tone-status');
+		row.hidden = true;
+		toneAutomatic.push(row);
+		// The verdict and what to do on the line; the reason, in the camera's
+		// terms, behind the "?" (#581) -- the same mark and the same fold the
+		// setting rows use for their longer text.
+		row.innerHTML = '<span class="mj-pip"></span><span class="mj-tone-said"></span>' +
+			'<button type="button" class="mj-help" aria-expanded="false" ' +
+			'aria-controls="mj-tone-why" aria-label="Why">?</button>';
+		container.appendChild(row);
+		const pip = row.querySelector('.mj-pip');
+		const text = row.querySelector('.mj-tone-said');
+		const whyBtn = row.querySelector('.mj-help');
+		const why = el('div', 'mj-tone-why');
+		why.id = 'mj-tone-why';
+		why.hidden = true;
+		toneAutomatic.push(why);
+		container.appendChild(why);
+		let whyOpen = false;
+		whyBtn.addEventListener('click', () => {
+			whyOpen = !whyOpen;
+			whyBtn.setAttribute('aria-expanded', whyOpen ? 'true' : 'false');
+			why.hidden = !whyOpen || row.hidden;
+		});
+
+		// The measurement the sentence above is a verdict on. Rebuilt rather
+		// than updated in place because the SET of figures changes with the
+		// camera -- a part whose AE will not state its gain publishes no
+		// headroom, ever, and a cell left standing with a stale number in it
+		// is the one outcome worth engineering against here.
+		const figs = el('div', 'mj-tone-figs');
+		figs.hidden = true;
+		toneAutomatic.push(figs);
+		container.appendChild(figs);
+		const paintFigures = (list) => {
+			figs.hidden = !list.length;
+			figs.innerHTML = list.map(f =>
+				'<div class="mj-tone-fig"><span class="mj-tone-fig-k">' +
+				esc(f.label) + '</span><span class="mj-tone-fig-v">' +
+				esc(f.value) + '</span></div>').join('');
+		};
+
+		// The operator's SAVED value for a dotted key, which is the baseline
+		// the controller works from — not what the control currently reads. A
+		// half-dragged slider is not a baseline, and comparing against one
+		// would make the camera look like it was fighting the drag.
+		const saved = (dot) => {
+			const v = state.initial[dot];
+			if (v !== undefined && v !== null && v !== '') return v;
+			const c = getDotted(state.config, dot);
+			return (c === undefined || c === null || c === '') ? null : c;
+		};
+
+		const off = window.mjMetricsSubscribe((s) => {
+			// Cleared, not frozen, when the poll fails: a stale verdict
+			// presented as live is worse than none, and this one moves. This
+			// is also the only branch that hides the row, because it is the
+			// only one where the page does not know.
+			if (!s || !s.ok || !s.tone) {
+				row.hidden = true;
+				why.hidden = true;
+				paintFigures([]);
+				lastTone = null;
+				return;
+			}
+			// Whether the feature is ON is the switch's answer, not the
+			// gauges'. A build that predates these metrics can have it
+			// enabled and publish none of them, and "Off" printed beside a
+			// lit Automatic chip is a confident lie.
+			const auto = toneAutoOn();
+			const d = window.MajesticToneCheck.describe(s.tone, saved, auto);
+			// The MODE decides whether this is on the page, and the mode is
+			// the switch -- not `d.on`, which is the gauges' answer and is
+			// true in every state the daemon publishes. Handing over to
+			// Manual pushes the knobs, which puts the controller in PAUSED,
+			// which is a state: so the row came back two seconds later
+			// reading "Paused -- standing aside while you adjust the picture"
+			// under the knobs of the operator who had just taken them. It is
+			// written on every heartbeat, so it has to re-derive this rather
+			// than trust what applyToneMode left behind.
+			// Manual is a MODE; the live `tuning` key is a momentary
+			// PREVIEW built for a held button, and it expires so an abandoned
+			// press cannot leave a camera showing somebody's comparison for
+			// ever. Those are different lifetimes and the daemon cannot tell
+			// the two callers apart, so the page -- which can -- says which
+			// one it is by keeping the preview alive. Measured on the lab
+			// hi3516ev300: switch to Manual, touch nothing, and at +63 s the
+			// controller took the picture back and began driving it while the
+			// page still said Manual and the sliders still claimed to own it.
+			//
+			// Refreshed BEFORE the expiry, not after it. Re-asserting on the
+			// lapse works -- measured, it was back inside one heartbeat -- but
+			// "works" there means the controller got one tick of the picture
+			// first, every minute, which is a visible blip on a camera the
+			// operator is watching. TONE_KEEPALIVE_MS is half the daemon's
+			// hold, so the hold is renewed at its midpoint and never runs out.
+			//
+			// The lapse test stays as the second arm, and it is not
+			// redundant: a dropped write, a daemon restart, or a hold shorter
+			// than this interval all land there, and it costs one comparison
+			// against a number the row is reading anyway. Both arms go quiet
+			// the moment the mode is saved -- the controller stops, publishes
+			// no state, and `d.known` goes false.
+			if (!auto && d.known &&
+				(s.tone.state !== window.MajesticToneCheck.STATE.PAUSED ||
+					Date.now() - toneKeptAt > TONE_KEEPALIVE_MS)) {
+				toneKeptAt = Date.now();
+				pushLive();
+			}
+			row.hidden = !(auto && d.known);
+			why.hidden = !whyOpen || row.hidden || !d.why;
+			// Hidden with the sentence, and empty whenever the sentence is
+			// not a claim about the picture right now: figures() enforces the
+			// second half itself, so a pause empties the row rather than
+			// freezing four numbers under a sentence that says it has
+			// stopped looking.
+			paintFigures(auto && d.known
+				? window.MajesticToneCheck.figures(s.tone, d.measuring) : []);
+			if (!d.known) { lastTone = null; return; }
+			pip.className = 'mj-pip mj-pip-' + d.tone;
+			text.innerHTML = '<b>' + esc(d.head) + '</b> \u2014 ' + esc(d.tail);
+			whyBtn.hidden = !d.why;
+			why.textContent = d.why || '';
+			// Kept only while the camera is actually measuring. Paused, the
+			// actuator gauges are as frozen as the span beside them, and
+			// handing those to the take-over button would seed the sliders
+			// from a reading taken before the operator started.
+			lastTone = d.measuring ? s.tone : null;
+		});
+		// mjMetricsSubscribe predates returning an unsubscribe, so it may hand
+		// back nothing; the guard keeps this working either way.
+		state.liveCleanup.push(() => { if (typeof off === 'function') off(); });
+	}
+
+	// Where the camera is holding each knob, drawn on the knob's own track.
+	//
+	// Three marks on one track, and they mean three different things: the
+	// tick is the schema's factory default, the thumb is the operator's
+	// value, and this is what the ISP is running right now. The last one is
+	// the only one that moves on its own, which is why it is worth drawing at
+	// all — without it the slider says 50 while the camera runs 84 and
+	// nothing on the page accounts for the difference.
+	//
+	// Hidden when it coincides with the thumb, which is most of the time: a
+	// mark permanently under the handle is furniture, and furniture is how a
+	// reader learns to stop looking at something.
+	// The camera's last live reading, which is what a hand-over seeds from.
+	let lastTone = null;
+	// When the Manual preview was last renewed. Half of the daemon's sixty
+	// second hold (TONE_HOLD_TICKS in src/tonetune.c), which is the longest
+	// interval that cannot let it lapse -- and the page has no way to read
+	// that number, so the second arm of the test above covers a daemon whose
+	// hold is shorter than this.
+	const TONE_KEEPALIVE_MS = 30000;
+	let toneKeptAt = 0;
+	// Everything else automatic tuning takes over while it is on: the Scene
+	// chips, the Stock button, and the note that says where the switch is.
+	// What belongs to each mode, collected as the leaf renders and shown or
+	// hidden whole. Nothing is in both lists -- that is the rule, expressed
+	// as the only data structure that can hold it.
+	let toneManual = [];
+	let toneAutomatic = [];
+	let toneModeAuto = [];
+	let toneModeManual = [];
+	let toneAuto = null;
+	// Whether the Scene row carries the Automatic chip. When it does, the
+	// image.tuning switch is redundant and is hidden.
+	let toneModeRow = false;
+
+	// The three the controller actually drives on this strip. Hue is not one
+	// of them and stays the operator's throughout — a mode that greys out
+	// controls it does not touch is as misleading as one that leaves live the
+	// ones it does.
+	// The two modes share no controls, so the mode does not dress the page --
+	// it decides which half of it is there.
+	//
+	// AUTOMATIC: what the camera is doing, and the way to take it back.
+	// Nothing to set, because nothing in that mode is the operator's to set.
+	// MANUAL: the presets and the knobs, and no status, because nothing is
+	// running to report on.
+	//
+	// Locking the driven knobs in place was the other way to keep a control
+	// from lying, and it is half a step: this file already says of the Stock
+	// button that "a control which cannot be used is not left on the page
+	// looking as though it can", and a greyed slider with the camera's number
+	// beside it is exactly that -- a control-shaped thing that is not one.
+	// Reported on a camera as "I see both Automatic and Outdoor", which is
+	// the same complaint one control further along.
+	//
+	// Driven from the SWITCH rather than from the metrics gauges, so the page
+	// answers the click at once instead of at the next poll two seconds
+	// later. A mode change that appears to do nothing for two seconds reads
+	// as a mode change that did nothing.
+	// Taking the picture over. Seed the knobs the camera is driving from what
+	// it is actually holding, and only then switch -- in that order the ISP
+	// already carries those numbers when the controller lets go, so the
+	// picture does not move as the operator takes it. Switching first and
+	// seeding after is a visible jump to the saved values and back.
+	//
+	// The seeded values stage like any other edit; the save bar is what says
+	// they are not permanent yet. Without the seed, taking over would hand
+	// back a picture the operator never chose and did not just agree to.
+	function handOver(autoField) {
+		const T = window.MajesticToneCheck;
+		if (T && lastTone) {
+			T.KNOBS.forEach(k => {
+				const v = lastTone[k.gauge];
+				if (v === null || v === undefined) return;
+				const f = state.fields.find(x => x.dot === k.dot);
+				if (f && f.control) setLive(f, v);
+			});
+		}
+		// Consumed. Without this the same sample could seed a second
+		// hand-over later, after the operator has edited what it seeded.
+		lastTone = null;
+		// Unconditionally, and that is deliberate: the operator asked for
+		// Manual. A camera whose firmware publishes no tone gauges, a failed
+		// poll, or a controller that is paused all leave nothing to seed
+		// from, and refusing the mode because the page could not read the
+		// camera would be a control that sometimes does nothing. It falls
+		// back to the saved values, which is where Manual would have started
+		// before any of this existed.
+		if (autoField && autoField.control) setAuto(autoField, false);
+	}
+
+	// The switch's state, read live. Falls back to the saved config for the
+	// moment before the field exists.
+	function toneAutoOn() {
+		const f = state.fields.find(x => x.dot === 'image.tuning');
+		if (f && f.control) return !!f.control.checked;
+		return toBool(getDotted(state.config, 'image.tuning'));
+	}
+
+	function applyToneMode(auto) {
+		if (auto === toneAuto) return;
+		toneAuto = auto;
+		// A reading belongs to the Automatic session it was taken in. Left
+		// standing across a mode change it can seed a later hand-over from
+		// before the operator's own edits -- Manual, edit, Automatic, Manual
+		// again inside one heartbeat, and the first session's sample writes
+		// over the second session's work. The subscription refills it on the
+		// next measuring heartbeat, which only happens in Automatic anyway.
+		lastTone = null;
+		toneManual.forEach(n => { n.hidden = auto; });
+		toneAutomatic.forEach(n => { n.hidden = !auto; });
+		toneModeAuto.forEach(b => {
+			b.classList.toggle('mj-tone-mode-on', auto);
+			b.setAttribute('aria-pressed', auto ? 'true' : 'false');
+		});
+		toneModeManual.forEach(b => {
+			b.classList.toggle('mj-tone-mode-on', !auto);
+			b.setAttribute('aria-pressed', auto ? 'false' : 'true');
+		});
 	}
 
 	// The luma histogram. Everything it needs is already in the browser — the
@@ -1931,9 +3149,17 @@
 			'</svg>' +
 			'<span class="mj-luma-clip mj-luma-clip-l" hidden></span>' +
 			'<span class="mj-luma-clip mj-luma-clip-r" hidden></span>' +
+			// The camera's own reading of the same picture, as a bracket
+			// across the bottom of the plot. Two measurements of one scene,
+			// deliberately shown together: this one is what the controller
+			// decides on, and the shape above is what the viewer is actually
+			// being served. They should agree, and an installer who can see
+			// that they do not has learnt something no single number tells
+			// them. Absent entirely until the camera reports a span.
+			'<span class="mj-luma-band" hidden><i></i></span>' +
 			'</div>' +
 			'<div class="mj-luma-read"><span class="mj-luma-verdict"></span>' +
-			'<span class="mj-luma-scale">Y&#8242; 0&#8211;255</span></div>';
+			'<span class="mj-luma-scale">dark &#8594; bright</span></div>';
 		container.appendChild(wrap);
 
 		const pathEl = wrap.querySelector('.mj-luma-path');
@@ -1941,6 +3167,7 @@
 		const clipR = wrap.querySelector('.mj-luma-clip-r');
 		const verdict = wrap.querySelector('.mj-luma-verdict');
 		const meanEl = container.parentNode.querySelector('.mj-luma-mean');
+		mountLumaBand(wrap.querySelector('.mj-luma-band'));
 
 		const sampler = window.MajesticLuma.start({
 			// Whichever element the stage currently has a picture on. It was a
@@ -1963,11 +3190,14 @@
 				clipL.hidden = !lo;
 				clipR.hidden = !hi;
 				const parts = [];
-				if (lo) parts.push((r.low * 100).toFixed(1) + '% crushed');
-				if (hi) parts.push((r.high * 100).toFixed(1) + '% blown');
+				// In the words the Tone figures use (#581): "crushed", "blown"
+				// and "clipping" are an image engineer's, and a mean on the
+				// 0-255 luma scale is a number with no scale on screen.
+				if (lo) parts.push((r.low * 100).toFixed(1) + '% lost in shadows');
+				if (hi) parts.push((r.high * 100).toFixed(1) + '% lost in highlights');
 				verdict.className = 'mj-luma-verdict' + (parts.length ? ' mj-luma-warn' : ' mj-luma-ok');
-				verdict.textContent = parts.length ? parts.join(' · ') : 'no clipping';
-				if (meanEl) meanEl.textContent = 'mean ' + Math.round(r.mean);
+				verdict.textContent = parts.length ? parts.join(' · ') : 'no detail lost';
+				if (meanEl) meanEl.textContent = 'average ' + Math.round(r.mean / 255 * 100) + '%';
 			},
 		});
 		// Torn down with the rest of the leaf, so a section change does not
@@ -1975,8 +3205,132 @@
 		state.liveCleanup.push(() => sampler.stop());
 	}
 
+	// The camera's measured span, under the browser's histogram of the same
+	// scene. Its own subscription rather than a hook in the status line's,
+	// because the two are independent: a build with no player has no
+	// histogram to draw on and must still get the sentence, and a camera with
+	// the controller off has a histogram and no band.
+	function mountLumaBand(band) {
+		if (!band || !window.MajesticToneCheck ||
+			typeof window.mjMetricsSubscribe !== 'function') return;
+		const bar = band.firstElementChild;
+		const off = window.mjMetricsSubscribe((s) => {
+			const b = (s && s.ok && s.tone)
+				? window.MajesticToneCheck.spanBand(s.tone) : null;
+			if (!b) { band.hidden = true; return; }
+			band.hidden = false;
+			bar.style.left = (b.lo * 100).toFixed(2) + '%';
+			bar.style.width = ((b.hi - b.lo) * 100).toFixed(2) + '%';
+			// The camera reports a WIDTH, not two ends, so the bracket is
+			// centred rather than placed — said in the tooltip so nobody
+			// reads its position as the camera's opinion of where the
+			// picture sits.
+			band.title = 'The camera measures this picture as spanning ' +
+				b.span + ' of 255. Drawn centred: it reports the width, ' +
+				'not where on the scale it falls.';
+		});
+		state.liveCleanup.push(() => { if (typeof off === 'function') off(); });
+	}
+
+	// The rows mj-exposure.js describes read the camera's heartbeat, once for
+	// the whole page. One subscription rather than one per row or per leaf: the
+	// rows are rebuilt on every section switch and state.expRows is emptied
+	// with them, so the subscriber only ever paints what is on screen, and the
+	// heartbeat it rides is polled for the page's life anyway.
+	let expSample = null;
+	let expWatching = false;
+	function watchExp() {
+		if (expWatching || typeof window.mjMetricsSubscribe !== 'function') return;
+		expWatching = true;
+		window.mjMetricsSubscribe((s) => {
+			expSample = s;
+			(state.expRows || []).forEach(r => { if (r.p.isConnected) r.paint(); });
+		});
+	}
+
+	// The rate a frame count is worth seconds at: what the main stream is set
+	// to, else the sensor's own. Said beside the figure, because slow shutter
+	// lowers the real rate at night and a delay in frames grows with it.
+	function streamFps() {
+		const set = Number(getDotted(state.config, 'video0.fps'));
+		if (isNum(set) && set > 0) return set;
+		const fps = ((((state.schema || {}).properties || {}).video0 || {}).properties || {}).fps;
+		return fps && isNum(fps['x-fps-sensor']) && fps['x-fps-sensor'] > 0
+			? fps['x-fps-sensor'] : null;
+	}
+
+	// Name, placeholder and running figure for one of those rows.
+	//
+	// The name follows the mode: in the one x-title-when names the field is the
+	// value itself, and the ceiling auto-exposure works inside is not what
+	// runs, so the placeholder drops the figure rather than quote a limit
+	// nothing is spending. A failed or absent reading says only "Auto": a stale
+	// number is the one thing worse than none (#582).
+	function paintExp(row, siblingValue, onRename) {
+		const { p, control, sub, unit } = row;
+		const title = EXP.titleFor(sub, siblingValue, '');
+		const hl = p.querySelector('.form-label [data-hl]');
+		if (title && hl && hl.dataset.hl !== title) {
+			hl.dataset.hl = title;
+			hl.textContent = title;
+			onRename(title);
+		}
+		const other = !!EXP.matched(sub, siblingValue);
+		// In manual, an exposure time with the gain left empty is the one
+		// combination that looks broken: majestic hands an empty field back to
+		// auto-exposure, which raises the gain to hold the brightness, so the
+		// picture does not change and the row seems to do nothing. Said on the
+		// row, while it is true.
+		if (row.dot === 'isp.exposure') {
+			let note = p.querySelector(':scope > .mj-manual-note');
+			const gainEmpty = String(siblingValue('aGain') || '') === '' ||
+				Number(siblingValue('aGain')) === 0;
+			const show = other && gainEmpty;
+			if (show && !note) {
+				note = el('div', 'hint mj-manual-note');
+				note.textContent = 'Analog gain is still automatic, so brightness is held: ' +
+					'set it too to see the exposure change the picture.';
+				p.appendChild(note);
+			}
+			if (note) note.hidden = !show;
+		}
+		const m = sub['x-metric'] || {};
+		const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
+		const inForce = other ? null : EXP.reading(v, m.inForce, m.scale);
+		control.placeholder = EXP.autoText(inForce, unit);
+
+		const out = p.querySelector('.mj-now');
+		if (!out) return;
+		out.textContent = '';
+		if (unit === 'frames') {
+			const n = control.value !== '' ? Number(control.value) : inForce;
+			out.textContent = EXP.delayText(n, streamFps()) || '';
+			return;
+		}
+		const now = EXP.reading(v, m.now, m.scale);
+		if (now === null) return;
+		const b = document.createElement('b');
+		b.textContent = EXP.withUnit(now, unit);
+		out.appendChild(document.createTextNode('now '));
+		out.appendChild(b);
+	}
+
 	function renderLive(form) {
 		const fields = liveFields();
+		// Rebuilt with the leaf. Left alone, a section switch would leave the
+		// painter writing into marks on a detached track for the rest of the
+		// page's life, and the new ones would never be found.
+		lastTone = null;
+		// Zero rather than now: a leaf remounted into Manual must renew the
+		// preview on its first heartbeat, not thirty seconds into a hold it
+		// did not start and whose remaining life it cannot know.
+		toneKeptAt = 0;
+		toneManual = [];
+		toneAutomatic = [];
+		toneModeAuto = [];
+		toneModeManual = [];
+		toneAuto = null;
+		toneModeRow = false;
 
 		// The only place the leaf names itself — the rail's active item says it
 		// too. The stream picker used to share this line; it is on the picture
@@ -1989,7 +3343,7 @@
 		// group label must not cost the Live leaf its heading.
 		const head = el('div', 'mj-live-head');
 		head.innerHTML =
-			'<h3 class="mj-cap">Live adjustments</h3>' +
+			'<h3 class="mj-cap">Picture</h3>' +
 			'<span class="mj-live-rule"></span>';
 		form.appendChild(head);
 
@@ -2056,7 +3410,9 @@
 
 			const rtMount = el('div', 'mj-live-rt-mount');
 			form.appendChild(rtMount);
-			state.liveCleanup.push(dockRuntime(preview, rtMount));
+			const dock = dockRuntime(preview, rtMount);
+			state.liveCleanup.push(dock.stop);
+			state.liveCleanup.push(pinStage(preview.stage, rtMount, dock));
 
 			const note = el('p', 'mj-live-hint');
 			note.textContent = 'Night, IR-cut and the lamp are runtime state: pressing one changes ' +
@@ -2070,11 +3426,33 @@
 		const mirror = fields.find(f => f.key === 'mirror' && f.sub.type === 'boolean');
 		const flip = fields.find(f => f.key === 'flip' && f.sub.type === 'boolean');
 		const useGeo = !!(mirror && flip);
-		// The strip is for knobs, so it is integers that decide whether there is
-		// one. A build that marks only booleans x-live has no strip and loses
-		// nothing: they render in the row below, where a switch has room to be a
-		// switch rather than a fifth cell of a four-cell instrument.
-		const hasTone = fields.some(f => f.sub.type === 'integer');
+		// What this leaf has an instrument for, and what it has not.
+		//
+		// LIVE_META is the leaf's whole vocabulary: four tone knobs it has a
+		// name, a Scene preset and a Stock button for, and the two switches the
+		// Orientation pad replaces. What arrives, though, is the daemon's
+		// decision — every x-live key of the owning group is lifted here
+		// (mj-tree.js, rule 2) — so the two sets were never the same set; they
+		// merely coincided, and nothing said what should happen when they stopped.
+		//
+		// They stopped when majestic classed eight isp keys live. Three of them
+		// are integers, and this used to read `f.sub.type === 'integer'`, which
+		// put every one of them in the strip — whose cells are dealt
+		// `flex: 1 1 0`. Seven knobs then shared the 851px four were drawn for:
+		// 110px each, the readout printed over the name, each label broken to one
+		// word a line. The picture paid for it as well, since --mj-pv-reserve
+		// holds room for ONE 76px row of knobs and the strip had become two.
+		//
+		// So the strip is the knobs this leaf knows, and nothing ever joins them.
+		// A lifted key it cannot name is drawn under the deck in its own
+		// section's card, as ordinary rows in the ordinary two columns — the same
+		// place, and the same shape, as the leftovers of a section the leaf
+		// absorbed. The picture keeps its reserve whatever the daemon lifts next,
+		// and a key that arrives tomorrow is on the page rather than in the
+		// instrument. A build that marks only booleans x-live has no strip and
+		// loses nothing, exactly as before.
+		const isKnob = f => f.sub.type === 'integer' && !!LIVE_META[f.key];
+		const hasTone = fields.some(isKnob);
 
 		// Out here rather than beside the stage: the knobs write to the camera
 		// whether or not the player scripts loaded, so the promise to put it
@@ -2089,33 +3467,202 @@
 		// the guarantee stays "a knob and the effect it has, together" while the
 		// picture takes everything left over (#239).
 		const strip = el('div', 'mj-live-strip');
+		// The knobs are Manual's whole reason to exist, so they go with it.
+		toneManual.push(strip);
 		if (hasTone) form.appendChild(strip);
 
 		// The second card carries what is worth having but not worth the
-		// picture's height: Scene, Luma and Orientation, side by side rather
-		// than as the 405px two-column block they used to make. Shallow enough
-		// that on a 1080p window the whole panel is on screen again.
+		// picture's height, in two columns: what you set on the left -- Tone,
+		// then Orientation under it -- and what the picture measures on the
+		// right -- Luma, with the tone figures under the histogram they are
+		// readings of. Orientation had a column of its own once, as tall as
+		// Tone's for one row of four buttons; the figures sat two by two in
+		// Tone's narrow column with their labels wrapped and half of every
+		// cell empty.
 		const deck = el('div', 'mj-live-deck');
 		const colScene = el('div', 'mj-live-col mj-live-col-scene');
-		const colLuma = el('div', 'mj-live-col');
-		const colGeo = el('div', 'mj-live-col mj-live-col-geo');
+		const colLuma = el('div', 'mj-live-col mj-live-col-luma');
+		// Filled while the fields are placed (the hidden mirror and flip
+		// checkboxes land here first), and put under Tone once Tone is drawn.
+		const colGeo = el('div', 'mj-live-geo');
 		deck.appendChild(colScene);
 		deck.appendChild(colLuma);
-		deck.appendChild(colGeo);
 		form.appendChild(deck);
 
-		for (const f of fields) {
+		// Under the deck: one card per section, holding what the deck has no
+		// place for. Made on demand and remembered, because two things end up
+		// here for two different reasons — the keys above that this leaf cannot
+		// name, and the leftovers of a section it absorbed — and a section that
+		// has both must not appear twice under two copies of its own name.
+		//
+		// A section the leaf did NOT absorb still has a leaf of its own, so its
+		// card says so: the page it came from carries liftedNote() pointing here,
+		// and this is the other half of that sentence. An absorbed section has no
+		// page left to point at and gets no note.
+		const restCards = new Map();
+		function restCols(sec) {
+			let cols = restCards.get(sec);
+			if (cols) return cols;
+			const card = el('div', 'card mj-live-rest');
+			const body = el('div', 'card-body');
+			const head = el('div', 'mj-live-head');
+			const h = el('h3', 'mj-cap');
+			h.textContent = label(sec);
+			head.appendChild(h);
+			head.appendChild(el('span', 'mj-live-rule'));
+			if (!absorbed(sec)) {
+				// Named once. The heading above already says which section this
+				// is, so the note says only where the rest of it went — the other
+				// half of the sentence liftedNote() prints over there.
+				const note = el('span', 'mj-live-note');
+				note.innerHTML = 'the rest is on <a href="?tab=' + esc(sec) +
+					'">its own page</a>';
+				head.appendChild(note);
+			}
+			body.appendChild(head);
+			cols = el('div', 'mj-cols');
+			cols.appendChild(el('div', 'mj-col'));
+			cols.appendChild(el('div', 'mj-col'));
+			state.cols.push(cols);
+			body.appendChild(cols);
+			card.appendChild(body);
+			form.appendChild(card);
+			restCards.set(sec, cols);
+			return cols;
+		}
+
+		// A section with named groups draws its lifted rows under their
+		// headings, in the order the groups are named, with every row no group
+		// names ahead of the first heading -- after the last one it would read
+		// as part of that group. Each section's rows are kept together and in
+		// the order the sections first appear, which is the order their cards
+		// are made in either way.
+		const groupIdx = (f) => {
+			const gs = sectionGroups(f.section);
+			return gs ? gs.findIndex(g => g.keys.indexOf(f.key) >= 0) : -1;
+		};
+		// Within a group, the order the group names its keys in -- which is the
+		// point of naming them: Exposure mode decides what everything under it
+		// means, and schema order put Slow shutter above it.
+		const keyIdx = (f) => {
+			const gi = groupIdx(f);
+			return gi < 0 ? -1 : sectionGroups(f.section)[gi].keys.indexOf(f.key);
+		};
+		const bySec = new Map();
+		fields.forEach((f, i) => {
+			if (!bySec.has(f.section)) bySec.set(f.section, []);
+			bySec.get(f.section).push({ f, i });
+		});
+		const placed = [];
+		bySec.forEach((list) => {
+			list.sort((a, b) => (groupIdx(a.f) - groupIdx(b.f)) ||
+				(keyIdx(a.f) - keyIdx(b.f)) || (a.i - b.i));
+			list.forEach(x => placed.push(x.f));
+		});
+		const headed = new Set();
+		// Groups whose rows act only while a sibling holds one value
+		// (activeWhen in mj-tree.js), and what to set back when it does not.
+		const idle = new Map();
+		// One disclosure per section and fold name (`fold` in mj-tree.js).
+		const folds = new Map();
+		const foldFor = (box, sec, name) => {
+			const k = sec + '/' + name;
+			if (!folds.has(k)) folds.set(k, groupFold(box, sec, name));
+			return folds.get(k);
+		};
+
+		for (const f of placed) {
 			const geoField = useGeo && (f === mirror || f === flip);
 			// The geometry checkboxes stay real fields — hidden — beside the pad
 			// that replaces them, so Save and dirty tracking never learn any of
 			// this happened.
-			const box = (!geoField && f.sub.type === 'integer') ? strip : colGeo;
+			let box = isKnob(f) ? strip
+				: geoField ? colGeo
+				: restCols(f.section).firstElementChild;
+			const gi = (isKnob(f) || geoField) ? -1 : groupIdx(f);
+			const gDef = gi >= 0 ? sectionGroups(f.section)[gi] : null;
+			if (gDef && gDef.fold) box = foldFor(box, f.section, gDef.fold);
+			let groupH = null;
+			if (gi >= 0 && !headed.has(f.section + '/' + gi)) {
+				headed.add(f.section + '/' + gi);
+				const g = sectionGroups(f.section)[gi];
+				// An unlabelled group orders its rows and draws no heading.
+				if (g.label) groupH = groupHead(box, g.label, g.note);
+			}
+			// `live` is the STRIP's presentation, not the live-write behaviour:
+			// it swaps the detent slider in and drops the hint, the help, the
+			// range and the x-requires warning, because a knob is four cells of
+			// an instrument with no room for prose. Right in the strip; wrong
+			// in the card under the deck, where it left the three gain rows
+			// with no explanation at all while the selects beside them kept
+			// theirs — a row missing its hint looks exactly like a row that
+			// never had one, which is the failure this leaf exists to stop.
+			//
+			// Whether the field WRITES live is decided from the schema
+			// (`pushes`, below the widget dispatch) and is untouched by this,
+			// so a knob in the card still moves the picture as it is dragged.
 			const field = renderField(box, f.dot, f.key, f.sub,
-				getDotted(state.config, f.dot), { live: true, hidden: geoField });
+				getDotted(state.config, f.dot),
+				{ live: isKnob(f) || geoField, hidden: geoField });
 			if (!field) continue;
+			// Carried on the group's first row, so whatever hides a whole
+			// group's rows can take its heading too (see the dehaze row).
+			if (groupH) field.groupHead = groupH;
+			const gAct = gi >= 0 ? sectionGroups(f.section)[gi] : null;
+			if (gAct && gAct.activeWhen) {
+				const k = f.section + '/' + gi;
+				if (!idle.has(k)) idle.set(k, { section: f.section, when: gAct.activeWhen, els: [] });
+				if (groupH) idle.get(k).els.push(groupH);
+				idle.get(k).els.push(field.p);
+			}
 			state.fields.push(field);
 			state.initial[f.dot] = field.getValue();
+
 		}
+
+		// Picking Manual starts from the picture on screen. Manual holds only the
+		// fields that are set, and an empty one keeps following the light --
+		// so without this, switching to Manual and dialling the exposure changed
+		// nothing visible (auto-exposure moved the gain to cancel it). Each
+		// empty field manual holds is filled with what the camera is running
+		// at that moment, as an ordinary edit: it previews, it is dirty, and
+		// Save keeps it or Discard drops it. On the user's change only -- a
+		// refresh or a leaf drawn in manual leaves the boxes as saved. The
+		// sensor digital gain is not among them: manual pins it at 1x.
+		const modeF = state.fields.find(f => f.dot === 'isp.aeMode');
+		if (modeF && EXP) {
+			modeF.control.addEventListener('change', () => {
+				if (modeF.getValue() !== 'manual') return;
+				const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
+				for (const dot of ['isp.exposure', 'isp.aGain', 'isp.ispGain']) {
+					const f = state.fields.find(x => x.dot === dot);
+					if (!f || !f.schema || String(f.getValue()) !== '') continue;
+					const m = f.schema['x-metric'] || {};
+					const now = EXP.reading(v, m.now, m.scale);
+					if (now === null || !(now > 0)) continue;
+					setLive(f, EXP.fmt(now, f.schema['x-unit'] || ''));
+				}
+			});
+		}
+
+		// Set back, not disabled: a value written while the camera is in the
+		// other mode is in place the moment it comes back, and a disabled box
+		// would say it cannot be. The heading's note says which mode they
+		// act in; this makes the page agree with it. An unreadable mode leaves
+		// the rows as they are rather than dimming them on a guess.
+		idle.forEach(({ section, when, els }) => {
+			const d = section + '.' + when.field;
+			const paint = () => {
+				const f = state.fields.find(x => x.dot === d);
+				const v = f ? f.getValue() : getDotted(state.config, d);
+				const off = v !== undefined && v !== null && v !== '' &&
+					String(v) !== String(when.equals);
+				els.forEach(e => e.classList.toggle('mj-idle', off));
+			};
+			state.repaint.push(paint);
+			state.liveSync.push(paint);
+			paint();
+		});
 
 		// Hold to compare shows the picture at stock while it is held. At stock
 		// there is nothing to compare, and a press that changes nothing read as
@@ -2124,9 +3671,8 @@
 		// edit and after a refresh, the same way the pad re-reads its fields.
 		if (cmpBtn) {
 			const syncCompare = () => {
-				const off = state.fields.some(f => isLive(f) && f.schema &&
-					f.schema.default !== undefined &&
-					String(liveValue(f)) !== String(liveDefault(f)));
+				const off = state.fields.some(f => isLive(f) &&
+					String(liveValue(f)) !== String(liveStock(f)));
 				cmpBtn.disabled = !off;
 				cmpBtn.title = off
 					? 'Hold to see the picture at stock; release to come back'
@@ -2156,20 +3702,36 @@
 			strip.appendChild(foot);
 		}
 
+		// No leftovers pass. An absorbed section's remaining keys are the ones
+		// the camera cannot apply live, and they are drawn on their home leaf
+		// (mj-tree.js rule 3), never here: this leaf holds only what changes
+		// the picture as it is touched (#583).
+
 		const toneFields = state.fields.filter(f =>
 			f.schema && f.schema['x-live'] && f.type === 'integer');
 		if (hasTone && toneFields.length) {
-			renderScene(liveGroup(colScene, 'Scene', 'starting points'), toneFields);
+			// "Tone", not "Scene": the group leads with who is driving, and
+			// the presets are one of the two things that can be under that.
+			renderScene(
+				liveGroup(colScene, 'Tone', 'automatic or by hand'),
+				toneFields);
 		}
+		colScene.appendChild(colGeo);
 
 		if (preview) {
 			// The group's note slot carries the running mean rather than a
 			// caption — a number that changes is worth more there than a word
 			// that does not.
-			const lumaBody = liveGroup(colLuma, 'Luma', 'mean —');
+			const lumaBody = liveGroup(colLuma, 'Luma', 'average —');
 			const note = lumaBody.parentNode.querySelector('.mj-live-note');
 			if (note) note.className = 'mj-live-note mj-luma-mean';
 			renderLuma(lumaBody, preview);
+			// The tone figures -- range used, lost in shadows and highlights,
+			// light to spare -- are readings of this histogram, so they sit
+			// under it, four across. renderScene built them and still drives
+			// them; only their place changes.
+			const figs = colScene.querySelector('.mj-tone-figs');
+			if (figs) lumaBody.appendChild(figs);
 		}
 
 		if (useGeo) {
@@ -2177,7 +3739,7 @@
 			const ff = state.fields.find(f => f.dot === flip.dot);
 			if (mf && ff) {
 				const geo = liveGroup(colGeo, 'Orientation', '');
-				renderOrientation(geo, mf, ff, mountTurnField(geo, mirror.section));
+				renderOrientation(geo, mf, ff, mirror.section);
 			}
 		}
 
@@ -2190,8 +3752,8 @@
 		// stacked. Drop whatever came out empty instead of enumerating the
 		// combinations. colGeo is judged on what is VISIBLE in it: with the pad
 		// mounted it holds the two hidden checkboxes as well, and without the
-		// pad it may hold nothing but them — a cell that renders as a divider
-		// and 15rem of nothing.
+		// pad it may hold nothing but them — a block that renders as a rule and
+		// a gap under Tone with nothing in it.
 		if (!colGeo.querySelector('.mj-live-grp, .mj-live-row:not([hidden])')) {
 			// The hidden fields go with it. They are detached, not destroyed:
 			// state.fields still holds them, and getValue()/Save read the
@@ -2202,32 +3764,60 @@
 		if (!deck.childElementCount) deck.remove();
 		if (hasTone && !strip.querySelector('.mj-live-row')) strip.remove();
 
-		// The leftovers of a section this leaf absorbed — on this build, the
-		// image section's Automatic tuning — as the ordinary rows they would
-		// have been on a page of their own, in a card under the deck. Generic on
-		// purpose: the rows come from the schema, so a key the section grows
-		// tomorrow lands here rather than on a page that no longer exists. What
-		// the deck already claimed (the quarter turns) is skipped by dot.
-		const claimed = new Set(state.fields.map(f => f.dot));
-		for (const sec of absorbedSections()) {
-			if (!sectionFields(sec).some(f => !claimed.has(f.dot))) continue;
-			const card = el('div', 'card mj-live-rest');
-			const body = el('div', 'card-body');
-			const head = el('div', 'mj-live-head');
-			const h = el('h3', 'mj-cap');
-			h.textContent = label(sec);
-			head.appendChild(h);
-			head.appendChild(el('span', 'mj-live-rule'));
-			body.appendChild(head);
-			const cols = el('div', 'mj-cols');
-			cols.appendChild(el('div', 'mj-col'));
-			cols.appendChild(el('div', 'mj-col'));
-			state.cols = cols;
-			body.appendChild(cols);
-			card.appendChild(body);
-			form.appendChild(card);
-			renderProps(cols.firstElementChild, sec,
-				((state.schema.properties || {})[sec] || {}).properties || {}, claimed);
+		// Automatic tuning: a lifted switch with no instrument of its own, so
+		// the loop above drew it as an ordinary row in the image card under the
+		// deck. The Tone mode row replaces it below.
+		// Last, because the switch it answers for is drawn by the loop above
+		// and there is no row to hang a status line under until there is.
+		// Absent on a build that does not carry the key at all, which is
+		// every vendor but this one — a line about a feature the camera does
+		// not have is worse than no line.
+		const tuning = state.fields.find(f => f.dot === 'image.tuning');
+		if (tuning && tuning.control) {
+			// The mode row is this switch now, so the switch itself goes --
+			// hidden rather than removed, exactly as the Orientation pad
+			// treats the mirror and flip checkboxes it replaces, so Save and
+			// dirty tracking never learn anything happened. Two controls for
+			// one setting, in two places, is the thing this avoids.
+			const rowEl = tuning.control.closest('.mj-row');
+			if (rowEl && toneModeRow) {
+				rowEl.hidden = true;
+				// The card it sat in may now hold nothing at all: on this
+				// build image.tuning is the whole of what the Live leaf
+				// absorbed from the image section. A card that is a heading
+				// and 3rem of nothing is worse than no card.
+				const card = rowEl.closest('.mj-live-rest');
+				if (card && !card.querySelector('.mj-row:not([hidden])')) {
+					// Detached, not destroyed: state.fields still holds the
+					// field and Save reads the control, which does not care
+					// whether it is in the document.
+					card.hidden = true;
+				}
+			} else if (rowEl) {
+				renderAutoStatus(rowEl.parentNode);
+			}
+			// isp.dehaze is the tuner's third actuator, and it is not drawn in
+			// the tone card: it is an isp.* block and renders with the rest of
+			// that section, in a card further down. The mode still owns it.
+			// An editable haze slider under Automatic is a control for
+			// something a controller is driving -- the whole fault this
+			// section exists to remove, one card away from where it was
+			// fixed. Manual's, so it goes when Manual does.
+			//
+			// Here rather than beside the strip because the rest-cards are
+			// built above this line and not before it.
+			// Its heading goes with it: the row is the whole of its group, and
+			// a heading left standing over a hidden row introduces nothing.
+			const hazeField = state.fields.find(f => f.key === 'dehaze' && f.p);
+			if (hazeField) toneManual.push(hazeField.p);
+			if (hazeField && hazeField.groupHead) toneManual.push(hazeField.groupHead);
+
+			const relock = () => applyToneMode(toneAutoOn());
+			tuning.control.addEventListener('change', relock);
+			// Also on a refresh or a discard, which put the switch back
+			// without anybody pressing a chip.
+			state.liveSync.push(relock);
+			relock();
 		}
 	}
 
@@ -2242,7 +3832,7 @@
 	// across two rail entries asked people to hold one in their head while
 	// looking at the other.
 	//
-	// It is laid out as the Live adjustments leaf is, because it is the same
+	// It is laid out as the Picture leaf is, because it is the same
 	// kind of page: a picture you change things against. Head, then the picture,
 	// then the strip for the one knob worth dragging while you watch, then the
 	// deck. And it keeps that leaf's rule about what may sit on the glass —
@@ -2250,6 +3840,49 @@
 	// fields go through Save, so none of them is a lit toggle on the bar; the
 	// only thing added there is Draw regions, which is a tool rather than a
 	// setting, exactly as Zoom to an area is on the Live View page.
+	// What the live-detection overlay says underneath the picture. Four
+	// states, and they are deliberately not three: a camera with nothing to
+	// report and a camera that has stopped reporting look identical on screen
+	// and mean opposite things, so they get different words.
+	function paintLiveNote(el, n) {
+		if (!el || !n) return;
+		if (n.state === 'waiting') { el.textContent = ''; return; }
+		if (n.state === 'stale') {
+			el.textContent = 'detector quiet for ' +
+				Math.round(n.age / 1000) + 's';
+			return;
+		}
+		if (n.state === 'quiet') { el.textContent = 'nothing moving'; return; }
+		const more = n.total > n.n ? ' of ' + n.total : '';
+		el.textContent = n.n + more + (n.n === 1 ? ' detection' : ' detections');
+	}
+
+	// The pins leaf. Everything on it comes from /api/v1/pinmux and goes back
+	// the same way — there is no config row to save with the rest of the page,
+	// because a pin change is applied to the hardware and held open for thirty
+	// seconds before it is kept, which no settings form can express.
+	function renderPins(form) {
+		const head = el('div', 'mj-live-head');
+		head.innerHTML = '<h3 class="mj-cap">' + esc(label('pins')) + '</h3>' +
+			'<span class="mj-live-rule"></span>';
+		form.appendChild(head);
+
+		if (!window.MajesticPins) {
+			// A dead end otherwise: this leaf draws no form, so there is no
+			// fallback control to fall back TO. Say what is still reachable.
+			const p = el('p', 'mj-pins-empty');
+			p.textContent = 'The pin map did not load, so there is nothing to ' +
+				'draw. Reload the page; what each pin is set to is still ' +
+				'readable at /api/v1/pinmux.';
+			form.appendChild(p);
+			return;
+		}
+		// Torn down with the section, like the preview and the region overlay:
+		// the module holds a heartbeat to the camera, and a heartbeat nobody is
+		// watching is the exact thing the back-out window exists to end.
+		state.pins = window.MajesticPins.mount(form, {});
+	}
+
 	function renderMotion(form) {
 		const fields = sectionFields('motionDetect');
 
@@ -2333,6 +3966,29 @@
 			if (!strip.querySelector('.mj-live-row')) strip.remove();
 		}
 
+		// The camera's own detections, live, over the same picture the regions
+		// are drawn on. Mounted BEFORE the region editor so its layer sits
+		// underneath: the editor hit-tests its gestures by DOM order, and a
+		// layer above it that swallowed a press would stop new regions being
+		// drawn (the detection layer is pointer-transparent, but the z-order
+		// is the contract, not the CSS).
+		if (preview && window.MajesticAnalytics && window.MajesticRegion) {
+			const live = window.MajesticAnalytics.mount(preview, {
+				// How a main-stream detection lands on the stream being shown,
+				// from the same report the region outlines use. Undefined
+				// until the camera has answered, which means "do not draw
+				// yet" rather than "no mapping": an outline placed by a guess
+				// moves once the answer arrives, and a box that jumps reads
+				// as the camera being wrong about where the movement was.
+				view: () => camRects.ok && !camRects.known
+					? undefined
+					: window.MajesticRegion.view(
+						camRects.group, camRects.views, 0, preview.stream()),
+				onNote: (n) => paintLiveNote(note, n),
+			});
+			if (live) state.liveCleanup.push(() => live.destroy());
+		}
+
 		if (roiField && preview && window.MajesticRegion) {
 			repaint = mountRegions(preview, roiField, regionBody, regionNote).repaint;
 			// Regions are in the main stream's pixels and the picture may be
@@ -2386,67 +4042,18 @@
 		paintNote();
 	}
 
-	// The region editor: rectangles on the picture, the list beside it, and one
-	// mode that turns a drag into a new region.
+	// The geometry of a picture on the preview's stage, for an editor that
+	// draws main-stream coordinates on it: the region editor below, and the
+	// counting lines. One copy, so two editors on one picture cannot disagree
+	// about where it is.
 	//
-	// Returns its repaint function, which renderMotion hands to the stage's
-	// onFrame — the geometry below cannot be computed until a frame has said how
-	// big it is.
-	// `words` is the whole of what differs between the two callers. Motion
-	// regions say where to watch; privacy masks are burned into the stream. Same
-	// control, different sentence beside it — sharing the sentence would be the
-	// one thing that must not be shared.
-	//
-	// `words.gated` says the caller decides when a drag draws (the Overlay leaf
-	// has two things you can place on one picture, so it owns that choice); the
-	// Motion leaf leaves it ungated and the picture is drawable throughout.
-	function mountRegions(preview, field, listBox, noteEl, words) {
-		words = words || {};
-		const W = {
-			one: words.one || '1 region',
-			many: words.many || ' regions',
-			draw: words.draw || 'Draw regions',
-			drawHint: words.drawHint || 'Drag a rectangle on the picture',
-			empty: words.empty ||
-				'No regions — the whole picture is watched. Drag one on the picture to watch part of it instead.',
-			clearAsk: words.clearAsk ||
-				'Remove every region? The whole picture will be watched.',
-			clearLabel: words.clearLabel || 'Clear all',
-			base: words.base ||
-				'Regions are stored in the main stream’s pixels, and this camera has ' +
-				'no main resolution set. Switch the picture to Main to draw them.',
-			// The singular noun the row verdicts build their sentences from,
-			// and the two things a rectangle the camera cannot use is failing
-			// to do. Kept as words rather than as a boolean, because "watches"
-			// and "hides" are not the same promise and the whole reason these
-			// two callers share a control is that only the sentences differ.
-			thing: words.thing || 'region',
-			deadSome: words.deadSome ||
-				'A region with no area, or one outside the picture, is saved but never watched.',
-			deadAll: words.deadAll ||
-				'None of these regions watches anything, so nothing will be detected: ' +
-				'detection is limited to the regions listed and does not fall back to ' +
-				'the whole picture.',
-			space: words.space || 'Coordinates are main-stream pixels',
-		};
-		// Ungated callers are always live; a gated one starts off and is turned
-		// on by the caller's own mode control.
-		let active = !words.gated;
-		const ctl = field.control;
-
-		// ── coordinates ───────────────────────────────────────────────────
-		//
-		// Regions are stored in the MAIN stream's pixels, which is what
-		// majestic.yaml holds and what the old editor computed against
-		// video0.size. The picture on screen may be the sub stream — a different
-		// resolution of the same field of view — so the mapping goes through
-		// fractions of the frame rather than through either size directly.
-		//
-		// video0.size can also be unset, meaning "sensor native", which the
-		// config does not spell out. Then the only honest base is the frame
-		// itself, and only while the frame IS the main stream; on the sub
-		// stream there is nothing to scale by and the editor says so instead of
-		// drawing rectangles in the wrong places.
+	// Regions are stored in the MAIN stream's pixels, which is what
+	// majestic.yaml holds. The picture on screen may be the sub stream -- a
+	// different resolution of the same field of view -- so the mapping goes
+	// through the camera's own report of how the streams sit on the sensor
+	// (camRects, from /api/v1/osd) where it has given one.
+	function stageGeom(preview) {
+		const RGN = window.MajesticRegion;
 		function base() {
 			// The camera's own word for the main stream's size, where it has
 			// given one. It is not always video0.size: a crop on the main
@@ -2514,6 +4121,75 @@
 			const s = Math.min(w / f.w, h / f.h);
 			return { x: (w - f.w * s) / 2, y: (h - f.h * s) / 2, w: f.w * s, h: f.h * s };
 		}
+		return { base: base, camView: camView, geom: geom, pic: pic };
+	}
+
+	// The region editor: rectangles on the picture, the list beside it, and one
+	// mode that turns a drag into a new region.
+	//
+	// Returns its repaint function, which renderMotion hands to the stage's
+	// onFrame — the geometry below cannot be computed until a frame has said how
+	// big it is.
+	// `words` is the whole of what differs between the two callers. Motion
+	// regions say where to watch; privacy masks are burned into the stream. Same
+	// control, different sentence beside it — sharing the sentence would be the
+	// one thing that must not be shared.
+	//
+	// `words.gated` says the caller decides when a drag draws (the Overlay leaf
+	// has two things you can place on one picture, so it owns that choice); the
+	// Motion leaf leaves it ungated and the picture is drawable throughout.
+	function mountRegions(preview, field, listBox, noteEl, words) {
+		words = words || {};
+		const W = {
+			one: words.one || '1 region',
+			many: words.many || ' regions',
+			draw: words.draw || 'Draw regions',
+			drawHint: words.drawHint || 'Drag a rectangle on the picture',
+			empty: words.empty ||
+				'No regions — the whole picture is watched. Drag one on the picture to watch part of it instead.',
+			clearAsk: words.clearAsk ||
+				'Remove every region? The whole picture will be watched.',
+			clearLabel: words.clearLabel || 'Clear all',
+			base: words.base ||
+				'Regions are stored in the main stream’s pixels, and this camera has ' +
+				'no main resolution set. Switch the picture to Main to draw them.',
+			// The singular noun the row verdicts build their sentences from,
+			// and the two things a rectangle the camera cannot use is failing
+			// to do. Kept as words rather than as a boolean, because "watches"
+			// and "hides" are not the same promise and the whole reason these
+			// two callers share a control is that only the sentences differ.
+			thing: words.thing || 'region',
+			deadSome: words.deadSome ||
+				'A region with no area, or one outside the picture, is saved but never watched.',
+			deadAll: words.deadAll ||
+				'None of these regions watches anything, so nothing will be detected: ' +
+				'detection is limited to the regions listed and does not fall back to ' +
+				'the whole picture.',
+			space: words.space || 'Coordinates are main-stream pixels',
+			max: words.max || 0,
+		};
+		// Ungated callers are always live; a gated one starts off and is turned
+		// on by the caller's own mode control.
+		let active = !words.gated;
+		const ctl = field.control;
+
+		// ── coordinates ───────────────────────────────────────────────────
+		//
+		// Regions are stored in the MAIN stream's pixels, which is what
+		// majestic.yaml holds and what the old editor computed against
+		// video0.size. The picture on screen may be the sub stream — a different
+		// resolution of the same field of view — so the mapping goes through
+		// fractions of the frame rather than through either size directly.
+		//
+		// video0.size can also be unset, meaning "sensor native", which the
+		// config does not spell out. Then the only honest base is the frame
+		// itself, and only while the frame IS the main stream; on the sub
+		// stream there is nothing to scale by and the editor says so instead of
+		// drawing rectangles in the wrong places.
+		// Where everything on the picture is, shared with the line editor so
+		// the two cannot disagree about it (stageGeom, above).
+		const SG = stageGeom(preview);
+		const base = SG.base, camView = SG.camView, geom = SG.geom, pic = SG.pic;
 
 		// The geometry verdicts live in mj-region.js, away from the DOM, because
 		// every branch of them renders a confident-looking chip and only a
@@ -3137,6 +4813,8 @@
 				// Empty picture. A press here is also how you put a selection down,
 				// which is what makes the grips and the delete button transient.
 				select(-1);
+				// As many as the camera reads, and no more: past that it drops them.
+				if (W.max && list().length >= W.max) return;
 				gesture = { kind: 'new', id: e.pointerId, from: at(e), moved: false };
 			}
 			if (!gesture.orig && gesture.kind !== 'new') { gesture = null; return; }
@@ -3343,6 +5021,458 @@
 	}
 
 
+	// ── The Counting leaf ─────────────────────────────────────────────────
+	//
+	// Lines to count crossings of and zones to count who is in, both drawn on
+	// the live picture, beside the switches for what is counted. The same
+	// kind of page as the Motion leaf, and the zones ARE its regions: the same
+	// editor, gated, because this picture has two things a drag can draw and
+	// the Draw switch says which one it is for.
+	function renderCounting(form) {
+		const fields = sectionFields('counting');
+		const head = el('div', 'mj-live-head');
+		head.innerHTML = '<h3 class="mj-cap">' + esc(label('counting')) + '</h3>' +
+			'<span class="mj-live-rule"></span>';
+		const note = el('span', 'mj-live-note');
+		head.appendChild(note);
+		form.appendChild(head);
+
+		let repaint = () => {};
+		const preview = window.MajesticPreview &&
+			window.MajesticPreview.mount(form, {
+				config: () => state.config,
+				where: 'counting',
+				onFrame: () => repaint(),
+			});
+		state.preview = preview;
+
+		const deck = el('div', 'mj-live-deck');
+		const colDraw = el('div', 'mj-live-col');
+		const colWhat = el('div', 'mj-live-col mj-live-col-b');
+		deck.appendChild(colDraw);
+		deck.appendChild(colWhat);
+		form.appendChild(deck);
+
+		const lineBody = liveGroup(colDraw, 'Lines', 'none');
+		const lineNote = lineBody.parentNode.querySelector('.mj-live-note');
+		const zoneBody = liveGroup(colDraw, 'Zones', 'none');
+		const zoneNote = zoneBody.parentNode.querySelector('.mj-live-note');
+		const whatBody = liveGroup(colWhat, 'Counting', '');
+
+		// The drawing editors are chosen by what the camera declares about a
+		// field (x-shapes), and take its limits from there too.
+		// Lines are one string; rects are the array of "XxYxWxH" strings a
+		// MultiRect field is, which is what the region editor drives.
+		const shapes = (f) => {
+			const sh = f.sub && f.sub['x-shapes'];
+			if (!sh || typeof sh !== 'object') return null;
+			const want = sh.kind === 'lines' ? 'string' : sh.kind === 'rects' ? 'array' : null;
+			return want && f.sub.type === want ? sh : null;
+		};
+		let linesField = null, zonesField = null, lineShapes = null, zoneShapes = null;
+		for (const f of fields) {
+			const sh = shapes(f);
+			// One of each: a second field of a kind keeps its text box.
+			const isLines = !!sh && sh.kind === 'lines' && !linesField;
+			const isZones = !!sh && sh.kind === 'rects' && !zonesField;
+			const box = isLines ? lineBody : isZones ? zoneBody : whatBody;
+			const field = renderField(box, f.dot, f.key, f.sub, getDotted(state.config, f.dot),
+				isLines || isZones ? { hidden: true } : undefined);
+			if (!field) continue;
+			state.fields.push(field);
+			state.initial[f.dot] = field.getValue();
+			if (isLines) { linesField = field; lineShapes = sh; }
+			if (isZones) { zonesField = field; zoneShapes = sh; }
+		}
+		// A group, and a Draw button, only for what the camera declared:
+		// one with no field would say "none" about a value shown elsewhere,
+		// and its button would switch to an editor that does not exist.
+		if (!linesField) lineBody.parentNode.hidden = true;
+		if (!zonesField) zoneBody.parentNode.hidden = true;
+		if (!linesField && !zonesField) return;
+
+		const can = preview && window.MajesticRegion && window.MajesticLine;
+		if (!can) {
+			for (const f of [linesField, zonesField]) if (f) f.p.hidden = false;
+			const p = el('p', 'mj-live-hint');
+			p.textContent = (preview ? 'The line and zone editor could not be loaded'
+				: 'The preview could not be loaded') +
+				', so lines and zones can only be given as coordinates here.';
+			colDraw.appendChild(p);
+			return;
+		}
+
+		// What a drag on the picture draws. One at a time, because a press on
+		// empty picture has to mean one thing.
+		const sw = el('div', 'btn-group btn-group-sm mj-ct-mode');
+		sw.setAttribute('role', 'group');
+		sw.setAttribute('aria-label', 'Draw on the picture');
+		const modes = {};
+		const kinds = [['lines', 'Draw lines', linesField], ['zones', 'Draw zones', zonesField]]
+			.filter((x) => x[2]);
+		// With one kind there is nothing to choose between.
+		sw.hidden = kinds.length < 2;
+		for (const [k, t] of kinds) {
+			const b = el('button', 'btn btn-outline-primary');
+			b.type = 'button';
+			b.textContent = t;
+			b.addEventListener('click', () => setMode(k));
+			sw.appendChild(b);
+			modes[k] = b;
+		}
+		colDraw.insertBefore(sw, colDraw.firstChild);
+
+		const zones = zonesField ? mountRegions(preview, zonesField, zoneBody, zoneNote, {
+			gated: true,
+			max: Number.isInteger(zoneShapes.maxItems) && zoneShapes.maxItems > 0 ? zoneShapes.maxItems : 0,
+			one: '1 zone',
+			many: ' zones',
+			draw: 'Draw zones',
+			drawHint: 'Drag a rectangle on the picture',
+			empty: 'No zones. Drag one on the picture to count who is in it.',
+			clearAsk: 'Remove every zone?',
+			thing: 'zone',
+			deadSome: 'A zone with no area, or one outside the picture, is saved but counts no one.',
+			deadAll: 'None of these zones can count anyone: each has no area or is outside the picture.',
+			base: 'Zones are stored in the main stream’s pixels, and this camera has ' +
+				'no main resolution set. Switch the picture to Main to draw them.',
+		}) : null;
+		const lines = linesField ? mountLines(preview, linesField, lineBody, lineNote,
+			window.MajesticLine.spec(lineShapes)) : null;
+
+		let mode = 'lines';
+		function setMode(m) {
+			mode = m;
+			for (const k in modes) {
+				modes[k].classList.toggle('active', k === m);
+				modes[k].setAttribute('aria-pressed', k === m ? 'true' : 'false');
+			}
+			if (zones) zones.setActive(m === 'zones');
+			if (lines) lines.setActive(m === 'lines');
+		}
+		setMode(lines ? 'lines' : 'zones');
+		repaint = () => {
+			if (zones) zones.repaint();
+			if (lines) lines.repaint();
+		};
+		// A reset or a fresh read of the config sets the hidden fields without
+		// an input event; the picture and the lists follow them here.
+		state.liveSync.push(() => repaint());
+		// Where the picture is on the stage. Without it nothing can be drawn,
+		// so a failed ask is asked again while this leaf is up -- not only
+		// on the next frame, which a stalled preview may never deliver. A 404
+		// (the camera cannot say) is final, and refreshOsdRects records it.
+		let mounted = true;
+		state.liveCleanup.push(() => { mounted = false; });
+		const askRects = (n) => refreshOsdRects().catch(() => {}).then(() => {
+			if (!mounted) return;
+			repaint();
+			if (camRects.ok && !camRects.known && n < 10) setTimeout(() => askRects(n + 1), 3000);
+		});
+		askRects(0);
+
+		const enabled = state.fields.find(f => f.dot === 'counting.enabled');
+		// Following keeps a person in the same place in the picture, and lines
+		// and zones are places in the picture: a camera that follows counts
+		// almost nobody crossing anything, and nothing else on this page would
+		// say why. Only where the head can follow, though -- a motor that
+		// counts steps and classes to follow on GET /ptz, the test the PTZ pad
+		// makes before it offers the switch (ptz-follow.js, shared); a stale
+		// ptz.track on a camera without such a head follows nobody.
+		let caps = null;
+		const follows = () => String(getDotted(state.config, 'ptz.track')) === 'true' &&
+			!!window.MajesticPtzFollow && window.MajesticPtzFollow.offered(caps);
+		apiFetch('/ptz', { cache: 'no-store' })
+			.then(r => (r.ok ? r.text() : null)).catch(() => null)
+			.then(t => { caps = t; paintNote(); });
+		const paintNote = () => {
+			const off = enabled && enabled.getValue() === 'false';
+			note.textContent = off ? 'Counting is off — lines and zones are saved, not used.'
+				: follows() ? 'The camera follows people, so it keeps them still in the picture — ' +
+					'turn Follow off for lines and zones to count.'
+				: '';
+			note.classList.toggle('mj-md-warn', !!off || follows());
+		};
+		if (enabled) {
+			enabled.control.addEventListener('change', paintNote);
+			state.liveSync.push(paintNote);
+		}
+		paintNote();
+	}
+
+	// The line editor: counting lines on the picture, each with an arrow into
+	// its "in" side, and the list of them beside it. The field is the
+	// camera's one string ("[name:]x1,y1,x2,y2;..."), hidden, and every edit
+	// rewrites it whole through MajesticLine -- which never writes a string
+	// the camera would refuse, because the camera refuses ALL the lines over
+	// one bad entry and says so nowhere but its log.
+	function mountLines(preview, field, listBox, noteEl, sp) {
+		const LN = window.MajesticLine;
+		const SG = stageGeom(preview);
+		const SVG = 'http://www.w3.org/2000/svg';
+		let active = false;
+		let sel = -1;
+		let gesture = null;
+
+		// The model is the field: read back from it on every paint, written to
+		// it on every edit, so Save, dirty tracking and reset see one value.
+		const read = () => LN.parse(field.getValue(), sp) || [];
+		const unreadable = () => LN.parse(field.getValue(), sp) === null;
+		function write(list) {
+			field.setValue(LN.format(list));
+			field.control.dispatchEvent(new Event('input', { bubbles: true }));
+			field.control.dispatchEvent(new Event('change', { bubbles: true }));
+			updateDirty();
+			paint();
+		}
+
+		const catcher = el('div', 'mj-md-catch');
+		preview.overlay.appendChild(catcher);
+		const svg = document.createElementNS(SVG, 'svg');
+		svg.setAttribute('class', 'mj-ct-svg');
+		preview.overlay.appendChild(svg);
+
+		const list = el('div', 'mj-ct-lines');
+		listBox.appendChild(list);
+		const warn = el('p', 'mj-live-hint mj-md-warn');
+		warn.hidden = true;
+		listBox.appendChild(warn);
+
+		function mk(tag, attrs, parent) {
+			const e = document.createElementNS(SVG, tag);
+			for (const k in attrs) e.setAttribute(k, attrs[k]);
+			(parent || svg).appendChild(e);
+			return e;
+		}
+
+		// The picture and the list are painted apart: hovering a row only has
+		// to light its line, and rebuilding the list under a pointer threw
+		// away a name being typed and a click on Swap or Remove mid-press.
+		function paint() {
+			paintSvg();
+			paintList(read());
+		}
+
+		function paintSvg() {
+			const g = SG.geom();
+			const ls = read();
+			while (svg.firstChild) svg.removeChild(svg.firstChild);
+			const usable = !!g && active;
+			catcher.hidden = !usable;
+			// Off, the lines stay on the picture but take no press at all:
+			// their hit strokes and grips declare pointer-events of their
+			// own, which the root's 'none' does not reach, and a press on one
+			// would land in an editor that ignores it instead of the zones'.
+			svg.classList.toggle('mj-ct-off', !active);
+			// Only ever set here: the zone editor shares the class and owns
+			// clearing it, and a line editor that cleared it on every paint
+			// took the crosshair from Draw zones.
+			if (usable) preview.stage.classList.add('mj-md-armed');
+			if (g) {
+				const defs = mk('defs', {});
+				const m = mk('marker', { id: 'mj-ct-arrow', viewBox: '0 0 10 10', refX: '6', refY: '5',
+					markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' }, defs);
+				mk('path', { d: 'M0,0 L10,5 L0,10 z', class: 'mj-ct-arrowhead' }, m);
+				ls.forEach((l, i) => {
+					const x1 = g.sx(l.x1), y1 = g.sy(l.y1), x2 = g.sx(l.x2), y2 = g.sy(l.y2);
+					const grp = mk('g', { class: 'mj-ct-line' + (i === sel ? ' mj-ct-sel' : '') +
+						(LN.verdict(l, SG.base(), sp) ? ' mj-ct-dead' : '') });
+					mk('line', { x1, y1, x2, y2, class: 'mj-ct-hit' }, grp).dataset.i = i;
+					mk('line', { x1, y1, x2, y2, class: 'mj-ct-stroke' }, grp);
+					const a = LN.inArrow({ x1, y1, x2, y2 }, 28);
+					mk('line', { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, class: 'mj-ct-in',
+						'marker-end': 'url(#mj-ct-arrow)' }, grp);
+					const t = mk('text', { x: a.x2 + 4, y: a.y2 + 4, class: 'mj-ct-label' }, grp);
+					t.textContent = l.name + ' · in';
+					for (const [end, cx, cy] of [[1, x1, y1], [2, x2, y2]]) {
+						const h = mk('circle', { cx, cy, r: 7, class: 'mj-ct-grip' }, grp);
+						h.dataset.i = i;
+						h.dataset.end = end;
+					}
+				});
+			}
+		}
+
+		function select(i) {
+			sel = i;
+			paintSvg();
+			list.querySelectorAll('.mj-ct-row').forEach((r, k) => r.classList.toggle('mj-ct-sel', k === i));
+		}
+
+		function paintList(ls) {
+			list.textContent = '';
+			const bad = unreadable();
+			warn.hidden = !bad;
+			warn.textContent = bad
+				? 'The camera cannot read these lines, so it counts none of them. Draw them again, or clear them.'
+				: '';
+			if (noteEl) noteEl.textContent = bad ? '' : ls.length === 1 ? '1 line' : (ls.length || 'none') + (ls.length ? ' lines' : '');
+			if (!ls.length && !bad) {
+				const p = el('p', 'mj-live-hint');
+				p.textContent = 'No lines. Choose Draw lines and drag one across where people walk.';
+				list.appendChild(p);
+			}
+			ls.forEach((l, i) => {
+				const row = el('div', 'mj-ct-row' + (i === sel ? ' mj-ct-sel' : ''));
+				const name = el('input', 'form-control form-control-sm mj-ct-name');
+				name.value = l.name;
+				name.setAttribute('aria-label', 'Name of line ' + (i + 1));
+				name.addEventListener('change', () => {
+					const v = name.value.trim();
+					const ls2 = read();
+					if (!ls2[i]) return;
+					if (v && v.indexOf(';') < 0 && v.indexOf(':') < 0 && LN.nameOk(sp, v)) {
+						ls2[i].name = v;
+						ls2[i].named = true;
+						write(ls2);
+					} else {
+						name.value = ls2[i].name;
+						name.title = 'The camera does not take this name';
+					}
+				});
+				row.appendChild(name);
+				const co = el('span', 'small text-secondary mj-ct-co');
+				co.textContent = [l.x1, l.y1, l.x2, l.y2].map((v) => Math.round(v)).join(', ');
+				row.appendChild(co);
+				const flip = el('button', 'btn btn-sm btn-outline-secondary');
+				flip.type = 'button';
+				flip.textContent = 'Swap in/out';
+				flip.addEventListener('click', () => {
+					const ls2 = read();
+					ls2[i] = LN.flip(ls2[i]);
+					write(ls2);
+				});
+				row.appendChild(flip);
+				const del = el('button', 'btn btn-sm btn-outline-danger');
+				del.type = 'button';
+				del.textContent = 'Remove';
+				del.addEventListener('click', () => {
+					const ls2 = read();
+					ls2.splice(i, 1);
+					sel = -1;
+					write(ls2);
+				});
+				row.appendChild(del);
+				const v = LN.verdict(l, SG.base(), sp);
+				if (v) {
+					const why = el('div', 'small mj-md-bad mj-ct-why');
+					why.textContent = v;
+					row.appendChild(why);
+				}
+				row.addEventListener('mouseenter', () => select(i));
+				list.appendChild(row);
+			});
+			if (bad) {
+				const clr = el('button', 'btn btn-sm btn-outline-danger');
+				clr.type = 'button';
+				clr.textContent = 'Clear the lines';
+				clr.addEventListener('click', () => write([]));
+				list.appendChild(clr);
+			}
+		}
+
+		function at(e) {
+			const r = preview.overlay.getBoundingClientRect();
+			return { x: e.clientX - r.left, y: e.clientY - r.top };
+		}
+
+		function begin(e) {
+			// One gesture at a time: a second finger neither starts another
+			// nor takes over this one.
+			if (!active || e.button > 0 || gesture) return;
+			const g = SG.geom();
+			if (!g || unreadable()) return;
+			const p = at(e);
+			const t = e.target;
+			const ls = read();
+			if (t && t.dataset && t.dataset.end) {
+				gesture = { kind: 'end', i: +t.dataset.i, end: +t.dataset.end, ls };
+			} else if (t && t.dataset && t.dataset.i !== undefined && t.classList.contains('mj-ct-hit')) {
+				gesture = { kind: 'move', i: +t.dataset.i, from: p, orig: Object.assign({}, ls[+t.dataset.i]), ls };
+			} else {
+				if (sp.max && ls.length >= sp.max) return;
+				const x = g.mx(p.x), y = g.my(p.y);
+				ls.push({ name: 'line' + (ls.length + 1), named: false, x1: x, y1: y, x2: x, y2: y });
+				gesture = { kind: 'new', i: ls.length - 1, end: 2, ls };
+			}
+			// What the field held before, for a gesture the browser takes back.
+			gesture.before = field.getValue();
+			gesture.id = e.pointerId;
+			sel = gesture.i;
+			e.currentTarget.setPointerCapture(e.pointerId);
+			e.preventDefault();
+		}
+
+		function move(e) {
+			if (!gesture || e.pointerId !== gesture.id) return;
+			const g = SG.geom();
+			if (!g) return;
+			const p = at(e);
+			const l = gesture.ls[gesture.i];
+			if (gesture.kind === 'move') {
+				const dx = g.dx(p.x - gesture.from.x), dy = g.dy(p.y - gesture.from.y);
+				l.x1 = gesture.orig.x1 + dx; l.y1 = gesture.orig.y1 + dy;
+				l.x2 = gesture.orig.x2 + dx; l.y2 = gesture.orig.y2 + dy;
+			} else if (gesture.end === 1) {
+				l.x1 = g.mx(p.x); l.y1 = g.my(p.y);
+			} else {
+				l.x2 = g.mx(p.x); l.y2 = g.my(p.y);
+			}
+			// Drawn from the gesture's own copy until it is let go, so a drag
+			// is one edit to the field rather than one per pointermove.
+			field.setValue(LN.format(gesture.ls));
+			paint();
+		}
+
+		function finish(e) {
+			if (!gesture || e.pointerId !== gesture.id) return;
+			const ls = gesture.ls;
+			const l = ls[gesture.i];
+			// A press that did not draw is not a line.
+			if (gesture.kind === 'new' && Math.hypot(l.x2 - l.x1, l.y2 - l.y1) < 8) ls.splice(gesture.i, 1);
+			gesture = null;
+			write(ls);
+		}
+
+		// A gesture the browser cancels (a scroll or a system gesture took the
+		// touch) was not let go where it ended: the field goes back to what
+		// it held, and nothing is edited.
+		function cancel(e) {
+			if (!gesture || e.pointerId !== gesture.id) return;
+			const before = gesture.before;
+			gesture = null;
+			field.setValue(before);
+			paint();
+		}
+
+		for (const t of [catcher, svg]) {
+			t.addEventListener('pointerdown', begin);
+			t.addEventListener('pointermove', move);
+			t.addEventListener('pointerup', finish);
+			t.addEventListener('pointercancel', cancel);
+		}
+		const ro = window.ResizeObserver ? new ResizeObserver(() => paint()) : null;
+		if (ro) ro.observe(preview.stage);
+		state.liveCleanup.push(() => {
+			if (ro) ro.disconnect();
+			catcher.remove();
+			svg.remove();
+			preview.stage.classList.remove('mj-md-armed');
+		});
+		// Someone typing in the hidden field cannot happen, but a reset can.
+		field.control.addEventListener('input', () => { if (!gesture) paint(); });
+		paint();
+		return {
+			repaint: paint,
+			setActive: (on) => {
+				if (active === !!on) return;
+				active = !!on;
+				if (!active) sel = -1;
+				paint();
+			},
+		};
+	}
+
 	// ── The Overlay leaf ──────────────────────────────────────────────────
 	//
 	// The camera BURNS the overlay into the stream, which is the whole reason
@@ -3358,15 +5488,17 @@
 	//
 	// Two things can be placed on one picture, so the bar carries a Text/Masks
 	// switch rather than letting a drag guess which was meant.
-	// Only what the camera can actually print. An unrecognised code does not
-	// error and does not print — majestic's specifier switch falls through to
-	// `return 0`, which SILENTLY TRUNCATES the rest of the line, so a person who
-	// copies a template off a forum gets an overlay that is half missing with
-	// nothing anywhere saying why. That is what the chips exist to prevent, and
-	// it is why the raw box below them refuses an unknown code rather than
-	// letting the camera swallow it.
-	const OSD_CODES = 'aAhbBcCedDFgGHIjmMnprRsStTuUWVwxXyYzZf@$%';
-	const OSD_PARTS = [
+	// Only what the camera can actually print. The clock is strftime letters;
+	// the camera's readings are %{name} tokens on a camera that has them, and
+	// letters on one from before (mj-osd-codes.js says which). An unrecognised
+	// code does not error: a newer camera prints it as written, an older one
+	// stops the line there. The chips cannot produce one, and the raw box below
+	// them names it before it reaches the camera.
+	//
+	// An option with a `token` is offered only where the camera names that
+	// token; one marked `legacy` only where it reads no %{...} at all.
+	const OSD_CODES = (typeof window === 'object' && window.MajesticOsdCodes) || null;
+	const OSD_PARTS_ALL = [
 		{ id: 'date', label: 'Date', hint: 'formats',
 			opts: [
 				{ fmt: '%d.%m.%Y', shows: '02.09.2026' },
@@ -3378,13 +5510,40 @@
 			opts: [
 				{ fmt: '%H:%M:%S', shows: '18:08:12' },
 				{ fmt: '%H:%M', shows: '18:08' },
+				{ fmt: '%H:%M:%S.%{ms}', shows: '18:08:12.345', token: 'ms' },
+				{ fmt: '%H:%M:%S.%f', shows: '18:08:12.345', legacy: true },
 				{ fmt: '%I:%M %p', shows: '06:08 PM' },
 			] },
-		// Live lens magnification. Offered only where there is a lens to report
-		// it: on a camera with no focus motor it prints nothing at all, and a
-		// chip that is always blank is worse than no chip.
+		// The chip's own temperature sensor, in whole degrees.
+		{ id: 'temp', label: 'Temperature',
+			opts: [
+				{ fmt: '%{temp}', shows: '64\u00b0C', token: 'temp' },
+				{ fmt: '%{temp:F}', shows: '147\u00b0F', token: 'temp' },
+			] },
+		// The shutter AE is holding. Where the camera cannot say, it prints --ms.
+		{ id: 'exposure', label: 'Shutter',
+			opts: [{ fmt: '%{exposure}', shows: '33.3ms', token: 'exposure' }] },
+		// Live lens magnification; x? on a camera with no zoom lens to report it.
 		{ id: 'zoom', label: 'Zoom', needs: 'focus',
-			opts: [{ fmt: '%@', shows: 'x3.2' }] },
+			opts: [
+				{ fmt: '%{zoom}', shows: 'x3.2', token: 'zoom' },
+				{ fmt: '%@', shows: 'x3.2', legacy: true },
+			] },
+		// The camera's own name, address and time since boot.
+		{ id: 'hostname', label: 'Hostname',
+			opts: [{ fmt: '%{hostname}', shows: 'the camera\u2019s name', token: 'hostname' }] },
+		{ id: 'ip', label: 'IP address',
+			opts: [{ fmt: '%{ip}', shows: '203.0.113.10', token: 'ip' }] },
+		{ id: 'uptime', label: 'Uptime',
+			opts: [{ fmt: '%{uptime}', shows: '3d 04:12', token: 'uptime' }] },
+		// A value from outside: a file a script writes, or one sent over HTTP.
+		// The name is the owner's; the chip puts a placeholder in, and the
+		// raw line below is where it is changed.
+		{ id: 'own', label: 'Your value',
+			opts: [
+				{ fmt: '%{file:/tmp/osd/value}', shows: 'a file', token: 'file' },
+				{ fmt: '%{text:value}', shows: 'sent over HTTP', token: 'text' },
+			] },
 		{ id: 'text', label: 'Text', free: true },
 		// Whitespace is a piece too. It arrives as a literal like any other,
 		// but "Text ␣" is a poor name for the thing holding two words apart,
@@ -3396,6 +5555,15 @@
 				{ fmt: '      ', shows: 'six' },
 			] },
 	];
+
+	// The parts this camera can print: the options of its own spelling, and no
+	// part left with none to offer.
+	function osdParts(d) {
+		return OSD_PARTS_ALL.map(p => p.opts
+			? Object.assign({}, p, { opts: p.opts.filter(o => o.legacy ? !d.tokens
+				: !o.token || (d.tokens && d.names.indexOf(o.token) >= 0)) })
+			: p).filter(p => !p.opts || p.opts.length);
+	}
 
 	function renderOsd(form) {
 		const all = sectionFields('osd', true);
@@ -4797,7 +6965,22 @@
 			credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(d),
-		}).then((r) => r.status, () => 0).then((status) => {
+		}).then((r) => {
+			// The reply names the keys this camera could not preview; the rows
+			// they belong to say so, rather than a control that moves and a
+			// picture that does not.
+			if (r.status === 200) {
+				return r.json().then((j) => { noteRefused(d, j); return 200; }, () => 200);
+			}
+			// Anything else means the picture did NOT move, and saying nothing
+			// made a failed preview look exactly like a setting with no visible
+			// effect. The camera names the key it rejected in a 400's body.
+			if (r.status !== 404) {
+				return r.text().then((t) => { notePreviewFailed(r.status, t); return r.status; },
+					() => { notePreviewFailed(r.status, ''); return r.status; });
+			}
+			return r.status;
+		}, () => { notePreviewFailed(0, ''); return 0; }).then((status) => {
 			if (status !== 404) return status;
 			liveDoc = false;
 			return postLive(legacyQuery(d)).then(() => status, () => status);
@@ -4807,6 +6990,49 @@
 	// The placement the fields currently describe, as the document to send.
 	// Whole every time: majestic installs a whole placement or none, and a
 	// request naming only half of one would leave the camera to guess the rest.
+	// A preview the camera did not take, said where Save's messages are: the
+	// control has moved and the picture has not, and that is exactly what
+	// this line is for. Named by the row's own words where the camera said
+	// which key it refused.
+	function notePreviewFailed(status, body) {
+		const m = /\b([a-zA-Z0-9]+\.[a-zA-Z0-9.]+)\s*<\/body>/.exec(body || '');
+		const f = m && state.fields.find(x => x.dot === m[1]);
+		const name = f && f.p ? (f.p.querySelector('.form-label') || {}).textContent : '';
+		const why = status === 401 || status === 403
+			? 'the session has expired; reload the page and sign in again'
+			: status === 0 ? 'the camera did not answer'
+			: status === 400 ? 'the camera refused ' + (name ? '"' + name.trim() + '"' : 'a value')
+			: 'the camera answered HTTP ' + status;
+		flashToolbar('Not previewed: ' + why + '. The picture shows the saved settings.');
+	}
+
+	// Mark each live row this camera refused to preview, and unmark the ones it
+	// took. Only rows the document named are judged: an OSD placement answer
+	// says nothing about the exposure rows.
+	function noteRefused(doc, reply) {
+		const refused = new Set(String((reply && reply.keys) || '')
+			.split(',').map(k => k.trim()).filter(Boolean));
+		const named = (dot) => {
+			let cur = doc;
+			for (const k of dot.split('.')) {
+				if (!cur || typeof cur !== 'object' || !(k in cur)) return false;
+				cur = cur[k];
+			}
+			return true;
+		};
+		for (const f of state.fields) {
+			if (!isLive(f) || !f.p || !named(f.dot)) continue;
+			const no = refused.has(f.dot);
+			let note = f.p.querySelector(':scope > .mj-nopreview');
+			if (no && !note) {
+				note = el('div', 'hint mj-nopreview');
+				note.textContent = 'This camera cannot show it before Save.';
+				f.p.appendChild(note);
+			}
+			if (note) note.hidden = !no;
+		}
+	}
+
 	function placementDoc(held, overlay) {
 		const P = window.MajesticPlace;
 		const anchor = held.anchor ? held.anchor.getValue() : P.PROPORTIONAL;
@@ -6152,16 +8378,13 @@
 
 	// The overlay's text, as pieces you can pick up.
 	//
-	// The template is a printf-ish string and it fails in the worst possible
-	// way: majestic's specifier switch returns 0 for anything it does not know,
-	// and the caller stops there — so ONE wrong letter silently truncates the
-	// rest of the line, with no error and no clue. Measured on an hi3516av300,
-	// `AT %@ END` printed `AT`. Somebody who copied that off a forum sees half
-	// an overlay and has nowhere to look.
+	// The template is a printf-ish string, and a wrong code in it is printed
+	// as written: `AT %q END` puts "%q" on the picture where a value was meant.
+	// Somebody who copied that off a forum sees the code and not why.
 	//
 	// So the chips are not a friendlier skin over the string. They are the only
-	// version of this control that cannot produce a code the camera will choke
-	// on. The string stays underneath — it is how you learn what the chips did,
+	// version of this control that cannot produce a code the camera does not
+	// know. The string stays underneath — it is how you learn what the chips did,
 	// and how an expert pastes one in — but editing it directly is checked
 	// before it reaches the camera.
 	function buildTemplate(container, field) {
@@ -6170,6 +8393,15 @@
 
 		const row = el('div', 'mj-tpl-row');
 		wrap.appendChild(row);
+		// The pieces on offer, in flow under the row rather than floating over
+		// it. This builder lives in the overlay panel, and the panel scrolls: a
+		// list positioned on top of it is cut off at the panel's edge, which on
+		// a phone left one piece of a dozen showing (#709). It is also taller
+		// than the panel once every reading is offered, so there is no place
+		// for a floating one to fit anyway.
+		const menu = el('div', 'mj-tpl-menu');
+		menu.hidden = true;
+		wrap.appendChild(menu);
 		const opts = el('div', 'mj-tpl-opts');
 		opts.hidden = true;
 		wrap.appendChild(opts);
@@ -6178,32 +8410,19 @@
 
 		let parts = [];
 		let open = -1;
+		// Kept here rather than read off the DOM, so redrawing the chips (a
+		// drag, a removal, a save) does not shut a list somebody is reading.
+		let adding = false;
 
-		// Longest match first, or %H:%M would eat the front of %H:%M:%S and
-		// leave `:%S` as literal text.
+		// What this camera's template field says it reads decides the chips on
+		// offer and what the raw box flags.
+		const DIALECT = OSD_CODES.dialect(field.schema);
+		const OSD_PARTS = osdParts(DIALECT);
 		const KNOWN = [];
 		OSD_PARTS.forEach((p) => {
 			(p.opts || []).forEach(o => KNOWN.push({ id: p.id, fmt: o.fmt, shows: o.shows }));
 		});
-		KNOWN.sort((a, b) => b.fmt.length - a.fmt.length);
-
-		function parse(t) {
-			const out = [];
-			let i = 0, lit = '';
-			const flush = () => {
-				if (!lit) return;
-				// A run of nothing but spaces is a Gap; anything else is words.
-				out.push(/^\s+$/.test(lit) ? { id: 'gap', fmt: lit } : { id: 'text', text: lit });
-				lit = '';
-			};
-			while (i < t.length) {
-				const hit = KNOWN.find(k => t.startsWith(k.fmt, i));
-				if (hit) { flush(); out.push({ id: hit.id, fmt: hit.fmt }); i += hit.fmt.length; }
-				else { lit += t[i]; i++; }
-			}
-			flush();
-			return out;
-		}
+		const parse = t => OSD_CODES.parse(t, KNOWN);
 		const serialize = () => parts.map(p => p.id === 'text' ? p.text : p.fmt).join('');
 
 		function commit() {
@@ -6212,16 +8431,8 @@
 			draw();
 		}
 
-		// Anything the camera cannot print, named before it can swallow the rest
-		// of the line.
-		function unknownCodes(t) {
-			const bad = [];
-			String(t).replace(/%[-_0]?(.)/g, (m, c) => {
-				if (OSD_CODES.indexOf(c) < 0) bad.push('%' + c);
-				return m;
-			});
-			return bad;
-		}
+		// Anything the camera cannot print, named before it reaches the picture.
+		const unknownCodes = t => OSD_CODES.unknownCodes(t, DIALECT);
 
 		function drawRaw() {
 			const t = serialize();
@@ -6248,7 +8459,7 @@
 				const w = el('p', 'mj-live-hint mj-md-warn');
 				w.textContent = bad.join(', ') + (bad.length === 1 ? ' is not a code this camera knows' :
 					' are not codes this camera knows') +
-					' — it prints nothing from there on, so the rest of the line disappears.';
+					' — ' + OSD_CODES.unknownEffect(DIALECT, bad.length > 1) + '.';
 				raw.appendChild(w);
 			}
 		}
@@ -6317,7 +8528,14 @@
 			const d = dragging;
 			dragging = null;
 			row.querySelectorAll('.mj-tpl-caret').forEach(c => c.remove());
-			if (!d.moved || d.to === undefined) { open = open === d.i ? -1 : d.i; drawOpts(); return; }
+			if (!d.moved || d.to === undefined) {
+				open = open === d.i ? -1 : d.i;
+				// One thing open under the row: a piece's choices or the list.
+				if (open >= 0) setAdding(false);
+				drawChips();
+				drawOpts();
+				return;
+			}
 			let to = d.to;
 			if (to > d.i) to -= 1;
 			if (to === d.i) { drawChips(); return; }
@@ -6362,35 +8580,70 @@
 				row.appendChild(chip);
 			});
 
-			const add = el('span', 'mj-tpl-chip mj-tpl-add');
+			const add = el('button', 'mj-tpl-chip mj-tpl-add' + (adding ? ' mj-tpl-sel' : ''));
+			add.type = 'button';
+			add.setAttribute('aria-expanded', adding ? 'true' : 'false');
 			add.innerHTML = ICON.plus + '<span>Add</span>';
-			add.addEventListener('click', () => {
-				const menu = row.querySelector('.mj-tpl-menu');
-				if (menu) { menu.remove(); return; }
-				const m = el('div', 'mj-tpl-menu');
-				OSD_PARTS.forEach((def) => {
-					const b = el('button', 'mj-tpl-mi');
-					b.type = 'button';
-					b.innerHTML = '<span>' + esc(def.label) + '</span>' +
-						'<span class="mj-tpl-mi-s">' + esc(def.free ? 'your own words'
-							: def.id === 'gap' ? 'space between'
-							: (def.opts[0] || {}).shows || '') + '</span>';
-					b.addEventListener('click', () => {
-						parts.push(def.free ? { id: 'text', text: ' ' }
-							: { id: def.id, fmt: def.opts[0].fmt });
-						open = parts.length - 1;
-						m.remove();
-						commit();
-						drawOpts();
-					});
-					m.appendChild(b);
-				});
-				const hint = el('p', 'mj-tpl-mi-hint');
-				hint.textContent = 'Zoom needs a motorised lens; without one the camera prints nothing for it.';
-				m.appendChild(hint);
-				add.appendChild(m);
-			});
+			add.addEventListener('click', () => { setAdding(!adding); focusAdd(); });
 			row.appendChild(add);
+		}
+
+		function setAdding(v) {
+			adding = v;
+			if (adding && open >= 0) { open = -1; drawOpts(); }
+			menu.hidden = !adding;
+			drawChips();
+			// A short panel scrolls; bring the list into it rather than leave
+			// it opening below the fold of a box that does not look scrollable.
+			if (adding && menu.scrollIntoView) menu.scrollIntoView({ block: 'nearest' });
+		}
+
+		function drawMenu() {
+			OSD_PARTS.forEach((def) => {
+				const b = el('button', 'mj-tpl-mi');
+				b.type = 'button';
+				b.innerHTML = '<span>' + esc(def.label) + '</span>' +
+					'<span class="mj-tpl-mi-s">' + esc(def.free ? 'your own words'
+						: def.id === 'gap' ? 'space between'
+						: (def.opts[0] || {}).shows || '') + '</span>';
+				b.addEventListener('click', () => {
+					parts.push(def.free ? { id: 'text', text: ' ' }
+						: { id: def.id, fmt: def.opts[0].fmt });
+					open = parts.length - 1;
+					adding = false;
+					menu.hidden = true;
+					commit();
+				});
+				menu.appendChild(b);
+			});
+			const hint = el('p', 'mj-tpl-mi-hint');
+			// Only about the chips this camera was offered: telling an
+			// older camera's owner how to use a chip it does not have
+			// sends them looking for it.
+			const has = id => OSD_PARTS.some(p => p.id === id);
+			const words = [];
+			if (has('zoom') && has('exposure'))
+				words.push('Zoom needs a motorised lens and Shutter a camera that reports it; without one the camera prints x? or --ms.');
+			else if (has('zoom'))
+				words.push('Zoom needs a motorised lens; without one the camera prints x?.');
+			if (has('own'))
+				words.push('Your value shows /tmp/osd/value, or what is sent to /api/v1/osd/text/value; change the name in the line below.');
+			hint.textContent = words.join(' ');
+			hint.hidden = !words.length;
+			menu.appendChild(hint);
+			wrap.addEventListener('keydown', (e) => {
+				if (e.key !== 'Escape' || !adding) return;
+				e.stopPropagation();
+				setAdding(false);
+				focusAdd();
+			});
+		}
+
+		// The redraw replaces the button that was pressed; keep the keyboard
+		// where it was, without undoing the scroll that brought the list in.
+		function focusAdd() {
+			const a = row.querySelector('.mj-tpl-add');
+			if (a) a.focus({ preventScroll: true });
 		}
 
 		function draw() { drawChips(); drawOpts(); drawRaw(); }
@@ -6406,6 +8659,7 @@
 		field.control.addEventListener('input', () => { parts = parse(field.getValue() || ''); draw(); });
 		field.control.addEventListener('change', () => { parts = parse(field.getValue() || ''); draw(); });
 		state.liveSync.push(reload);
+		drawMenu();
 		reload();
 	}
 
@@ -6429,8 +8683,8 @@
 			? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1]
 			: names[0];
 		const p = el('p', 'mj-lifted');
-		p.innerHTML = 'On <a href="?tab=' + LIVE_ID + '">Live adjustments</a>, with the ' +
-			'picture: ' + esc(list) + '. They apply as you drag them.';
+		p.innerHTML = 'On the <a href="?tab=' + LIVE_ID + '">Picture</a> page, beside the ' +
+			'preview: ' + esc(list) + '. They apply as you drag them.';
 		return p;
 	}
 
@@ -6464,7 +8718,11 @@
 			// absence (#325). One place builds the sample now, and both pages
 			// ask the same question of the same object.
 			ircutSample = s;
-			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000);
+			// The same question the Dashboard asks: a filter that does not
+			// follow day/night is supposed to disagree with it, so the clock
+			// behind the conflict finding must not run while it does not.
+			ircutStats = ircutTrack.push(ircutSample, performance.now() / 1000,
+				IRCUT.follows(nightCfg()));
 			paintNightInert(ircutSample.src);
 			paintFindings();
 			paintMonitor(s);
@@ -6588,11 +8846,24 @@
 	// read past.
 	const TEST_DEPENDS = [
 		'nightMode.irCutPin1', 'nightMode.irCutPin2',
-		'nightMode.irCutSingleInvert', 'nightMode.irCutEnabled',
+		'nightMode.irCutSingleInvert',
 	];
+	// nightMode.irCut is in that set for one of its three values only. A
+	// verdict is about what happens when the camera pulses the pads, and
+	// moving day/night in or out of the job does not change that — a blocker
+	// firing on manual-to-auto is one that gets read past. Whether the pads
+	// are DRIVEN at all is a different matter, and it is what the blocker
+	// below refuses on.
+	const driveStaged = () => {
+		const f = state.fields.find((x) => x.dot === 'nightMode.irCut');
+		if (!f) return false;
+		const was = String(state.initial['nightMode.irCut']) === 'off';
+		return was !== (String(f.getValue()) === 'off');
+	};
 	function wiringStaged() {
-		return state.fields.some((f) => TEST_DEPENDS.indexOf(f.dot) >= 0 &&
-			f.getValue() !== state.initial[f.dot]);
+		return driveStaged() ||
+			state.fields.some((f) => TEST_DEPENDS.indexOf(f.dot) >= 0 &&
+				f.getValue() !== state.initial[f.dot]);
 	}
 
 	// Why the button cannot run, or null. Each reason is specific: a disabled
@@ -6629,9 +8900,9 @@
 		// Parked outranks wired: the daemon refuses to move a parked filter,
 		// so the test's toggle would silently do nothing and every verdict
 		// would read "stuck" on a filter that is fine.
-		if (nm.irCutEnabled === false)
-			return 'The filter is switched off (its wiring is kept). Turn "Drive the ' +
-				'IR-cut filter" on to test it.';
+		if (IRCUT.mode(nm.irCut) === 'off')
+			return 'The filter is set to off (its wiring is kept). Set ' +
+				'"IR-cut filter" to manual or auto to test it.';
 		if (!toBool(getDotted(state.config, 'jpeg.enabled')))
 			return 'The test reads a still picture, and this camera has JPEG snapshots turned off.';
 		// The switch above is the CONFIGURATION, and it is not the encoder. A
@@ -6703,6 +8974,32 @@
 		});
 	}
 
+	// The one thing a browser knows about this camera that the camera does not:
+	// somebody drove the filter and watched the picture follow. The Dashboard
+	// reads it to stop asking a question this has answered (#498); the rule
+	// that decides whether it still means anything lives beside the finding,
+	// in ircut-check's settledBy().
+	//
+	// 'ok' is remembered and everything else FORGETS, deliberately: a verdict
+	// that found a fault must not leave a stale "fine" standing behind it, and
+	// re-testing after a repair is what replaces it.
+	//
+	// Both ends are guarded. localStorage throws outright in some privacy
+	// configurations, and a store that cannot be written is a Dashboard that
+	// goes on asking — which is the right way for this to fail.
+	const IRCUT_TESTED = 'mj-ircut-tested';
+	function rememberTest(wiring, id) {
+		try {
+			if (id === 'ok') {
+				localStorage.setItem(IRCUT_TESTED, JSON.stringify({
+					id: id, wiring: wiring, at: Math.floor(Date.now() / 1000),
+				}));
+			} else {
+				localStorage.removeItem(IRCUT_TESTED);
+			}
+		} catch (e) { /* not remembered; the banner simply asks again */ }
+	}
+
 	const IRCUT_STEP = {
 		first: 'Reading the picture…',
 		toggle: 'Moving the filter…',
@@ -6737,6 +9034,20 @@
 		// against — and syncVerdict() would then find them matching and keep a
 		// stale verdict on screen.
 		const testedOn = fieldAssign();
+		// The wiring this run is about to measure, in the form the Dashboard
+		// compares against. Captured here for the same reason as the line
+		// above — the run takes seconds and the configuration underneath it is
+		// live — and read from the SAVED config rather than the fields,
+		// because the camera is what the probe measures and the blocker has
+		// already guaranteed the two agree.
+		const wiringOn = IRCUT.wiringKey(nightCfg());
+		// Forgotten BEFORE the first toggle, not after the last one. From the
+		// moment this run starts, the filter is being moved and no earlier
+		// verdict describes a camera at rest — and if the page goes away mid
+		// run neither completion handler gets to say so, leaving a "fine" in
+		// the store for a filter this run may have left open. Written again at
+		// the end, if the end agrees.
+		rememberTest(wiringOn, null);
 
 		IRCUT.probe({
 			settleMs: 1500,
@@ -6768,7 +9079,7 @@
 			result.innerHTML = (out.restored === false
 				? '<b>The filter could not be put back.</b> It is still in the ' +
 				'position the test left it in &mdash; use the IR-cut switch on ' +
-				'Live adjustments to move it back. The test itself found: '
+				'the Picture page to move it back. The test itself found: '
 				: '') + '<b>' + esc(v.title) + '</b> ' + esc(v.detail) +
 				// Said after the verdict, because it explains why the test took
 				// an extra move rather than changing what it found. The camera
@@ -6787,6 +9098,16 @@
 					'step, so day and night are the right way round from now on.</span>'
 					: '');
 			result.hidden = false;
+			// What the Dashboard is owed: this filter has been driven and the
+			// picture followed, so the suspicion it raises from the picture
+			// alone has been answered (#498).
+			//
+			// A failed restore is NOT an answer, whatever the verdict says
+			// about the wiring: the filter is sitting in the position the test
+			// left it in, so if that is open the picture is magenta because
+			// the filter really is open right now. Remembering "fine" there
+			// would silence the one accusation that is true.
+			rememberTest(wiringOn, out.restored === false ? null : v.id);
 			state.ircutTestedOn = testedOn;
 			// Edited while the probe ran: the verdict describes wiring that is
 			// no longer on screen, so it goes straight back out.
@@ -6808,7 +9129,7 @@
 				(e && e.message ? e.message : e) + '. ' +
 				(e && e.moves ? 'It had already started moving the filter, so ' +
 					'that may not be where it was — the picture says which, and ' +
-					'the IR-cut switch on Live adjustments moves it back.'
+					'the IR-cut switch on the Picture page moves it back.'
 					: 'The filter was not moved.');
 			result.hidden = false;
 			// A camera that cannot take a still cannot run this test at all, so
@@ -6821,6 +9142,11 @@
 			if (e && e.snapshot) {
 				state.ircutNoSnap = { status: e.status, reason: e.reason || null };
 			}
+			// Half a measurement is not evidence about the filter, so it is
+			// not evidence for the Dashboard either — and a run that stopped
+			// part way may have left the filter moved. Any earlier answer for
+			// this wiring goes with it.
+			rememberTest(wiringOn, null);
 			state.ircutTestedOn = testedOn;
 			// Edited while the probe ran: the verdict describes wiring that is
 			// no longer on screen, so it goes straight back out.
@@ -6837,13 +9163,14 @@
 		});
 	}
 
-	// The four wiring pins, by the name majestic's config gives them. Numbers
+	// The wiring pins, by the name majestic's config gives them. Numbers
 	// are plain running integers everywhere in the UI — the same 11 that goes
 	// into nightMode.irCutPin1 and the same 11 the wiki's GPIO table lists. The
 	// kernel's bank_pin spelling is deliberately never shown: a second
 	// numbering nobody can map onto the one they have to type is worse than the
 	// harder one alone.
-	const PIN_KEYS = ['irCutPin1', 'irCutPin2', 'backlightPin', 'lightSensorPin'];
+	const PIN_KEYS = ['irCutPin1', 'irCutPin2', 'backlightPin', 'lightSensorPin',
+		'whiteLightPin'];
 	const PIN_DOTS = {};
 	PIN_KEYS.forEach((k) => { PIN_DOTS['nightMode.' + k] = 1; });
 
@@ -6856,6 +9183,7 @@
 		irCutPin1: 'irCutSingleInvert',
 		backlightPin: 'backlightInvert',
 		lightSensorPin: 'lightSensorInvert',
+		whiteLightPin: 'whiteLightInvert',
 	};
 	// Derived from mj-tree's list rather than restated here, so the invariant
 	// in tests/tree.test.js is checking the set this page actually hides.
@@ -6863,6 +9191,22 @@
 	((TREE && TREE.mapDriven('nightMode')) || []).forEach((k) => {
 		MAP_DOTS['nightMode.' + k] = 1;
 	});
+	// Angles the schema marks as lines of twilight (x-twilight) are drawn on
+	// the strip sun-panel.js mounts rather than as bare sliders, and render
+	// hidden the way the pins do. Only where the strip can actually be drawn:
+	// its modules are on the page, and the section carries the night line the
+	// strip is built around -- otherwise they are ordinary rows, never rows
+	// nothing can reach.
+	const SUN_MODULES = typeof window.MajesticSunPanel === 'object' &&
+		typeof window.MajesticSunPlace === 'object';
+	function twilightHidden(dot, sub) {
+		if (!SUN_MODULES || !sub || !sub['x-twilight']) return false;
+		const section = dot.slice(0, dot.lastIndexOf('.'));
+		const props = getDotted(state.schema.properties, section.split('.').join('.properties.'));
+		const own = (props && props.properties) || {};
+		return Object.keys(own).some((k) => own[k] && own[k]['x-twilight'] === 'night' &&
+			!EXCLUDE.has(section + '.' + k) && !!window.MajesticSunPanel.scale(own[k]));
+	}
 
 	function pinField(key) {
 		return state.fields.filter((f) => f.dot === 'nightMode.' + key)[0];
@@ -6949,9 +9293,116 @@
 		});
 	}
 
+	// The row this switch belongs above: the first of the numbers it swaps, in
+	// document order, whichever of the two sets is on screen.
+	//
+	// It used to be anchored under "Automatic day/night" instead, on the
+	// reading that both are mechanism switches. That is true and it is not
+	// where the control belongs: everything this switch does happens inside
+	// Levels and timing, so under the other heading it sat a column away from
+	// the eight rows it was swapping, and it stood between Automatic day/night
+	// and the two rows #548 asked to have directly beneath it.
+	//
+	// Resolved from the rows rather than named, because which of the two sets
+	// exists is the camera's business and the hidden one is still a row in the
+	// document. A camera declaring none of them gets no switch, which is
+	// right: it would govern nothing.
+	function legacyAnchor() {
+		const rows = LEGACY_KEYS.concat(AUTO_KEYS)
+			.map(pinField).filter(Boolean).map((f) => f.p);
+		if (!rows.length) return null;
+		return rows.reduce((first, row) =>
+			(row.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
+				? row : first);
+	}
+
+	// The sun panel (sun-panel.js), where the twilight angles' hidden rows
+	// are: where the camera is, and the strip that edits the two angles.
+	// Every field it drives is found by what the schema says it is -- a line
+	// of twilight (x-twilight), an axis of the camera's place (x-geo) -- never
+	// by its name. The place belongs to another section and is drawn hidden
+	// here, so the panel stages it like any edit and one Save carries it with
+	// the rest: the batch is built by dotted path, and nothing on this page
+	// compares a field's section with the one on screen.
+	let tzPlaces = null;
+	function mountSun(container) {
+		const SUNP = window.MajesticSunPanel, PLACE = window.MajesticSunPlace;
+		if (state.sunPanel) {
+			state.sunPanel.destroy();
+			state.sunPanel = null;
+		}
+		if (!SUNP || !PLACE) return;
+		const tw = (line) => state.fields.find((x) => x.schema && x.schema['x-twilight'] === line) || null;
+		const night = tw('night');
+		if (!night || !night.p) return;
+		const geo = {};
+		const props = state.schema.properties || {};
+		Object.keys(props).forEach((sec) => {
+			const own = (props[sec] && props[sec].properties) || {};
+			Object.keys(own).forEach((k) => {
+				const axis = own[k] && own[k]['x-geo'];
+				if (axis !== 'latitude' && axis !== 'longitude') return;
+				const dot = sec + '.' + k;
+				if (EXCLUDE.has(dot)) return;
+				let field = state.fields.find((x) => x.dot === dot);
+				if (!field) {
+					field = renderField(container, dot, k, own[k], getDotted(state.config, dot), { hidden: true });
+					if (!field) return;
+					state.fields.push(field);
+					state.initial[dot] = field.getValue();
+				}
+				geo[axis] = field;
+			});
+		});
+		const form = $('#mj-settings-form');
+		state.sunPanel = SUNP.mount({
+			night: night,
+			day: tw('day'),
+			lat: geo.latitude || null,
+			lon: geo.longitude || null,
+			set: (field, v) => {
+				if (!field) return;
+				field.setValue(v);
+				runVisibility();
+				updateDirty();
+			},
+			initial: (field) => state.initial[field.dot],
+			visible: () => fieldVisible({ sub: night.schema, dot: night.dot }),
+			onChange: (fn) => {
+				if (!form) return null;
+				const h = () => fn();
+				form.addEventListener('input', h);
+				form.addEventListener('change', h);
+				return () => {
+					form.removeEventListener('input', h);
+					form.removeEventListener('change', h);
+				};
+			},
+			// Asked of the camera every time, with the place on the page:
+			// the times are in the camera's time zone and the arithmetic is
+			// the camera's. A refused or failed ask is no report -- the panel
+			// then says nothing about tonight rather than something stale.
+			report: (lat, lon) => fetch('/api/v1/sun' +
+				(lat === null ? '' : '?lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon)),
+			{ credentials: 'same-origin' })
+				.then((r) => (r.ok ? r.json() : null)).catch(() => null),
+			zone: boot.tz || '',
+			// Sixteen kilobytes nobody needs until a guess is offered, and
+			// fetched once per page however often the section is drawn.
+			places: () => tzPlaces || (tzPlaces = new Promise((resolve) => {
+				const s = document.createElement('script');
+				s.src = '/a/tz-places.js';
+				s.onload = () => resolve(window.MajesticTzPlaces || null);
+				s.onerror = () => resolve(null);
+				document.head.appendChild(s);
+			})),
+			P: PLACE,
+		});
+	}
+
 	function mountLegacy(container) {
-		const host = pinField('lightMonitor');
-		if (!host) return;
+		const anchor = legacyAnchor();
+		if (!anchor) return;
 		const id = 'mjf-nightMode-legacy';
 		const p = el('p', 'boolean mj-row');
 		// The same shape renderField gives a boolean once its reset wrap has run:
@@ -7000,7 +9451,7 @@
 		});
 		box.checked = legacyOn();
 		paint();
-		host.p.parentNode.insertBefore(p, host.p.nextSibling);
+		anchor.parentNode.insertBefore(p, anchor);
 		state.legacyBox = box;
 		showLegacy(box.checked);
 	}
@@ -7057,7 +9508,10 @@
 	// night_mode_source, as the endpoint documents it: 0 manual, 1 GPIO
 	// sensor, 2 gain thresholds, 3 ADC, 4 automatic. 0 is nothing deciding,
 	// which is not a verdict about any of these, so it marks nothing.
-	const MECH_OF_SRC = { 1: 'sensor', 2: 'thresholds', 3: 'adc', 4: 'auto' };
+	// 5 (the sun) and 6 (set times) are automatic mode asking something other
+	// than the picture, and handing back to it whenever they cannot answer, so
+	// the automatic rows stay in use and only the thresholds are outranked.
+	const MECH_OF_SRC = { 1: 'sensor', 2: 'thresholds', 3: 'adc', 4: 'auto', 5: 'auto', 6: 'auto' };
 	// One line each. The finding at the top of the section carries the
 	// explanation and the way out; repeating a paragraph under every ignored
 	// control is the wall of text the reporter of #325 objected to in the same
@@ -7081,7 +9535,10 @@
 			// An empty control misleads nobody; only a filled-in one that is
 			// being ignored needs saying.
 			const v = f.getValue();
-			const set = decides && mech !== decides &&
+			// The ADC reading is compared against the thresholds, so they are
+			// in use whenever it decides.
+			const inUse = mech === decides || (decides === 'adc' && mech === 'thresholds');
+			const set = decides && !inUse &&
 				String(v === undefined || v === null ? '' : v) !== '';
 			if (!set) {
 				if (note) note.remove();
@@ -7183,12 +9640,11 @@
 	function syncVerdict() {
 		const r = document.getElementById('mj-ircut-result');
 		if (!r || r.hidden || !state.ircutTestedOn) return;
-		// The scan borrows this same element, and its own hit writes the pins
-		// it found — which lands here as a changed assignment. Hiding it then
-		// would take the Stop button away from a sweep that is still driving
-		// pads, on the one control in this UI that can stop a camera
-		// answering. Only ever hide a verdict.
-		if (r.classList.contains('mj-ircut-scan')) return;
+		// This element used to be shared with the pin hunt, which meant a
+		// changed assignment could hide the Stop button out from under a sweep
+		// that was still driving pads. The hunt lives on the Pins page now and
+		// draws into a box of its own, so this holds a verdict and nothing
+		// else.
 		if (state.ircutTestedOn !== fieldAssign()) {
 			r.hidden = true;
 			state.ircutTestedOn = null;
@@ -7594,12 +10050,13 @@
 		const tune = box.querySelector('#mj-audio-tune');
 		const listen = box.querySelector('#mj-audio-listen');
 
+		// Everything the panel does needs both halves of the audio block, the
+		// speaker test included: the camera brings its output up with its
+		// capture, so there is no state in which one of these three buttons is
+		// usable and the others are not.
 		const blocked = !!(b && b.blocked);
-		// A speaker with no microphone can still be tested; it just cannot be
-		// measured. Refusing both would hide a test that would have worked.
-		const speakerOk = !blocked || b.speakerOnly === true;
 
-		if (test) test.disabled = audioBusy || !speakerOk;
+		if (test) test.disabled = audioBusy || blocked;
 		if (tune) tune.disabled = audioBusy || blocked;
 		if (listen) listen.disabled = audioBusy || blocked;
 
@@ -7612,8 +10069,6 @@
 	// The speaker test, and the measurement of what came back.
 	async function audioRunTest(box) {
 		if (audioBusy) return;
-		const b = audioBlocker();
-		const speakerOnly = !!(b && b.speakerOnly);
 		const rate = audioRate();
 		if (!rate) return;
 
@@ -7629,28 +10084,13 @@
 		let outcome = null;
 
 		try {
-			if (speakerOnly) {
-				// Nothing can measure it, so this is the honest half: the
-				// camera either accepted the sound or said why it would not.
-				audioSay(box, AUDIO_STEP.playing);
-				await audioPlay(AUDIO_CLIP_S, rate);
-				outcome = {
-					severity: 'secondary',
-					title: 'The camera played the test sound.',
-					detail:
-						'Whether anything came out of the speaker is something only ' +
-						'you can tell from the room — the microphone is switched ' +
-						'off, so nothing here could listen.',
-				};
-			} else {
-				outcome = await AUDIO.probe({
-					onStep: (s) => audioSay(state.audioBox || box, AUDIO_STEP[s] || ''),
-					quietMs: AUDIO_QUIET_MS,
-					soundMs: AUDIO_SOUND_MS,
-					listen: audioListen,
-					play: () => audioPlay(AUDIO_CLIP_S, rate),
-				});
-			}
+			outcome = await AUDIO.probe({
+				onStep: (s) => audioSay(state.audioBox || box, AUDIO_STEP[s] || ''),
+				quietMs: AUDIO_QUIET_MS,
+				soundMs: AUDIO_SOUND_MS,
+				listen: audioListen,
+				play: () => audioPlay(AUDIO_CLIP_S, rate),
+			});
 		} catch (e) {
 			// Never a verdict from a run that did not finish: half a
 			// measurement is not evidence, and a confident sentence built on
@@ -7906,6 +10346,63 @@
 		return box;
 	}
 
+	// Is this channel's encoder meeting the rate this very form sets?
+	//
+	// The camera reaches the verdict (venc*_rc_state, a thirty second window
+	// with its own hysteresis) and rc-check.js turns it into a sentence; this
+	// only mounts it beside the settings it names. Nothing here re-derives a
+	// judgement -- the form and the camera log must not be able to disagree.
+	//
+	// Absent on a camera too old to publish the verdict, which is the same
+	// thing as a camera with nothing wrong: the box simply stays empty.
+	function rcPanel(sec) {
+		const chn = sec === 'video0' ? 0 : sec === 'video1' ? 1 : -1;
+		if (chn < 0 || !window.MajesticRcCheck) return null;
+		state.rcChn = chn;
+		const box = el('div');
+		box.id = 'mj-rc-findings';
+		// Not painted here: the box is still detached, and paintRcFindings()
+		// looks the id up in the live document. Painting from the mount site
+		// once everything is appended is what ircutPanel does, and for the
+		// same reason -- a verdict the heartbeat had already delivered would
+		// otherwise stay blank until the next one arrived.
+		return box;
+	}
+
+	let rcSample = null;
+
+	function paintRcFindings() {
+		const box = document.getElementById('mj-rc-findings');
+		if (!box || !window.MajesticRcCheck) return;
+		const chn = state.rcChn;
+		const cfg = {
+			bitrate: getDotted(state.config, 'video' + chn + '.bitrate'),
+			fps: getDotted(state.config, 'video' + chn + '.fps'),
+		};
+		const f = window.MajesticRcCheck.diagnose(rcSample, cfg, chn);
+		box.innerHTML = '';
+		if (!f) return;
+		const cls = f.level === 'warning' ? 'alert-warning' : 'alert-secondary';
+		const d = el('div', 'alert ' + cls + ' py-2 px-3 mb-2 small');
+		d.innerHTML = '<b>' + esc(f.title) + '</b> ' + esc(f.detail);
+		box.appendChild(d);
+	}
+
+	// Subscribed once for the page, not once per mount: main.js keeps no
+	// unsubscribe, so re-subscribing on every visit to a video section would
+	// leave a live handler behind for each one. The same reasoning, and the
+	// same shape, as watchIrcut().
+	function watchRc() {
+		if (!window.MajesticRcCheck || typeof mjMetricsSubscribe !== 'function')
+			return;
+		mjMetricsSubscribe((s) => {
+			// A verdict is a claim about right now, and an unreachable camera
+			// has no right now to claim anything about.
+			rcSample = s.ok ? s : null;
+			paintRcFindings();
+		});
+	}
+
 	function ircutPanel(sec) {
 		if (sec !== 'nightMode' || !IRCUT) return null;
 		// A refused snapshot blanks the Test button until something says to ask
@@ -7927,14 +10424,34 @@
 			'<span class="mj-live-rule"></span></div>' +
 			'<div id="mj-ircut-rolelist"></div>' +
 			'<div class="mj-ircut-acts">' +
+			// The two are not the same weight and must not look it. One starts
+			// a search for wiring nobody knows; the other measures wiring that
+			// is already set. While they matched, the only thing telling them
+			// apart was their words (#552).
+			//
+			// The solid fill is in the shipped stylesheet; the outlined
+			// variant of the same colour is not, because the sheet is purged
+			// down to what this UI uses. That is why no comment here may SPELL
+			// either class name: purgecss scans these files as text, so naming
+			// one is enough to pull its rules back into the sheet -- the exact
+			// cost this paragraph exists to avoid, paid by the paragraph.
 			'<button type="button" class="btn btn-primary btn-sm" id="mj-ircut-find">Find them for me</button>' +
 			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-ircut-run">Test the filter</button>' +
 			'</div>' +
+			// Why the sweep may not run, where it may not. It is the camera's
+			// refusal rather than this panel's -- the kernel would not say who
+			// holds which pad -- and it is drawn under the button it disables
+			// so the two are read together.
 			'<div class="small text-secondary mt-2" id="mj-ircut-find-why" hidden></div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-why" hidden></div>' +
 			'<div class="small text-secondary mt-2" id="mj-ircut-status"></div>' +
 			'<div id="mj-ircut-result" class="small" hidden></div>' +
 			'</div></div>' +
+			// The sweep's own card, full width under the wiring rather than in
+			// the roles column beside it: it carries a warning, a range and a
+			// count of what is being left alone, and a 499px column turns that
+			// into a ladder. Hidden until the button above asks for it.
+			'<div id="mj-ircut-hunt" hidden></div>' +
 			'<div id="mj-ircut-mon" hidden>' +
 			'<div class="mj-live-grp-head mt-3"><span class="mj-cap">Automatic day/night</span>' +
 			'<span class="mj-live-rule"></span></div>' +
@@ -7990,6 +10507,32 @@
 		}
 
 		state.ircutInfo = info;
+		// Read the pads again after anything changes them. The list is the
+		// camera's, so this re-reads rather than patching a local copy -- the
+		// camera is the one that enforces it and the one that remembers it
+		// across the reboot that may have caused it. The hunt holds a copy of
+		// its own and takes this one too, or it would go on working from the
+		// list it was mounted with. Only the newest read is believed: two
+		// presses make two reads, and the older can arrive second.
+		let padReads = 0;
+		const rereadPads = () => {
+			const read = ++padReads;
+			return apiFetch('/api/v1/gpio', { credentials: 'same-origin' })
+				// A refusal has a JSON body too, and painting the map from it would
+				// replace a real pad list with an error object -- every pad quietly
+				// unknown, on the drawing somebody reads to decide what is safe to
+				// drive.
+				.then((r) => r.ok ? r.json()
+					: Promise.reject(new Error('HTTP ' + r.status)))
+				.then((fresh) => {
+					if (state.ircutMap !== map || read !== padReads) return;
+					state.ircutInfo = fresh;
+					map.reinfo(fresh);
+					if (state.ircutHunt) state.ircutHunt.reinfo(fresh);
+				})
+				.catch(() => { /* the pads keep the state the camera has */ });
+		};
+		const hunting = window.MajesticPinHunt;
 		const map = window.MajesticIrcutMap.mount(host, {
 			info: info,
 			assign: currentAssign(),
@@ -8000,12 +10543,65 @@
 			pwmLamp: !!pwmLamp(),
 			soc: SOC + (info.banks ? (SOC ? ' · ' : '') + info.banks.length + ' banks' : ''),
 			onChange: (a) => { pushAssign(a); paintRoles(); },
+			// Ruling a pad out of the scan, from the pad itself. What the map
+			// shows afterwards comes from the re-read rather than the reply,
+			// so it is what the camera holds, whichever way the press went.
+			onAvoid: hunting ? (pin, on) => {
+				const hunt = state.ircutHunt;
+				if (hunt) hunt.hold(true);
+				hunting.avoid(pin, on).then(rereadPads, rereadPads)
+					.then(() => { if (hunt) hunt.hold(false); });
+			} : undefined,
 		});
 		// Leaving the section while this fetch was in flight means the panel
 		// this map belongs to is already gone; mounting it now would strand a
 		// second set of document listeners with nothing to remove them.
 		if (state.sec !== 'nightMode') { map.destroy(); return; }
 		state.ircutMap = map;
+
+		// A find carried over from the pin hunt on the Pins page.
+		//
+		// The hunt drives the pads and works out which pair moves the filter;
+		// this page owns the wiring fields, the dirty tracking and the Save
+		// bar. So the find arrives as a PROPOSAL and is staged here through the
+		// same path the map's own edits take -- nothing is written to majestic
+		// behind anyone's back, which is what lets the filter test keep
+		// refusing to run against wiring the camera has not been given.
+		//
+		// Read once and removed whatever happens next: a proposal that survived
+		// being staged would re-apply itself over every later edit of these
+		// fields, on the page where getting them backwards looks like a broken
+		// camera.
+		(function stageProposal() {
+			let raw = null;
+			try {
+				raw = sessionStorage.getItem('mj-ircut-proposal');
+				if (raw !== null) sessionStorage.removeItem('mj-ircut-proposal');
+			} catch (e) {
+				return; /* no storage, no proposal */
+			}
+			if (!raw) return;
+			let p = null;
+			try { p = JSON.parse(raw); } catch (e) { return; }
+			const ok = (v) => typeof v === 'number' && isFinite(v) && v >= 0;
+			if (!p || !ok(p.irCutPin1) || !ok(p.irCutPin2)) return;
+
+			const a = Object.assign({}, currentAssign());
+			a.irCutPin1 = p.irCutPin1;
+			a.irCutPin2 = p.irCutPin2;
+			pushAssign(a);
+			map.set(a);
+			paintRoles();
+
+			const note = box.querySelector('#mj-ircut-status');
+			if (note) {
+				note.innerHTML = '<b>From the pin hunt:</b> pins ' +
+					p.irCutPin1 + ' and ' + p.irCutPin2 + ' are filled in ' +
+					'below and <b>nothing is saved yet</b>. Press Save to keep ' +
+					'them, then Test the filter.';
+			}
+		})();
+
 		// refresh() re-syncs the map from config with `quiet`, which suppresses
 		// onChange — and onChange is what repaints this list. Without a handle
 		// to it the pads moved and the roles beside them did not, so a coil the
@@ -8026,9 +10622,23 @@
 		// which of them the channel took is not something this page can tell
 		// without guessing. The channel is the honest answer then, and it is
 		// still an answer — unlike "not set", which was the bug.
-		function pwmLamp() {
-			const ch = getDotted(state.config, 'nightMode.backlightPwmChannel');
-			if (!ch || ch === 'none') return null;
+		//
+		// A board may have two lamps, IR and white, each on its own channel,
+		// and the camera reports both pads under this one role. Either is a
+		// lamp on the map; with both, the channels are named and no single
+		// pad is claimed, since which pad is which is again a guess.
+		//
+		// `only` ('IR' or 'white') asks about one lamp, for its own row: the
+		// night illuminator's row is the IR channel's, and the white light's
+		// row is the white channel's, which also makes a whiteLightPin left
+		// beside it read as the channel it is ignored for. Without it, any
+		// lamp on a channel -- which is what makes a pad nobody's to pick.
+		function pwmLamp(only) {
+			const chans = [['IR', 'irLightPwmChannel'],
+				['white', 'whiteLightPwmChannel']]
+				.map(([name, k]) => [name, getDotted(state.config, 'nightMode.' + k)])
+				.filter(([name, ch]) => ch && ch !== 'none' && (!only || name === only));
+			if (!chans.length) return null;
 			const pads = [];
 			((state.ircutInfo && state.ircutInfo.assigned) || []).forEach((x) => {
 				// Deduplicated, because a lamp pin left set to the pad the
@@ -8039,8 +10649,12 @@
 				}
 			});
 			return {
-				channel: String(ch),
-				pin: pads.length === 1 ? pads[0] : undefined,
+				channel: chans.length === 1 ? String(chans[0][1])
+					: chans.map(([name, ch]) => name + ' on ' + ch).join(', '),
+				hint: chans.length === 1 ? 'dimmable, on ' + chans[0][1]
+					: 'dimmable: ' + chans.map(([name, ch]) => name + ' on ' + ch)
+						.join(', '),
+				pin: chans.length === 1 && pads.length === 1 ? pads[0] : undefined,
 			};
 		}
 
@@ -8060,7 +10674,8 @@
 				// beside a selected channel is ignored by the camera, so
 				// letting it suppress this would show a dimmable lamp as an
 				// ordinary switched one and name a pad nothing drives.
-				const lamp = r.key === 'backlightPin' ? pwmLamp() : null;
+				const lamp = r.key === 'backlightPin' ? pwmLamp('IR')
+					: r.key === 'whiteLightPin' ? pwmLamp('white') : null;
 				const set = a[r.key] !== undefined || !!lamp;
 				if (!set) row.classList.add('mj-ircut-role-unset');
 				const dot = el('span', 'mj-ircut-rdot');
@@ -8072,7 +10687,7 @@
 				t.appendChild(l);
 				const h = el('em');
 				h.textContent = lamp
-					? 'dimmable, on ' + lamp.channel
+					? lamp.hint
 					: r.hint;
 				t.appendChild(h);
 				row.appendChild(t);
@@ -8156,272 +10771,93 @@
 		}
 		paintRoles();
 
-		const find = box.querySelector('#mj-ircut-find');
-		// Re-read the pads rather than reusing the mount-time snapshot. That
-		// snapshot carries `assigned`, and pairs() skips every pad in it — so
-		// after clearing the pins and saving, the scan went on skipping the two
-		// pads it was being asked to find, and reported nothing. Reloading the
-		// page "fixed" it, which is the tell that the staleness was in here and
-		// not on the camera (#273). The pad list can also move underneath the
-		// page for reasons of its own, majestic releasing an export among them.
-		if (find) find.addEventListener('click', async () => {
-			let fresh = info;
-			try {
-				const r = await apiFetch('/api/v1/gpio',
-					{ credentials: 'same-origin' });
-				if (!r.ok) throw new Error('HTTP ' + r.status);
-				fresh = await r.json();
-				state.ircutInfo = fresh;
-			} catch (e) {
-				// The cached list is stale, not wrong: every pad it names is
-				// still a pad. Scanning with it beats refusing to scan.
-			}
-			openScan(box, map, fresh);
-		});
-
-		// A sweep drives pads, and the camera refuses to drive any pair while it
-		// cannot say what the pads already are — no debugfs to name a line's
-		// owner, or no boot loader environment to see the PTZ pads. Offering the
-		// button anyway would spend a press to be told no, once per pad, so the
-		// reason is said here instead. Picking a pin by hand still works: that
-		// writes a number into a field and moves nothing.
-		if (find && (info.ownersUnknown || info.ptzUnknown)) {
-			const cant = [];
-			if (info.ownersUnknown) cant.push('which pads the kernel already holds');
-			if (info.ptzUnknown) cant.push('which pads the PTZ driver is on');
-			find.disabled = true;
-			// What is refused is the SWEEP, and only the sweep: it is the one
-			// thing here that drives pads nobody has vouched for. Testing a
-			// filter the camera already knows about still works, and still
-			// moves it. "Nothing may be driven" said otherwise, and then the
-			// same sentence sent the reader to a control that drives.
-			//
-			// It ends at Save because the pin map only STAGES: the map writes
-			// into the hidden fields, while the test reads the configuration
-			// the camera is running on. Skip the save and the verdict is about
-			// the old wiring — which is the one answer this panel must never
-			// give. The scan's own success path has always said it this way.
-			const why = 'This camera cannot say ' + cant.join(' or ') +
-				', so the sweep may not drive pads it has not been told about. ' +
-				'Set the coils by hand on the pin map, Save, then Test the ' +
-				'filter checks them.';
-			find.title = why;
-			// The reason goes on the page and not only in the title, for the
-			// reason syncTestBtn() says two controls down: a tooltip is not an
-			// explanation on a touchscreen, where there is no hover at all.
-			// This button was the one place in the panel that broke that rule,
-			// and the greyed-out control it left had to be asked about.
-			const note = box.querySelector('#mj-ircut-find-why');
-			if (note) {
-				note.textContent = why;
-				note.hidden = false;
-			}
-		}
-
-		// A camera that came back from the dead mid-scan says so before anything
-		// else — the pad that did it is named and excluded.
-		const dead = window.MajesticIrcutScan &&
-			window.MajesticIrcutScan.casualty(info);
-		if (dead) {
-			// The journal records the PAIR that was being driven, because a pair
-			// is what an actuation takes. Reading one pin off it printed
-			// "undefined" and excluded nothing, which left the pair that
-			// rebooted the camera free to be tried again on the next scan —
-			// the exact outcome the journal exists to prevent.
-			const pins = (dead.pins || []).map(Number).filter((n) => !isNaN(n));
-			const w = el('div', 'alert alert-warning py-2 px-3 mb-2 small');
-			w.innerHTML = '<b>The last pin scan stopped the camera.</b> It was driving ' +
-				(pins.length > 1 ? 'pins ' + esc(pins.join(' and ')) : 'pin ' + esc(String(pins[0]))) +
-				' when it stopped answering, and the watchdog restarted it. ' +
-				(pins.length > 1 ? 'Those pins have' : 'That pin has') +
-				' been excluded from further scans.';
-			box.querySelector('#mj-ircut-findings').appendChild(w);
-			state.ircutExclude = (state.ircutExclude || []).concat(pins);
-		}
-	}
-
-	// Finding the pins by driving them. This is the only control in the WebUI
-	// that can stop a camera answering, so it asks first, in those words, and
-	// the endpoint behind it journals each pad to flash before touching it.
-	function openScan(box, map, info) {
-		const SCAN = window.MajesticIrcutScan;
-		if (!SCAN) return;
-		const host = box.querySelector('#mj-ircut-result');
-		// Taking the element over destroys whatever verdict was in it, so the
-		// assignment that verdict was measured against stops meaning anything.
-		state.ircutTestedOn = null;
-		const status = box.querySelector('#mj-ircut-status');
-		// What the wiki's table records about this part: the pairs to try first,
-		// and the pads it names as a reset, a USB enable or an illuminator, to
-		// try last. Absent for a part the table has never seen, which is the
-		// behaviour the sweep had before the table was read at all.
-		const PADS = window.MajesticIrcutPads;
-		const part = PADS ? PADS.forSoc(SOC) : {};
-		const list = SCAN.pairs(info, {
-			exclude: state.ircutExclude || [],
-			part: part,
-		});
-		let stop = false;
-
-		host.hidden = false;
-		host.className = 'mj-ircut-scan';
-		// Dressed as a group of this section, not as an announcement inside it:
-		// micro-caps head, hairline to the margin, note on the right, small body
-		// — the same head the deck gives Wiring and Connected to. A lead
-		// paragraph at full body size was the only 1rem text on the page.
-		host.innerHTML =
-			'<div class="mj-live-grp-head"><span class="mj-cap">Find the pins</span>' +
-			'<span class="mj-live-rule"></span>' +
-			'<span class="mj-live-note" id="mj-scan-n"></span></div>' +
-			'<p class="small mb-2">Each pad is driven against another while the ' +
-			'picture is watched for the filter to move. An IR-cut filter is driven ' +
-			'across two pads, so pairs are what get tried; the pairs other boards ' +
-			'use go first, so this usually ends in seconds.</p>' +
-			'<div class="alert alert-warning py-2 px-3 mb-2 small">' +
-			'<b>This drives pads whose job is unknown.</b> One of them may reset the ' +
-			'network, cut power to the sensor, or stop the camera answering. That risk ' +
-			'cannot be removed &mdash; only made survivable: each pad is written to flash ' +
-			'before it is driven, so a camera that has to be restarted comes back knowing ' +
-			'which pad did it.</div>' +
-			'<p class="x-small text-secondary mb-2">Pads already spoken for are skipped. ' +
-			// Said only where it is true. The table is per board, so this is an
-			// order and not a promise — the pads are still driven if nothing
-			// before them moved the filter, which is why the warning above
-			// keeps its wording either way.
-			(part.known
-				? 'Pads that other boards with this SoC use for a reset, a USB enable ' +
-					'or an illuminator are tried last, and the pairs recorded for it first. '
-				: '') +
-			'This reads the picture, so it needs daylight &mdash; at night nothing will ' +
-			'look like it moved.</p>' +
-			'<div class="d-flex gap-2 align-items-center">' +
-			'<button type="button" class="btn btn-primary btn-sm" id="mj-scan-go">Start</button>' +
-			'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-no">Cancel</button>' +
-			'</div>';
-		host.querySelector('#mj-scan-n').textContent = list.length + ' pairs to try';
-		host.querySelector('#mj-scan-no').addEventListener('click', () => {
-			stop = true; host.hidden = true;
-		});
-		host.querySelector('#mj-scan-go').addEventListener('click', () => {
-			host.innerHTML =
-				'<div class="mj-live-grp-head"><span class="mj-cap">Scanning</span>' +
-				'<span class="mj-live-rule"></span>' +
-				'<span class="mj-live-note" id="mj-scan-s"></span></div>' +
-				'<p class="small mb-2" id="mj-scan-t">Starting&hellip;</p>' +
-				'<button type="button" class="btn btn-outline-secondary btn-sm" id="mj-scan-stop">Stop</button>';
-			const t = host.querySelector('#mj-scan-t');
-			const s = host.querySelector('#mj-scan-s');
-			host.querySelector('#mj-scan-stop').addEventListener('click', () => { stop = true; });
-
-			SCAN.run({
-				// A refusal and a failure are not the same answer. The endpoint
-				// guards pads with owners and says so with a 200 carrying
-				// done:false — that pair is skipped and the sweep goes on. A
-				// request that does not arrive at all is a camera that has
-				// stopped answering, and flattening it into "this pair did not
-				// move anything" made the scan keep firing GPIO writes at a dead
-				// camera for another two hundred pairs and then report that
-				// nothing moved. It rejects now, and the sweep stops.
-				// POST, not GET: driving a pad is a mutation, and a GET is what
-				// a browser issues by itself — a prefetch, a restored tab, a
-				// link from anywhere — carrying the session with it.
-				drive: (a, b) => apiFetch('/api/v1/gpio?pair=' + a + ',' + b,
-					{ method: 'POST', credentials: 'same-origin' })
-					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
-				release: (a, b) => apiFetch('/api/v1/gpio?park=' + a + ',' + b + '&mode=float',
-					{ method: 'POST', credentials: 'same-origin' })
-					.then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
-				look: () => IRCUT.snapshot('/image.jpg'),
-				wait: (ms) => new Promise((r) => setTimeout(r, ms)),
-				stopped: () => stop,
-				onStep: (st) => {
-					t.textContent = 'Trying pins ' + st.a + ' and ' + st.b;
-					s.textContent = (st.index + 1) + ' of ' + st.total;
-					map.sweep(st.a);
+		// Finding the pins by driving them, here, beside the roles it fills
+		// in. It was moved to the Pins page and moved back: what it DRIVES is
+		// arbitrary pads, which is that page's subject, but what it can FIND
+		// is an IR-cut filter and nothing else — its detector is the picture.
+		// Sending the reader away for it measured at three presses and a page
+		// change, two of which visibly did nothing because the door and then
+		// the Start button were below the fold (#552). The Pins page keeps its
+		// copy of the same door for somebody who arrives there instead.
+		//
+		// pin-hunt.js owns everything inside the host and never reaches out of
+		// it; the map is lent to it the way the Pins page lends its drawing.
+		const hunt = window.MajesticPinHunt && window.MajesticPinHunt.mount(
+			box.querySelector('#mj-ircut-hunt'), {
+				info: info,
+				soc: SOC,
+				only: 'filter',
+				pins: {
+					// The pair under the bridge, lit on the map the reader is
+					// already looking at.
+					sweep: (a, b) => { if (state.ircutMap === map) map.sweep(a, b); },
+					select: (pin) => { if (state.ircutMap === map) map.select(pin); },
+					changed: rereadPads,
+					// A find made HERE has nowhere to travel to. It is staged
+					// through the same path the map's own edits take, so the
+					// save bar and the dirty tracking pick it up and nothing
+					// reaches majestic until Save is pressed — which is what
+					// lets the filter test go on refusing to judge wiring the
+					// camera was never given.
+					use: (found, said) => {
+						const a = Object.assign({}, currentAssign());
+						a.irCutPin1 = found.irCutPin1;
+						a.irCutPin2 = found.irCutPin2;
+						pushAssign(a);
+						map.set(a);
+						paintRoles();
+						if (said) {
+							said.innerHTML = 'Pins ' + found.irCutPin1 + ' and ' +
+								found.irCutPin2 + ' are filled in above and ' +
+								'<b>nothing is saved yet</b>. Press Save to keep ' +
+								'them, then <b>Test the filter</b>.';
+						}
+					},
 				},
-			}, list).then((res) => {
-				map.sweep(null);
-				const found = res.pins;
-				if (!found) {
-					host.innerHTML = '<div class="mj-live-grp-head">' +
-						'<span class="mj-cap">Find the pins</span>' +
-						'<span class="mj-live-rule"></span></div>' +
-						'<div class="alert alert-secondary py-2 px-3 mb-0 small">' +
-						'<b>Nothing moved the picture.</b> Either the filter is on a pair this ' +
-						'scan did not reach, or there is not enough light to see it move. ' +
-						'Try again in daylight, or set the pins by hand.' +
-						// Named because it is a real class of camera the sweep
-						// cannot reach, rather than a gap in the pad list. A
-						// single-pad filter is moved by HOLDING one pad at a
-						// level, and holding a pad is the thing this scan may
-						// not do: on a two-coil board it would leave a winding
-						// carrying current, which is why every actuation here
-						// is a brief pulse across a pair. So that wiring is
-						// found by hand and confirmed by the test (#273).
-						'<br><br>A filter driven from a single pad is not something ' +
-						'this sweep can find: it works by pulsing pairs, and a ' +
-						'single-pad filter is moved by holding one pad at a level, ' +
-						'which is not safe to do to a pad whose job is unknown. ' +
-						'If yours is wired that way, put the pad on the opening coil ' +
-						'yourself and press <b>Test the filter</b>.</div>';
-					return;
-				}
-				// The pair itself was watched moving the picture, so it is
-				// reported either way; what may be missing is the classification
-				// and the guarantee that the filter was left closed.
-				// brakeHeld is three-valued. null is a test that did not run:
-				// one of these pads is already majestic's, so it was braked
-				// rather than let go of, and there is no way to see whether the
-				// filter would have sprung open. Saying "it holds its position
-				// on its own" from that would be a claim made about a pad
-				// nothing released (#273).
-				const tail = !found.settled
-					? 'The checks after that did not finish, so the filter may not have ' +
-						'been left closed &mdash; look at the picture before trusting it.'
-					: found.brakeHeld === null
-						? 'Whether it holds its position on its own was not tested: ' +
-							'majestic is already driving one of these pads, and letting ' +
-							'go of it here would have moved the filter.'
-						: found.brakeHeld
-							? 'It springs open when the pins are released, so they have to stay driven.'
-							: 'It holds its position on its own.';
-				host.innerHTML = '<div class="mj-live-grp-head">' +
-					'<span class="mj-cap">Find the pins</span>' +
-					'<span class="mj-live-rule"></span></div>' +
-					'<div class="alert ' + (found.settled ? 'alert-success' : 'alert-warning') +
-					' py-2 px-3 mb-2 small"><b>' +
-					(found.settled ? 'Found it.' : 'Found the pins, but not cleanly.') + '</b> ' +
-					'Pins ' + esc(String(found.irCutPin1)) + ' and ' + esc(String(found.irCutPin2)) +
-					' drive the filter &mdash; ' + esc(String(found.closesWhenHigh)) +
-					' is the one that closes it. ' + tail +
-					'</div><button type="button" class="btn btn-primary btn-sm" id="mj-scan-use">' +
-					'Use these pins</button>';
-				host.querySelector('#mj-scan-use').addEventListener('click', () => {
-					// Staged, never written behind the person's back: the map
-					// fills the fields and the save bar appears like any edit.
-					const a = map.get();
-					a.irCutPin1 = found.irCutPin1;
-					a.irCutPin2 = found.irCutPin2;
-					// set() fires onChange, which pushes the fields and repaints
-					// the roles — no second push needed.
-					map.set(a);
-					host.hidden = true;
-					if (status) status.textContent = 'Pins staged — Save, then test the filter.';
-				});
-			}).catch((e) => {
-				map.sweep(null);
-				host.innerHTML = '<div class="mj-live-grp-head">' +
-					'<span class="mj-cap">Find the pins</span>' +
-					'<span class="mj-live-rule"></span></div>' +
-					'<div class="alert alert-danger py-2 px-3 mb-0 small">' +
-					'The scan could not finish: ' + esc(e && e.message ? e.message : String(e)) +
-					'</div>';
 			});
-		});
+		state.ircutHunt = hunt || null;
+
+		const find = box.querySelector('#mj-ircut-find');
+		if (find && hunt) {
+			// The camera's own refusal, said under the button rather than
+			// discovered by pressing it: without a debugfs the kernel will not
+			// name which pads it already holds, and nothing here drives a pad
+			// it has not been told about.
+			const why = hunt.blocked();
+			if (why) {
+				find.disabled = true;
+				const w = box.querySelector('#mj-ircut-find-why');
+				if (w) { w.textContent = why; w.hidden = false; }
+			} else {
+				find.addEventListener('click', () => {
+					hunt.open();
+					// The card is drawn below the wiring, so on a short window
+					// the press would otherwise land entirely off screen — the
+					// fault that made the old route read as a dead button.
+					const h = box.querySelector('#mj-ircut-hunt');
+					if (h && h.scrollIntoView)
+						h.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+				});
+			}
+		} else if (find) {
+			// No hunt module, no sweep. The pads are still settable by hand on
+			// the map, so this is one button missing rather than a dead end.
+			find.hidden = true;
+		}
 	}
 
-	// "all N at stock" / "N of M off stock" for the section head — the question
-	// the per-row ↺ can only answer one row at a time. Counted over what is on
+	// The scan that finds these pins by driving them lives on the Pins page
+	// now. What it does is drive arbitrary pads across the whole chip, and
+	// everything that makes that safe is about GPIO in general -- it was here
+	// only because the filter is what it was built to find. This page keeps
+	// what is genuinely its own: which pad each coil is on, and testing the
+	// filter once they are set.
+
+
+	// "all N at stock" / "N of M off stock" for the section head, and the same
+	// judgement marked on every row it counted — the head can say how many and
+	// never which, and a reader who cannot find the four has been handed a
+	// number they can do nothing with. Counted over what is on
 	// screen (a visibleWhen-hidden row is not one of the section's N from here)
 	// and over fields the schema records a default for, so the sentence is
 	// provable: a key with no recorded default can never be shown to be either.
@@ -8436,33 +10872,128 @@
 	// Measured against the default rather than against the last save, so it goes
 	// on saying "off stock" after Save — it is a fact about the camera.
 	function paintStock() {
-		const note = document.getElementById('mj-stock-note');
-		if (!note) return;
-		let shown = 0, known = 0, off = 0;
+		openGroupFolds();
+		let shown = 0, known = 0, offN = 0;
 		for (const f of state.fields) {
 			if (!f.p || f.p.style.display === 'none' || f.p.hidden) continue;
 			shown++;
-			if (!f.schema || !Object.prototype.hasOwnProperty.call(f.schema, 'default')) continue;
+			if (!f.schema || !schemaHasDefault(f.schema)) continue;
 			known++;
-			// The default has to be serialised the way the control serialises its
-			// own value or the two are not comparable: an array control reads back
-			// as ", "-joined (getValue → _rows().join(', ')) while String([a,b])
-			// joins on a bare comma, so an untouched two-region default would count
-			// as off stock. Every array default majestic ships today is [], which
-			// stringifies to "" either way — this is the case that has not bitten
-			// yet, not the one that cannot.
-			const def = f.schema.default;
-			const defStr = Array.isArray(def) ? def.join(', ') : String(def);
-			if (String(f.getValue()) !== defStr) off++;
+			const off = String(f.getValue()) !== stockOf(f.schema);
+			if (off) offN++;
+			// The same count, said row by row. Which four of the seventeen the
+			// head is talking about is the one thing it cannot say, and nothing
+			// else on the row could say it either: the amber left border is
+			// taken (it means unsaved), and the value alone does not tell you
+			// what stock was. The ↺ is the free channel and the honest one — it
+			// is the undo for exactly this fact, so it lights when there is
+			// something to undo and hides when there is not.
+			f.p.classList.toggle('mj-off-stock', off);
+			if (f.setStock) f.setStock(off);
 		}
+		const note = document.getElementById('mj-stock-note');
+		// Painted on every leaf, the note only on the ones that have a head:
+		// renderLive, renderOsd and renderMotion draw their own, and the rows
+		// under them are the same rows with the same question about them. This
+		// used to return here first, which left those three leaves marking
+		// nothing.
+		if (!note) return;
 		// The denominator is the rows on screen, so it matches what can be
 		// counted; "all at stock" carries no number at all, because the honest
 		// one is the number of *defaulted* fields and printing "all 9" beside
 		// twelve visible rows invites exactly the wrong reading.
 		note.textContent = !known ? ''
-			: off ? off + ' of ' + shown + ' off stock'
+			: offN ? offN + ' of ' + shown + ' off stock'
 				: 'all at stock';
-		note.classList.toggle('mj-off-stock', off > 0);
+		note.classList.toggle('mj-off-stock', offN > 0);
+	}
+
+	// ── a group fold (#585) ─────────────────────────────────────────────────
+	//
+	// A button and a body under it. The body is hidden="until-found" rather
+	// than display:none, so the browser's own find-in-page reaches a setting
+	// inside it and opens it on the way (beforematch), the same as the "?"
+	// folds.
+	//
+	// It goes UNDER the card's two columns, full width, and holds a pair of
+	// columns of its own, dealt like any other card's when it opens. Inside
+	// the first column it made the whole card one narrow column: the rows
+	// above it fell under SOLO_MAX, and the fold's eleven rows then ran down
+	// that same column when opened. For the same reason the rows above it are
+	// never solo -- they are not a card of a handful of rows, they are the
+	// head of one whose rest is folded. Returns the column the group's rows
+	// are drawn into.
+	function groupFold(box, sec, name) {
+		const outer = box.parentNode;
+		const wrap = el('div', 'mj-grp-fold');
+		const btn = el('button', 'mj-grp-fold-btn');
+		btn.type = 'button';
+		btn.innerHTML = '<span class="mj-tree-caret"></span>';
+		btn.appendChild(document.createTextNode(name));
+		const body = el('div', 'mj-grp-fold-body');
+		body.id = 'mj-fold-' + sec + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+		btn.setAttribute('aria-controls', body.id);
+		const cols = el('div', 'mj-cols');
+		cols.appendChild(el('div', 'mj-col'));
+		cols.appendChild(el('div', 'mj-col'));
+		body.appendChild(cols);
+		state.cols.push(cols);
+		wrap.appendChild(btn);
+		wrap.appendChild(body);
+		outer.dataset.solo = 'off';
+		outer.after(wrap);
+		setGroupFold(wrap, false);
+		btn.addEventListener('click', () =>
+			setGroupFold(wrap, btn.getAttribute('aria-expanded') !== 'true'));
+		body.addEventListener('beforematch', () => setGroupFold(wrap, true));
+		return cols.firstElementChild;
+	}
+
+	function setGroupFold(wrap, open) {
+		const btn = wrap.querySelector(':scope > .mj-grp-fold-btn');
+		const body = wrap.querySelector(':scope > .mj-grp-fold-body');
+		if (!btn || !body) return;
+		btn.setAttribute('aria-expanded', String(open));
+		if (open) body.removeAttribute('hidden');
+		else body.setAttribute('hidden', 'until-found');
+		// Shut, the rows measure nothing and were dealt as nothing; open, they
+		// are dealt now that they have a height. Moving them cannot move the
+		// button, which is above them.
+		if (open) {
+			dealCols(body.querySelector(':scope > .mj-cols'));
+			foldHints();
+		}
+	}
+
+	// Opens, never shuts: a fold holding a row that is set away from stock, or
+	// that has an unsaved edit, or that a search matched, is not allowed to
+	// hide it. Shutting is the reader's own business. Run from paintStock(),
+	// which every edit, save, reset and load already goes through.
+	function openGroupFolds() {
+		document.querySelectorAll('#mj-settings-form .mj-grp-fold').forEach(wrap => {
+			const body = wrap.querySelector(':scope > .mj-grp-fold-body');
+			if (!body || !body.hasAttribute('hidden')) return;
+			const held = state.fields.some(f => f.p && body.contains(f.p) &&
+				(f.getValue() !== state.initial[f.dot] ||
+					String(f.getValue()) !== (f.schema && schemaHasDefault(f.schema)
+						? stockOf(f.schema) : '')));
+			if (held || body.querySelector('mark')) setGroupFold(wrap, true);
+		});
+	}
+
+	function schemaHasDefault(schema) {
+		return Object.prototype.hasOwnProperty.call(schema, 'default');
+	}
+
+	// The default as the CONTROL would serialise it, or the two are not
+	// comparable: an array control reads back as ", "-joined (getValue →
+	// _rows().join(', ')) while String([a,b]) joins on a bare comma, so an
+	// untouched two-region default would count as off stock. Every array
+	// default majestic ships today is [], which stringifies to "" either way —
+	// this is the case that has not bitten yet, not the one that cannot.
+	function stockOf(schema) {
+		const def = schema.default;
+		return Array.isArray(def) ? def.join(', ') : String(def);
 	}
 
 	// `skip` is a set of dots a caller has already mounted elsewhere on the same
@@ -8470,14 +11001,24 @@
 	// The group head both an object subtree and a flat section's heading use:
 	// micro-caps name and a hairline to the column edge, rather than a 20px
 	// grey <h5> that outweighed every label under it.
-	function head(container, label) {
+	function head(container, label, note) {
 		const h = el('div', 'mj-live-grp-head');
 		const t = el('span', 'mj-cap');
 		t.textContent = label;
 		h.appendChild(t);
 		h.appendChild(el('span', 'mj-live-rule'));
+		if (note) {
+			const n = el('span', 'mj-live-note');
+			n.textContent = note;
+			h.appendChild(n);
+		}
 		container.appendChild(h);
+		return h;
 	}
+
+	// head() under a name renderLive can reach: it has a `head` of its own, the
+	// leaf's title row, which shadows this one inside it.
+	function groupHead(container, label, note) { return head(container, label, note); }
 
 	// The named keys of `props`, in the order they were named.
 	function pick(props, order) {
@@ -8513,8 +11054,14 @@
 				const mine = g.keys.filter(k => keys.indexOf(k) >= 0);
 				// A heading with nothing under it is furniture; a build without
 				// these keys should not grow an empty rule.
-				if (!mine.some(k => !EXCLUDE.has(basePath + '.' + k) && !MAP_DOTS[basePath + '.' + k])) continue;
-				head(container, g.label);
+				// Nor one whose rows are all drawn somewhere else: the isp
+				// groups are lifted onto the Live leaf whole, and on the isp page
+				// their headings would stand over nothing.
+				if (!mine.some(k => {
+					const d = basePath + '.' + k;
+					return !EXCLUDE.has(d) && !MAP_DOTS[d] && !twilightHidden(d, props[k]) && !lifted().has(d) && !(skip && skip.has(d));
+				})) continue;
+				if (g.label) head(container, g.label, g.note);
 				renderProps(container, basePath, pick(props, mine), skip, true);
 			}
 			ordered = ordered.filter(k => !named.has(k));
@@ -8538,8 +11085,13 @@
 			// map above the form is what edits them, but they stay real fields
 			// so dirty tracking, Save and the per-row reset keep working on them
 			// without knowing a map exists.
+			// A value that belongs on another field's rows (x-row-of: a
+			// quality offset per region of interest) renders hidden the same
+			// way, and that field's rows edit it.
+			const rowOf = sub && sub['x-row-of'] && typeof sub['x-row-of'].field === 'string'
+				&& props[sub['x-row-of'].field];
 			const field = renderField(container, dot, key, sub, eff,
-				MAP_DOTS[dot] ? { hidden: true } : undefined);
+				(MAP_DOTS[dot] || twilightHidden(dot, sub) || rowOf) ? { hidden: true } : undefined);
 			if (field) {
 				state.fields.push(field);
 				state.initial[dot] = field.getValue();
@@ -8582,7 +11134,7 @@
 			saved: (dot) => getDotted(state.config, dot),
 			// withLive, or a live-classified controlling field has no default to
 			// find: sectionFields skips x-live keys unless asked for them, since
-			// the Live adjustments leaf lifts those out of their own sections.
+			// the Picture leaf lifts those out of their own sections.
 			// The lift is about where a control is DRAWN; this is asking the
 			// schema what the key defaults to, and an unresolvable controlling
 			// field makes met() fail open and the warning never draw at all.
@@ -8599,17 +11151,25 @@
 		const byDot = {};
 		for (const f of state.fields) byDot[f.dot] = f;
 		for (const f of state.fields) {
-			const vw = f.schema && f.schema.visibleWhen;
-			if (!vw || !vw.field) continue;
+			const conds = visConds(f.schema && f.schema.visibleWhen);
+			if (!conds.length) continue;
 			const parent = f.dot.slice(0, f.dot.lastIndexOf('.'));
-			const ctrl = byDot[parent + '.' + vw.field];
-			if (!ctrl) continue;
-			const update = () => { f.p.style.display = visMatches(vw, ctrl.getValue()) ? '' : 'none'; };
-			ctrl.control.addEventListener('change', update);
-			ctrl.control.addEventListener('input', update);
+			const ctrls = conds.map((c) => ({ c: c, ctrl: byDot[parent + '.' + c.field] }))
+				.filter((x) => x.ctrl);
+			if (!ctrls.length) continue;
+			// A row hidden for the strip (x-twilight) stays hidden whatever its
+			// rule says: the strip is what shows for it.
+			if (f.p.hidden) continue;
+			const update = () => {
+				f.p.style.display = ctrls.some((x) => visMatches(x.c, x.ctrl.getValue())) ? '' : 'none';
+			};
+			ctrls.forEach((x) => {
+				x.ctrl.control.addEventListener('change', update);
+				x.ctrl.control.addEventListener('input', update);
+				controllers.add(x.ctrl);
+			});
 			state.visUpdaters.push(update);
 			update();
-			controllers.add(ctrl);
 		}
 		// A frame-rate bound that depends on the chosen resolution has to move
 		// with it. Same shape as the visibleWhen pass above — find the sibling,
@@ -8727,14 +11287,60 @@
 		// isp.iris.type to DC reveals eight rows and the count read one of them —
 		// "1 of 13 off stock" against thirteen rows on a screen showing twenty.
 		for (const ctrl of controllers) {
-			const recount = () => { paintStock(); if (state.q.trim()) buildNav(); };
+			// foldHints, because a row this controller reveals was display:none
+			// when the page last measured — height 0, which is deliberately
+			// UNKNOWN rather than "it fits", so it is still carrying no verdict
+			// at all. Not layoutCols: re-dealing the columns on a visibility
+			// change is #189 exactly, and the comment on that function says so.
+			const recount = () => {
+				paintStock();
+				foldHints();
+				if (state.q.trim()) buildNav();
+			};
 			ctrl.control.addEventListener('change', recount);
 			ctrl.control.addEventListener('input', recount);
 		}
 	}
 
+	// Choices the schema says can do nothing until something else is set
+	// (x-enum-requires, in x-requires' own vocabulary) are held back while it
+	// is not, with the reason under the row -- rather than accepted and then
+	// explained. Never the choice the field holds now or was saved with: that
+	// is taken away from nobody, and moving off a saved choice must not make
+	// it impossible to come back to.
+	function paintEnumHolds() {
+		(state.fields || []).forEach((f) => {
+			const map = f.schema && f.schema['x-enum-requires'];
+			if (!map || !f.control || !f.control.options || !f.p) return;
+			const cur = String(f.getValue()), saved = String(state.initial[f.dot]);
+			const held = [];
+			let why = '';
+			Array.prototype.forEach.call(f.control.options, (op) => {
+				const req = map[op.value];
+				const msg = req ? reqNotice(req, () => f.getValue()) : '';
+				op.disabled = !!msg && op.value !== cur && op.value !== saved;
+				op.title = op.disabled ? msg : '';
+				if (op.disabled) {
+					held.push(op.textContent);
+					why = why || msg;
+				}
+			});
+			let note = f.p.querySelector('.mj-enum-held');
+			if (!held.length) {
+				if (note) note.remove();
+				return;
+			}
+			if (!note) {
+				note = el('div', 'hint mj-requires mj-enum-held');
+				f.p.appendChild(note);
+			}
+			note.textContent = held.join(', ') + ': ' + why;
+		});
+	}
+
 	function runVisibility() {
 		(state.visUpdaters || []).forEach(u => u());
+		paintEnumHolds();
 		// a saved edit can have met or broken a requirement on this page
 		(state.reqUpdaters || []).forEach(u => u.paint());
 		// what is on screen just changed, and the head counts what is on screen
@@ -8753,8 +11359,16 @@
 	// here instead — at mount and on resize, never while a row toggles. Showing
 	// or hiding a row then only moves what is under it in its own column, which
 	// is what makes the form predictable to edit.
+	// Every .mj-cols the page put up, not one. The Picture leaf can
+	// carry more than one card under its deck — a section it lifted keys out of
+	// gets a card of its own — and a box nobody deals keeps all of its rows in
+	// the first column with the second one empty beside it, which is the
+	// half-empty grid line tools/check-layout.mjs exists to catch.
 	function layoutCols() {
-		const box = state.cols;
+		(state.cols || []).forEach(dealCols);
+	}
+
+	function dealCols(box) {
 		// below md the columns stack, and every split reads the same stacked
 		if (!box || !WIDE.matches) return;
 		const a = box.children[0], b = box.children[1];
@@ -8774,7 +11388,7 @@
 		// heading would be dealt into two columns while claiming to be under the
 		// limit.
 		const shown = items.filter(it => it.offsetHeight && it.classList.contains('mj-row')).length;
-		const solo = shown <= SOLO_MAX;
+		const solo = box.dataset.solo !== 'off' && shown <= SOLO_MAX;
 		box.classList.toggle('mj-solo', solo);
 		if (solo) {
 			if (b.childElementCount) {
@@ -8930,8 +11544,61 @@
 	function renderField(container, dot, key, sub, eff, opts) {
 		opts = opts || {};
 		const live = !!opts.live;
-		// the field's `title` is the short label; older schemas only had `description`
-		const desc = sub.title || sub.description || key;
+		// One number the camera keeps as text (x-numeric: a font scale of
+		// "1.0") is drawn as the number it is, with the bounds it declares.
+		// What is saved is still the text the control holds.
+		if (sub && sub.type === 'string' && sub['x-numeric'] && typeof sub['x-numeric'] === 'object') {
+			const n = sub['x-numeric'];
+			sub = Object.assign({}, sub, { type: 'number', minimum: n.minimum, maximum: n.maximum });
+		}
+		// The NETIP password is kept as the hash XMEye/CMS clients send, and
+		// the schema names it for what is stored ("Hash of password"). The
+		// owner knows the password, not the hash, so the row takes the
+		// password and saves its hash (netip-hash.js); its name and hint say
+		// what to type. Without the module the row stays the schema's.
+		const netipHash = dot === 'netip.password' && sub && sub.type === 'string'
+			&& window.NetipHash ? window.NetipHash : null;
+		if (netipHash) {
+			sub = Object.assign({}, sub, {
+				title: 'Password',
+				hint: 'What XMEye and CMS clients sign in with. The camera keeps only its hash. '
+					+ 'With No password, any of them that can reach the camera signs in with the username alone.',
+			});
+		}
+		// A field's sibling as it stands NOW: the control if it is on the page,
+		// else the config it loaded with. What x-title-when is evaluated
+		// against, so a name follows the mode select as it moves, not after a
+		// save.
+		const base = dot.slice(0, dot.lastIndexOf('.'));
+		const siblingValue = (name) => {
+			const d = base + '.' + name;
+			const f = (state.fields || []).find(x => x.dot === d);
+			return f ? f.getValue() : getDotted(state.config, d);
+		};
+		// Rows the camera runs by itself when they are empty: it publishes the
+		// value in force (x-metric) or renames the row by mode (x-title-when),
+		// and an empty box reads "Auto · <what it is running>". A unit alone
+		// does not make one: x-unit is only what the number is in, and
+		// treating it as Auto too would draw a real 0 — a 0 ms hold, a 0 s
+		// pre-roll — as an empty box.
+		// `sub.type` and not `type`: this runs above that const, and reading it
+		// here is the temporal-dead-zone throw the accessor comment below
+		// describes, which takes every later field on the leaf with it.
+		const expRow = !!(EXP && !live && (sub.type === 'integer' || sub.type === 'number') &&
+			(sub['x-metric'] || sub['x-title-when']));
+		// What the number is in, printed beside the box or the slider's
+		// readout rather than inside the title.
+		const unit = sub['x-unit'] ? String(sub['x-unit']) : '';
+		const withUnit = (v) => unit
+			? (EXP ? EXP.withUnit(Number(v), unit) : v + ' ' + unit) : String(v);
+		const unitHtml = unit
+			? '<span class="input-group-text mj-unit">' + esc(unit) + '</span>' : '';
+		// the field's `title` is the short label; older schemas only had
+		// `description`. `let`, because a field with x-title-when is renamed
+		// when its mode changes, and the reset's confirm has to use the name the
+		// row is showing.
+		let desc = expRow ? EXP.titleFor(sub, siblingValue, key)
+			: (sub.title || sub.description || key);
 		// live knobs use the short label; everything else uses the title.
 		// data-hl carries the raw text so highlightPanel() can re-mark the label
 		// in place when the search term changes, without re-rendering the control
@@ -8941,8 +11608,17 @@
 		const liveCls = live ? ' mj-live-row' : '';
 		const type = sub.type;
 		const id = 'mjf-' + dot.replace(/\./g, '-');
-		const hasDefault = Object.prototype.hasOwnProperty.call(sub, 'default');
-		const isSensorPath = dot === 'isp.sensorConfig' && SENSORS.length > 0;
+		const hasDefault = schemaHasDefault(sub);
+		// Files the camera offers for a path field (x-choices): the sensor
+		// configurations, the IQ profiles. Read by the daemon when it builds
+		// the schema, so the page lists exactly what the camera can open.
+		const files = type === 'string' && sub['x-files'] && typeof sub['x-files'] === 'object'
+			&& typeof sub['x-files'].dir === 'string' ? sub['x-files'] : null;
+		const choices = files ? (Array.isArray(files.choices) ? files.choices.map(String) : []) : null;
+		// A fixed-length number list kept as text (x-list): one box per
+		// number, a grid for a matrix.
+		const xlist = type === 'string' && sub['x-list'] && typeof sub['x-list'] === 'object'
+			&& window.MajesticTable ? sub['x-list'] : null;
 		const isFontFile = isFontPath(dot) && FONTS.length > 0;
 		const enumVals = Array.isArray(sub.enum) ? sub.enum : null;
 		// resolution picker for the video/jpeg size fields: a dropdown of named
@@ -9011,6 +11687,23 @@
 			? window.MajesticFps.boundFor(sub, siblingSize(dot, 'size'))
 			: null;
 		if (isNum(fpsBound)) sub = Object.assign({}, sub, { maximum: fpsBound });
+		// Whether this number is a slider, and on what track: at most a
+		// hundred steps on the camera's own grain (EXP.sliderOf). A value
+		// with a name of its own (x-special) is said by that name wherever
+		// the row prints its figure.
+		const sliderSpec = EXP ? EXP.sliderOf(sub)
+			: (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100
+				? { min: isNum(sub.minimum) ? sub.minimum : 0, max: sub.maximum, step: 1 } : null);
+		const specialOf = (v) => EXP ? EXP.specialFor(sub, v) : '';
+		// A number box with exactly one named value draws it the way the
+		// Picture page draws Auto: the box empty, the name as its placeholder,
+		// and emptying the box is choosing it (the de-jitter buffer's
+		// Passthrough, the speaker's Always powered). Not for a slider, which
+		// cannot be empty and prints the name in its readout instead.
+		const specialKeys = (sub && sub['x-special'] && typeof sub['x-special'] === 'object')
+			? Object.keys(sub['x-special']).filter(k => k !== '' && Number.isFinite(Number(k))) : [];
+		const emptySpecial = (!live && !sliderSpec && !expRow && specialKeys.length === 1
+			&& (sub.type === 'integer' || sub.type === 'number')) ? specialKeys[0] : null;
 
 		if (live && type === 'integer' && isNum(sub.maximum)) {
 			// The detent slider. Its fill runs from the schema's own default to
@@ -9143,15 +11836,25 @@
 				control._set = (v) => { control.checked = toBool(v); paintState(); };
 				paintState();
 			}
-		} else if (type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100) {
+		} else if (sliderSpec) {
 			p = el('p', 'range mj-row' + liveCls);
-			const min = isNum(sub.minimum) ? sub.minimum : 0;
-			const max = sub.maximum;
+			// A frame rate of 0 is this field's own declared default — the
+			// sensor's rate, which the camera names beside it — and a track
+			// that starts at 1 cannot show it: the browser sanitises the value
+			// up to the floor, so a camera delivering 25 reads as 1 frame a
+			// second and the row counts as off stock. Where the camera names
+			// the sensor's rate, the track starts at 0 whatever floor the
+			// schema carries, which is what keeps this right on a camera whose
+			// schema still puts the default outside its own range.
+			const min = (isNum(sub['x-fps-sensor']) && Number(sub.default) === 0)
+				? 0
+				: sliderSpec.min;
+			const max = sliderSpec.max;
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
-				'<input type="range" id="' + id + '" class="form-control form-range" min="' + min + '" max="' + max + '" step="1" value="' + esc(v) + '">' +
+				'<input type="range" id="' + id + '" class="form-control form-range" min="' + min + '" max="' + max + '" step="' + sliderSpec.step + '" value="' + esc(v) + '">' +
 				'<span class="input-group-text show-value"></span>' +
 				'</span>';
 			control = p.querySelector('input');
@@ -9177,8 +11880,17 @@
 			// keyboard reaches for it: a blank readout is an absence, and an
 			// absence is what the reporter of #416 read as the number 33.
 			let chosen = v !== '';
+			// A frame rate of 0 is not a rate: it is "run at whatever the sensor
+			// mode gives", which the camera publishes as x-fps-sensor and is the
+			// state a channel nobody has configured is in. Printing the number
+			// says a camera delivering 25 is delivering 0 — and with the floor
+			// that used to sit at 1, the control rounded that up and said 1.
+			const sensorFps = isNum(sub['x-fps-sensor']) ? sub['x-fps-sensor'] : null;
 			const paint = () => {
-				show.textContent = chosen ? String(control.value) : UNSET_WORD;
+				show.textContent = !chosen ? UNSET_WORD
+					: (sensorFps !== null && Number(control.value) === 0)
+						? 'Auto · ' + withUnit(sensorFps)
+						: specialOf(control.value) || withUnit(control.value);
 				p.classList.toggle('mj-unset', !chosen);
 			};
 			// Any input is a choice — a drag, a click on the track, an arrow key.
@@ -9193,17 +11905,85 @@
 				paint();
 			};
 			paint();
-		} else if (type === 'integer') {
+		} else if (expRow) {
+			// A number the camera runs by itself when it is empty. A stored 0
+			// draws empty too: to the daemon both hand the setting back, and a
+			// box reading 0 says "off" to everyone else (#582). The greyed
+			// placeholder says Auto and, where the camera publishes it, what
+			// automatic currently resolves to — painted by paintExp below as
+			// the heartbeat arrives. Typing a number overrides; emptying the box
+			// posts null through clearsToNull, which removes the key.
+			p = el('p', 'number mj-row mj-exp-row');
+			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
+			const maxA = isNum(sub.maximum) ? ' max="' + sub.maximum + '"' : '';
+			const stepA = type === 'number' ? ' step="any"' : ' step="1"';
+			const v = isNumish(eff) && !EXP.isAuto(eff) ? String(eff) : '';
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+				'<span class="input-group">' +
+				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA +
+				' value="' + esc(v) + '" placeholder="Auto">' +
+				unitHtml +
+				'</span>' +
+				'<span class="mj-now"></span>';
+			control = p.querySelector('input');
+			// refresh() hands back what the config says, and a 0 there is Auto
+			// here as well, or a save of an untouched row would read as a
+			// change the next time the page looked.
+			control._set = (val) => {
+				control.value = EXP.isAuto(val) ? '' : String(val);
+			};
+		} else if (type === 'integer' || type === 'number') {
 			p = el('p', 'number mj-row');
 			const minA = isNum(sub.minimum) ? ' min="' + sub.minimum + '"' : '';
 			const maxA = isNum(sub.maximum) ? ' max="' + sub.maximum + '"' : '';
+			// A camera declares `number` for a quantity whose useful values sit
+			// between the integers — isp.exposure, where the unit is a
+			// millisecond and daylight is a fraction of one. `any` rather than a
+			// step of our own: the schema says nothing about a grain, and
+			// inventing one would refuse values the camera accepts.
+			const xStep = isNum(sub['x-step']) && sub['x-step'] > 0 ? sub['x-step'] : null;
+			const stepA = type === 'number' ? ' step="' + (xStep || 'any') + '"' : ' step="1"';
 			const v = isNumish(eff) ? String(eff) : '';
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<span class="input-group">' +
-				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + ' step="1" value="' + esc(v) + '">' +
-				'</span>';
+				'<input type="number" id="' + id + '" class="form-control text-end"' + minA + maxA + stepA + ' value="' + esc(v) + '">' +
+				unitHtml +
+				'</span>' +
+				(sub['x-special'] && emptySpecial === null ? '<span class="mj-now mj-special"></span>' : '');
 			control = p.querySelector('input');
+			if (emptySpecial !== null) {
+				const name = specialOf(emptySpecial);
+				control.placeholder = name;
+				// The name is the reading here, as "Auto · 32" is on the
+				// Picture page, so the box is sized to show all of it rather
+				// than the 10rem a number gets: "Counted by the camera" was
+				// cut to "Counted by th".
+				p.classList.add('mj-named-row');
+				control.style.setProperty('--mj-ph', (Math.max(name.length, 6) + 2) + 'ch');
+				// Where a phone column still cannot hold it, the whole name is
+				// a touch away, and the hint under the row says it too.
+				control.title = name;
+				const shown = (val) => (val === undefined || val === null || String(val).trim() === ''
+					|| Number(val) === Number(emptySpecial)) ? '' : String(val);
+				control.value = shown(eff);
+				control._get = () => control.value.trim() === '' ? emptySpecial : control.value;
+				control._set = (val) => { control.value = shown(val); };
+			}
+			// A value that names a mode says so beside the box: 0 on the
+			// de-jitter buffer reads "Passthrough", not a buffer of nothing.
+			const said = p.querySelector('.mj-special');
+			if (said) {
+				const paintSpecial = () => { said.textContent = specialOf(control.value); };
+				control.addEventListener('input', paintSpecial);
+				control.addEventListener('change', paintSpecial);
+				control._set = (val) => {
+					control.value = val === undefined || val === null ? '' : String(val);
+					paintSpecial();
+				};
+				paintSpecial();
+			}
 		} else if (isResolution) {
 			p = el('p', 'select mj-row mj-wide');
 			const cur = eff !== undefined && eff !== null ? String(eff) : '';
@@ -9241,7 +12021,11 @@
 			// An empty value means "let the firmware decide" for the fields that
 			// document a fallback; elsewhere it is only offered when the field is
 			// already unset, so the UI can show that state without inventing it.
-			const autoLabel = RES_AUTO_LABEL[dot] || (cur ? '' : 'Auto · unset');
+			// A size whose empty value is not Auto but a mode of its own (the
+			// custom-snapshot cap, where empty is off) says so by x-special.
+			const emptyName = sub['x-special'] && typeof sub['x-special'][''] === 'string'
+				? sub['x-special'][''] : '';
+			const autoLabel = emptyName || RES_AUTO_LABEL[dot] || (cur ? '' : 'Auto · unset');
 			const optsHtml = (list, selVal) => (autoLabel
 				? '<option value=""' + (selVal === '' ? ' selected' : '') + '>' + esc(autoLabel) + '</option>'
 				: '') + list.map(o => {
@@ -9306,8 +12090,14 @@
 			}
 		} else if (type === 'string' && enumVals && enumVals.length) {
 			p = el('p', 'select mj-row');
-			// short enums get a moderate width cap; long-option enums stay full-width
-			if (enumVals.some(o => String(o).length > 14)) p.classList.add('mj-wide');
+			// short enums get a moderate width cap; long-option enums stay full-width.
+			// Measured on the WORDS, not on the values: a titled member is as
+			// long as its title, and a select does not wrap, it truncates --
+			// so sizing "Follows day/night" by the four letters of `auto`
+			// would clip it silently.
+			const optText = enumVals.map(o => enumTitle(sub, o)
+				|| (String(o) === '' ? 'Auto' : String(o)));
+			if (optText.some(t => t.length > 14)) p.classList.add('mj-wide');
 			// A select can only show a value it has an option for. majestic narrows
 			// some enums to what that consumer can actually carry (outgoing.audioCodec
 			// drops opus, which FLV cannot frame), but a hand-written majestic.yaml
@@ -9315,11 +12105,24 @@
 			// place to hold it the browser falls back to the first option and the page
 			// reports a codec that is not the one in effect, so carry the live value
 			// as an explicitly-unsupported entry instead.
-			const cur = eff === undefined || eff === null ? '' : String(eff);
+			//
+			// An ABSENT value is a different thing again, and the browser's
+			// answer to it is the worst available: with nothing selected it
+			// takes the FIRST option, which has no relationship to the key's
+			// default — isp.slowShutter defaults to medium and would read
+			// disabled, and nightMode.irCut defaults to auto and would read
+			// off, which is a control claiming an actuator is parked and a
+			// Save away from parking it. The schema states the default; a
+			// reading that is not there resolves through it rather than
+			// through option order.
+			const dflt = sub.default === undefined || sub.default === null
+				? '' : String(sub.default);
+			const eff2 = eff === undefined || eff === null ? dflt : eff;
+			const cur = eff2 === undefined || eff2 === null ? '' : String(eff2);
 			const unlisted = cur !== '' && !enumVals.some(o => String(o) === cur);
 			const opts =
 				(unlisted ? option(cur, true, cur + ' (unsupported)') : '') +
-				enumVals.map(o => option(o, !unlisted && cur === String(o))).join('');
+				enumVals.map((o, i) => option(o, !unlisted && cur === String(o), optText[i])).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
@@ -9353,13 +12156,250 @@
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
 				'<select class="form-select" id="' + id + '">' + opts + '</select>';
 			control = p.querySelector('select');
-		} else if (type === 'string' && isSensorPath) {
-			p = el('p', 'select mj-row mj-wide');
-			const opts = option('', !eff) + SENSORS.map(s => option(s, String(eff) === s)).join('');
+		} else if (files) {
+			// A file the camera keeps in one directory (x-files): what is
+			// there, whatever is configured even when it is not there, and an
+			// upload into the same place. The upload only puts the file on the
+			// camera; choosing it is still an edit that Save sends.
+			p = el('p', 'select mj-row mj-wide mj-file-row');
+			const cur = eff === undefined || eff === null ? '' : String(eff);
+			const emptyName = sub['x-special'] && typeof sub['x-special'][''] === 'string'
+				? sub['x-special'][''] : 'Auto';
+			const extra = cur !== '' && choices.indexOf(cur) < 0
+				? option(cur, true, cur + (cur.indexOf('/') < 0 ? ' (by name)' : ' (not found)'))
+				: '';
+			const opts = option('', cur === '', emptyName) + extra +
+				choices.map(c => option(c, cur === c, c.split('/').pop())).join('');
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
-				'<select class="form-select" id="' + id + '">' + opts + '</select>';
+				'<select class="form-select" id="' + id + '">' + opts + '</select>' +
+				// Under the select rather than beside it: on a phone a
+				// button in the same group squeezed the file name to a
+				// few letters.
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-file-up">Upload…</button>' +
+				'<input type="file" class="mj-file-in" hidden' +
+				(files.accept ? ' accept="' + esc(String(files.accept)) + '"' : '') + '>' +
+				'<span class="mj-now mj-file-note"></span>';
 			control = p.querySelector('select');
+			const pick = p.querySelector('.mj-file-in');
+			const note = p.querySelector('.mj-file-note');
+			p.querySelector('.mj-file-up').addEventListener('click', () => pick.click());
+			pick.addEventListener('change', () => {
+				const f = pick.files && pick.files[0];
+				pick.value = '';
+				if (!f) return;
+				// A bare file name, into the declared directory and nowhere
+				// else: the name comes from the reader's disk.
+				if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(f.name)) {
+					note.textContent = 'Rename the file to letters, digits, dots, dashes or underscores first.';
+					return;
+				}
+				const dest = files.dir.replace(/\/+$/, '') + '/' + f.name;
+				note.textContent = 'Uploading ' + f.name + '…';
+				apiFetch('/upload', { method: 'POST', headers: { 'File-Location': dest }, body: f })
+					.then(r => {
+						if (!r.ok) throw new Error('HTTP ' + r.status);
+						if (!Array.from(control.options).some(o => o.value === dest)) {
+							const o = document.createElement('option');
+							o.value = dest;
+							o.textContent = f.name;
+							control.appendChild(o);
+						}
+						control.value = dest;
+						control.dispatchEvent(new Event('change', { bubbles: true }));
+						note.textContent = f.name + ' is on the camera. Save to use it.';
+					})
+					.catch(e => { note.textContent = 'The camera did not take ' + f.name + ': ' + e.message; });
+			});
+		} else if (xlist) {
+			// One labelled box per number, from what the camera declares: the
+			// count, each cell's name and range, and a grid for a matrix. A
+			// whole-number cell that can only be 0 or 1 is a switch. Empty in
+			// every box clears the key (the camera's own value stands); a
+			// partly filled list is sent as typed, for the camera to refuse.
+			const TBL = window.MajesticTable;
+			const cells = TBL.listCells(xlist);
+			const rows = isNum(xlist.rows) && xlist.rows > 1 ? xlist.rows : 1;
+			p = el('p', 'string mj-row mj-wide mj-list-row');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-list' + (rows > 1 ? ' mj-list-grid' : '') + '" id="' + id + '"' +
+				(rows > 1 ? ' style="--mj-list-cols:' + Math.ceil(cells.length / rows) + '"' : '') +
+				'></span>';
+			control = p.querySelector('.mj-list');
+			const boxes = cells.map((c, i) => {
+				const cell = el('label', 'mj-list-cell');
+				const name = el('span', 'mj-list-name');
+				name.textContent = c.label;
+				const f = el('input', c.bool ? 'form-check-input' : 'form-control form-control-sm text-end');
+				if (c.bool) {
+					f.type = 'checkbox';
+				} else {
+					f.type = 'number';
+					f.inputMode = c.integer ? 'numeric' : 'decimal';
+					f.step = c.integer ? '1' : 'any';
+					if (isNum(c.min)) f.min = c.min;
+					if (isNum(c.max)) f.max = c.max;
+				}
+				f.setAttribute('aria-label', (desc || key) + ': ' + c.label);
+				f.dataset.cell = String(i);
+				cell.appendChild(name);
+				cell.appendChild(f);
+				control.appendChild(cell);
+				return f;
+			});
+			control._get = () => TBL.joinList(boxes.map(f =>
+				f.type === 'checkbox' ? (f.checked ? '1' : '0') : f.value));
+			control._set = (val) => {
+				const vals = TBL.parseList(val, cells.length);
+				boxes.forEach((f, i) => {
+					if (f.type === 'checkbox') {
+						f.checked = vals[i] === '1';
+						// Unset is not off: an empty list keeps the value
+						// the camera shipped with, which may well be on.
+						f.indeterminate = vals[i] === '';
+					} else f.value = vals[i];
+				});
+			};
+			control._set(eff);
+			// A list of switches alone has no empty state to clear to, so an
+			// untouched one must not read as a choice: the page sends nothing
+			// until a switch is flipped.
+			if (cells.every(c => c.bool)) {
+				let touched = TBL.parseList(eff, cells.length).some(v => v !== '');
+				const inner = control._get;
+				control._get = () => touched ? inner() : '';
+				const innerSet = control._set;
+				control._set = (val) => {
+					touched = TBL.parseList(val, cells.length).some(v => v !== '');
+					innerSet(val);
+				};
+				boxes.forEach(f => f.addEventListener('change', () => { touched = true; }));
+			}
+			boxes.forEach(f => {
+				f.addEventListener('input', () => updateDirty());
+				f.addEventListener('change', () => updateDirty());
+			});
+		} else if (type === 'string' && sub['x-strings'] && window.MajesticTable) {
+			// A list of text items the camera keeps comma-joined (x-strings:
+			// the STUN/TURN servers): one row per item. A value that is a mode
+			// rather than a list (x-special: "none" is local network only) is
+			// a switch, and while it is on the rows are set aside, not lost.
+			const TBL = window.MajesticTable;
+			const ph = sub['x-strings'].placeholder ? String(sub['x-strings'].placeholder) : '';
+			const modes = sub['x-special'] && typeof sub['x-special'] === 'object'
+				? Object.keys(sub['x-special']).filter(k => k !== '' && typeof sub['x-special'][k] === 'string') : [];
+			const mode = modes.length ? modes[0] : null;
+			p = el('p', 'string mj-row mj-wide mj-strs-row');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-strs" id="' + id + '">' +
+				(mode ? '<span class="form-check form-switch mj-strs-mode"><input type="checkbox" class="form-check-input" id="' + id + '-mode">' +
+					'<label class="form-check-label" for="' + id + '-mode">' + esc(sub['x-special'][mode]) + '</label></span>' : '') +
+				'<span class="mj-strs-list"></span>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-strs-add">+ Add</button>' +
+				'</span>';
+			control = p.querySelector('.mj-strs');
+			const list = p.querySelector('.mj-strs-list');
+			const addBtn = p.querySelector('.mj-strs-add');
+			const sw = mode ? p.querySelector('.mj-strs-mode input') : null;
+			const addRow = (val) => {
+				const row = el('span', 'input-group input-group-sm mb-1 mj-strs-item');
+				const inp = el('input', 'form-control');
+				inp.type = 'text';
+				inp.spellcheck = false;
+				inp.placeholder = ph;
+				inp.value = val || '';
+				inp.addEventListener('input', () => updateDirty());
+				const del = el('button', 'btn btn-outline-danger');
+				del.type = 'button';
+				del.textContent = '\u00d7';
+				del.setAttribute('aria-label', 'Remove');
+				del.addEventListener('click', () => { row.remove(); updateDirty(); });
+				row.appendChild(inp);
+				row.appendChild(del);
+				list.appendChild(row);
+			};
+			const paintMode = () => {
+				const on = !!(sw && sw.checked);
+				list.hidden = on;
+				addBtn.hidden = on;
+			};
+			control._get = () => (sw && sw.checked) ? mode
+				: TBL.joinStrings(Array.from(list.querySelectorAll('input')).map(i => i.value));
+			control._set = (val) => {
+				list.innerHTML = '';
+				const v = val === undefined || val === null ? '' : String(val).trim();
+				const isMode = mode !== null && v.toLowerCase() === mode.toLowerCase();
+				if (sw) sw.checked = isMode;
+				(isMode ? [] : TBL.splitStrings(v)).forEach(addRow);
+				paintMode();
+			};
+			control._set(eff);
+			addBtn.addEventListener('click', () => {
+				addRow('');
+				const last = list.querySelector('.mj-strs-item:last-child input');
+				if (last) last.focus();
+				updateDirty();
+			});
+			if (sw) sw.addEventListener('change', () => { paintMode(); updateDirty(); });
+		} else if (netipHash) {
+			// The box is only ever the password being typed. What the camera
+			// holds is a hash nobody can type back, so it is kept aside and
+			// never put in the box: an untouched row reads as that hash, which
+			// keeps it clean and is what a save sends for it, and a typed
+			// password reads as its hash. The placeholder says whether one is
+			// set. Clearing the setting is ↺, which goes through _set.
+			//
+			// An empty box therefore cannot also mean "the password is empty",
+			// and a client signing in with no password still sends a hash —
+			// the hash of nothing, which is not an empty setting: an empty
+			// setting is majestic refusing everyone. So the empty password is
+			// its own switch, saving that hash (OpenIPC/majestic#344).
+			// Switching it off with nothing typed goes back to not set, the
+			// direction that lets nobody in.
+			p = el('p', 'string password mj-row');
+			p.innerHTML =
+				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
+				'<div class="input-group">' +
+				'<input type="password" id="' + id + '" class="form-control"' +
+				' autocomplete="new-password" spellcheck="false">' +
+				'<div class="input-group-text"><input class="form-check-input mt-0" type="checkbox"' +
+				' data-for="' + id + '" aria-label="Show"></div>' +
+				'</div>' +
+				'<span class="form-check form-switch mt-1"><input type="checkbox" class="form-check-input" id="' + id + '-none">' +
+				'<label class="form-check-label" for="' + id + '-none">No password</label></span>';
+			control = p.querySelector('input[type=password]');
+			const eye = p.querySelector('input[data-for]');
+			if (eye) eye.addEventListener('change', () => {
+				control.type = eye.checked ? 'text' : 'password';
+			});
+			const none = p.querySelector('#' + id + '-none');
+			const EMPTY = netipHash.hash('');
+			let stored = '';
+			// What was typed is set aside while the switch is on, not lost:
+			// switching it back off is "never mind", and must not leave the
+			// row reading as the stored hash with the new password gone.
+			let typed = '';
+			const paintNone = () => {
+				control.disabled = none.checked;
+				if (none.checked) { typed = control.value || typed; control.value = ''; }
+				else if (typed !== '') { control.value = typed; typed = ''; }
+				control.placeholder = none.checked ? ''
+					: stored !== '' && stored !== EMPTY ? 'Set — type a new one to replace it' : 'Not set';
+			};
+			control._get = () => none.checked ? EMPTY
+				: control.value !== '' ? netipHash.hash(control.value)
+				: stored === EMPTY ? '' : stored;
+			control._set = (v) => {
+				stored = v !== undefined && v !== null ? String(v) : '';
+				control.value = '';
+				typed = '';
+				none.checked = stored === EMPTY;
+				paintNone();
+			};
+			none.addEventListener('change', () => { paintNone(); updateDirty(); });
+			control._set(eff);
 		} else if (type === 'string' && (sub['x-secret'] || sub.writeOnly)) {
 			// A secret the camera has asked not to be shown. It is not hidden
 			// from anyone who can read this page — the value came down the same
@@ -9388,10 +12428,203 @@
 		} else if (type === 'string') {
 			p = el('p', 'string mj-row');
 			const v = eff !== undefined && eff !== null ? String(eff) : '';
+			// A number the camera keeps as text (a keyframe interval of 1.5)
+			// still has a unit to print beside it.
 			p.innerHTML =
 				'<label for="' + id + '" class="form-label">' + labelHtml + '</label>' +
-				'<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">';
+				(unit
+					? '<span class="input-group"><input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">' + unitHtml + '</span>'
+					: '<input type="text" id="' + id + '" class="form-control" value="' + esc(v) + '">');
 			control = p.querySelector('input');
+		} else if (type === 'array' && sub.items && sub.items.type === 'object'
+				&& sub.items.properties && !sub.items.properties.url) {
+			// A list of objects with no address: plain data, drawn as a table.
+			// One row per item, one labelled cell per member `items` declares,
+			// typed by that member. The board below is for a list whose rows
+			// are addresses; this is everything else — the calibration lens
+			// table, its peers and pairings — which that board used to draw
+			// with every member hidden behind an address it does not have.
+			// What a cell holds and which rows are kept is mj-table.js's
+			// business, tested there.
+			const TBL = (typeof window === 'object' && window.MajesticTable) || null;
+			if (!TBL) return null;
+			const props = sub.items.properties;
+			const required = Array.isArray(sub.items.required) ? sub.items.required : [];
+			const members = Object.keys(props).filter(m => !props[m]['x-hidden']);
+			const maxRows = isNum(sub.maxItems) ? sub.maxItems : Infinity;
+
+			p = el('p', 'array objects mj-wide mj-row mj-tbl-field');
+			p.innerHTML =
+				'<label class="form-label">' + labelHtml + '</label>' +
+				'<span class="mj-tbl" id="' + id + '"></span>' +
+				'<button type="button" class="btn btn-sm btn-outline-secondary mt-1 mj-tbl-add">'
+				+ '+ Add row</button>';
+			control = p.querySelector('.mj-tbl');
+			const addBtn = p.querySelector('.mj-tbl-add');
+
+			const readRow = (r) => {
+				const o = {};
+				members.forEach(m => {
+					const f = r.querySelector('[data-member="' + m + '"]');
+					if (!f) return;
+					o[m] = TBL.cellValue((props[m] || {}).type,
+						f.type === 'checkbox' ? f.checked : f.value);
+				});
+				return o;
+			};
+			const rowsOf = () => Array.from(control.querySelectorAll('.mj-tbl-row'))
+				.map(readRow);
+
+			// Advisory: a row missing a required member is still sent, and
+			// the camera is the one to refuse it.
+			const paintRow = (row) => {
+				const note = row.querySelector('.mj-tbl-note');
+				const gone = TBL.missing(readRow(row), required, props);
+				note.textContent = gone.length ? 'Needs ' + gone.join(', ') + '.' : '';
+				note.hidden = gone.length === 0;
+			};
+			const paintAdd = () => {
+				addBtn.disabled =
+					control.querySelectorAll('.mj-tbl-row').length >= maxRows;
+			};
+			const onChange = (row) => { paintRow(row); updateDirty(); };
+
+			const addTblRow = (values) => {
+				const v = values || {};
+				const row = el('span', 'mj-tbl-row');
+				const cells = el('span', 'mj-tbl-cells');
+				members.forEach(m => {
+					const prop = props[m] || {};
+					const xl = prop.type === 'string' && prop['x-list'] && typeof prop['x-list'] === 'object'
+						? prop['x-list'] : null;
+					const cell = el(xl ? 'span' : 'label', 'mj-tbl-cell' +
+						(prop.type === 'string' && !Array.isArray(prop.enum)
+							? ' mj-tbl-wide' : ''));
+					const name = el('span', 'mj-tbl-name');
+					name.textContent = prop.title || m;
+					cell.appendChild(name);
+					let f;
+					if (xl) {
+						// A member holding a fixed number of numbers (the
+						// peer homography's nine): a grid of boxes, joined
+						// into the hidden input the row reads.
+						const cellsSpec = TBL.listCells(xl);
+						const rows = isNum(xl.rows) && xl.rows > 1 ? xl.rows : 1;
+						f = el('input', '');
+						f.type = 'hidden';
+						f.value = v[m] != null ? String(v[m]) : '';
+						const grid = el('span', 'mj-list' + (rows > 1 ? ' mj-list-grid' : ''));
+						if (rows > 1) grid.style.setProperty('--mj-list-cols', String(Math.ceil(cellsSpec.length / rows)));
+						const vals = TBL.parseList(f.value, cellsSpec.length);
+						const boxes = cellsSpec.map((c, i) => {
+							// Text with a number keypad, not a number box: a
+							// calibration figure like -0.000589854 needs the
+							// room a spinner takes, and nobody steps a
+							// homography by one.
+							const b = el('input', 'form-control form-control-sm text-end');
+							b.type = 'text';
+							b.spellcheck = false;
+							b.inputMode = c.integer ? 'numeric' : 'decimal';
+							b.value = vals[i];
+							b.setAttribute('aria-label', (prop.title || m) + ' ' + c.label);
+							b.title = c.label;
+							grid.appendChild(b);
+							return b;
+						});
+						const sync = () => {
+							f.value = TBL.joinList(boxes.map(b => b.value));
+							onChange(row);
+						};
+						boxes.forEach(b => {
+							b.addEventListener('input', sync);
+							b.addEventListener('change', sync);
+						});
+						cell.appendChild(grid);
+					} else if (Array.isArray(prop.enum)) {
+						f = el('select', 'form-select form-select-sm');
+						const cur = v[m] != null ? String(v[m]) : '';
+						const opts = prop.enum.slice();
+						if (cur !== '' && opts.indexOf(cur) < 0) opts.push(cur);
+						opts.forEach(opt => {
+							const o = document.createElement('option');
+							o.value = opt;
+							o.textContent = enumTitle(prop, opt) || (opt === '' ? 'Default' : opt);
+							f.appendChild(o);
+						});
+						f.value = cur;
+					} else if (prop.type === 'boolean') {
+						f = el('input', 'form-check-input');
+						f.type = 'checkbox';
+						f.checked = v[m] != null
+							? (v[m] !== false && v[m] !== 'false') : prop.default === true;
+					} else {
+						f = el('input', 'form-control form-control-sm');
+						const num = prop.type === 'integer' || prop.type === 'number';
+						f.type = num ? 'number'
+							: (prop['x-secret'] || prop.writeOnly) ? 'password' : 'text';
+						if (num) {
+							f.inputMode = prop.type === 'integer' ? 'numeric' : 'decimal';
+							f.step = prop.type === 'integer' ? '1' : 'any';
+							if (isNum(prop.minimum)) f.min = prop.minimum;
+							if (isNum(prop.maximum)) f.max = prop.maximum;
+						}
+						if (f.type === 'password') { f.autocomplete = 'off'; f.spellcheck = false; }
+						f.value = v[m] != null ? String(v[m]) : '';
+						if (prop['x-placeholder']) f.placeholder = prop['x-placeholder'];
+					}
+					f.setAttribute('data-member', m);
+					f.addEventListener('input', () => onChange(row));
+					f.addEventListener('change', () => onChange(row));
+					cell.appendChild(f);
+					cells.appendChild(cell);
+				});
+				const del = el('button', 'btn btn-sm btn-outline-danger mj-tbl-del');
+				del.type = 'button';
+				del.textContent = '×';
+				del.setAttribute('aria-label', 'Remove this row');
+				del.addEventListener('click', () => { row.remove(); paintAdd(); updateDirty(); });
+				row.appendChild(cells);
+				row.appendChild(del);
+				const note = el('span', 'hint mj-tbl-note');
+				note.hidden = true;
+				row.appendChild(note);
+				control.appendChild(row);
+				paintRow(row);
+				paintAdd();
+				return row;
+			};
+
+			// What each column means, said once under the table rather than
+			// under every cell of every row.
+			const legend = members.filter(m => props[m] && props[m].hint);
+			if (legend.length) {
+				const dl = el('span', 'hint text-secondary mj-tbl-legend');
+				legend.forEach(m => {
+					const line = el('span', 'mj-tbl-legend-line');
+					const b = el('strong', '');
+					b.textContent = (props[m].title || m) + ': ';
+					line.appendChild(b);
+					line.appendChild(document.createTextNode(props[m].hint));
+					dl.appendChild(line);
+				});
+				p.insertBefore(dl, addBtn.nextSibling);
+			}
+
+			control._addRow = addTblRow;
+			control._get = () => TBL.canon(rowsOf());
+			control._set = (val) => {
+				control.querySelectorAll('.mj-tbl-row').forEach(r => r.remove());
+				let arr = val;
+				if (typeof arr === 'string') {
+					try { arr = JSON.parse(arr); } catch (e) { arr = []; }
+				}
+				(Array.isArray(arr) ? arr : []).forEach(x => {
+					if (x && typeof x === 'object') addTblRow(x);
+				});
+				paintAdd();
+			};
+			control._set(eff);
+			addBtn.addEventListener('click', () => { addTblRow({}); updateDirty(); });
 		} else if (type === 'array' && sub.items && sub.items.type === 'object'
 				&& sub.items.properties) {
 			// A list whose items are objects: one editable row per element, with
@@ -9479,9 +12712,9 @@
 			// mj-wide: opt out of the 20rem cap .array carries for the
 			// MultiRect fields, which is half an address.
 			p = el('p', 'array objects mj-wide mj-row mj-dest-board');
-			// No field label. This is the only object array the camera
-			// declares, it is lifted to the top of its own section, and the
-			// section is already headed Outgoing — so a "Destinations" label
+			// No field label. This is the only object array of addresses the
+			// camera declares, it is lifted to the top of its own section, and
+			// the section is already headed Outgoing — so a "Destinations" label
 			// under it was the same word twice, with a rule between them.
 			// Its text still reaches the search through the schema.
 			p.innerHTML =
@@ -9816,7 +13049,8 @@
 							// The empty member of an enum is the "follow the
 							// setting above" choice, and reads as nothing at all
 							// unless it is given words.
-							o.textContent = opt === '' ? 'Default' : opt;
+							o.textContent = enumTitle(prop, opt)
+								|| (opt === '' ? 'Default' : opt);
 							f.appendChild(o);
 						});
 						// A stored value the camera does not offer: a codec
@@ -10126,10 +13360,37 @@
 			// A plain assignable hook says the same thing without knowing who
 			// is listening, and stays a no-op where nobody is.
 			control._sync = () => {};
-			const onChange = () => { updateDirty(); control._sync(); };
+			// A sibling that holds one number per row (x-row-of: the quality
+			// offset per region) gets a box on each row, and every edit here
+			// writes the joined list back into that hidden field.
+			const parentProps = (() => {
+				let n = state.schema;
+				for (const seg of base.split('.')) n = n && n.properties && n.properties[seg];
+				return (n && n.properties) || {};
+			})();
+			const qpKey = Object.keys(parentProps).find(k => {
+				const r = parentProps[k] && parentProps[k]['x-row-of'];
+				return r && r.field === key;
+			});
+			const qpSpec = qpKey ? parentProps[qpKey]['x-row-of'] : null;
+			const qpDot = qpKey ? base + '.' + qpKey : null;
+			const qpNow = () => {
+				const f = qpDot && (state.fields || []).find(x => x.dot === qpDot);
+				const v = f ? f.getValue() : getDotted(state.config, qpDot);
+				return window.MajesticTable ? window.MajesticTable.splitStrings(v) : [];
+			};
+			const qpPush = () => {
+				if (!qpDot || !window.MajesticTable) return;
+				const f = (state.fields || []).find(x => x.dot === qpDot);
+				if (!f) return;
+				const cells = Array.from(control.querySelectorAll('.mj-array-row .mj-array-qp'))
+					.map(i => i.value.trim());
+				f.setValue(window.MajesticTable.joinRowNumbers(cells));
+			};
+			const onChange = () => { qpPush(); updateDirty(); control._sync(); };
 			const addRow = (val) => {
 				const row = el('div', 'input-group input-group-sm mb-1 mj-array-row');
-				const inp = el('input', 'form-control');
+				const inp = el('input', 'form-control mj-array-rect');
 				inp.type = 'text';
 				inp.placeholder = 'XxYxWxH';
 				inp.value = val || '';
@@ -10140,12 +13401,30 @@
 				del.textContent = '×';
 				del.addEventListener('click', () => { row.remove(); onChange(); });
 				row.appendChild(inp);
+				if (qpSpec) {
+					const idx = control.querySelectorAll('.mj-array-row').length;
+					const lab = el('span', 'input-group-text mj-array-qp-name');
+					lab.textContent = qpSpec.label || qpKey;
+					const qp = el('input', 'form-control text-end mj-array-qp');
+					qp.type = 'number';
+					qp.step = '1';
+					if (isNum(qpSpec.minimum)) qp.min = qpSpec.minimum;
+					if (isNum(qpSpec.maximum)) qp.max = qpSpec.maximum;
+					qp.placeholder = '0';
+					qp.setAttribute('aria-label', qpSpec.label || qpKey);
+					const now = qpNow()[idx];
+					qp.value = now !== undefined && now !== '0' ? now : '';
+					qp.addEventListener('input', onChange);
+					qp.addEventListener('change', onChange);
+					row.appendChild(lab);
+					row.appendChild(qp);
+				}
 				row.appendChild(del);
 				control.appendChild(row);
 				return inp;
 			};
 			control._addRow = addRow;
-			control._rows = () => Array.from(control.querySelectorAll('.mj-array-row input'))
+			control._rows = () => Array.from(control.querySelectorAll('.mj-array-row input.mj-array-rect'))
 				.map(i => i.value.trim()).filter(s => s.length);
 			(Array.isArray(eff) ? eff : (eff ? String(eff).split(/\s*,\s*/) : []))
 				.forEach(x => { if (x) addRow(x); });
@@ -10161,6 +13440,9 @@
 			return null;
 		}
 
+		// Assigned below on a row that has a default to be off, and called by
+		// paintStock, which is the only place that knows whether it is.
+		let setStock = null;
 		// live knobs share one "Reset all" in the panel header — no per-knob reset
 		if (!live) {
 			const reset = document.createElement('button');
@@ -10184,12 +13466,49 @@
 			// disabled, and every value typed into it was permanent (#416). The
 			// 404 is still handled, in onReset, where the camera's answer arrives.
 			const clears = !hasDefault;
+			// Where this press leaves a SWITCH, which is the one thing on this
+			// page that can stop a stream — see onReset. Two ways to land on
+			// off and the warning is owed for both: a declared default of
+			// false, and no declared default at all, because a switch whose key
+			// is absent reads off. The second is measured rather than assumed —
+			// clearing the main stream's Enable stopped the encoder and the row
+			// came back off — and it holds for every switch the camera
+			// publishes no default for, since clearing one and turning it off
+			// leave the camera in the same state.
+			const offs = type === 'boolean' && (clears || stockOf(sub) === 'false');
 			reset.setAttribute('aria-label',
 				clears ? 'Clear ' + desc : 'Reset ' + desc + ' to default');
+			// The default in the words the row itself uses: an empty default is
+			// a real one — the crop region's [] is "the whole frame" — and a
+			// frame rate of 0 is the sensor's own rate rather than no frames.
+			const defWord = !hasDefault ? ''
+				: (isNum(sub['x-fps-sensor']) && Number(sub.default) === 0)
+					? 'Auto · ' + sub['x-fps-sensor']
+					: (stockOf(sub) || 'empty');
 			reset.title = clears
-				? 'Clear this setting and leave it to the camera.'
-				: 'Reset to default: ' + String(sub.default);
-			reset.addEventListener('click', () => onReset(dot, reset, desc, clears));
+				? offs
+					? 'Clear this setting. With no value set the camera reads it as off.'
+					: 'Clear this setting and leave it to the camera.'
+				: 'Reset to default: ' + defWord;
+			// Asked at the press, not at mount: a switch already off has nothing
+			// to be warned about, and a warning that fires anyway is one the
+			// next reader presses through without looking.
+			reset.addEventListener('click', () =>
+				onReset(dot, reset, desc, clears, offs && String(getValue()) === 'true'));
+			// Whether this row is off stock is not known here — it changes with
+			// every keystroke — so the button lends paintStock a hatch and stays
+			// out of the judgement. The colour is for the reader who can see it;
+			// this is the same fact for the one who cannot.
+			if (!clears) setStock = (off) => {
+				// A 404 has already replaced both of these with the camera's own
+				// answer, and that one outlives every repaint — same rule as the
+				// button it left down.
+				if (reset.dataset.gone) return;
+				reset.title = (off ? 'Off stock. Reset to default: ' : 'Reset to default: ')
+					+ defWord;
+				reset.setAttribute('aria-label',
+					'Reset ' + desc + ' to default' + (off ? ', currently off stock' : ''));
+			};
 			// Put the glyph on the control's own line instead of below it. The
 			// live rows are left alone: .mj-live-row.range > .input-group is a
 			// direct-child selector that this wrapper would break.
@@ -10203,23 +13522,107 @@
 			p.appendChild(ctl);
 		}
 
-		// detailed help under the control (skipped on the compact live-panel rows):
-		// the authored `hint` plus auto-context (value range for bounded integers).
+		// The explanation under the control, skipped on the compact live-panel
+		// rows where a knob is four cells of an instrument with no room for
+		// prose. Three tiers arrive here: the authored `hint`, the auto-context
+		// (a value range, for bounded integers), and the authored `help` —
+		// which goes behind a "?" so nobody pays for it who did not ask.
+		//
+		// Built with DOM calls rather than innerHTML. `dataset.hl = text` needs
+		// no escaping at all, where the string form had to esc() into an
+		// attribute and then parse it back out.
+		//
+		// Every [data-hl] node here must stay a TEXT-ONLY LEAF: highlightPanel()
+		// empties and refills each one on every keystroke, so an element child
+		// would vanish at the first character typed and never come back. That
+		// is why the "?" is a sibling of the hint's leaf and not inside it.
 		if (!live) {
-			const hintParts = [];
-			if (sub.hint) hintParts.push('<span data-hl="' + esc(sub.hint) + '"></span>');
+			const helpText = HELP ? HELP.text(sub.help) : '';
 			// only plain number inputs gain a range hint; sliders (max ≤ 100)
 			// already show their bounds via the track and the live value box
-			const isSlider = type === 'integer' && isNum(sub.maximum) && sub.maximum <= 100;
-			if (type === 'integer' && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
-				hintParts.push(esc(sub.minimum + '–' + sub.maximum));
-			if (hintParts.length) {
+			const isSlider = !!sliderSpec;
+			const numeric = type === 'integer' || type === 'number';
+			// On a row whose empty box already says Auto, the floor is that
+			// same Auto spelled as 0 and says nothing new; the ceiling, in the
+			// row's own unit, is the part worth reading.
+			const range = (numeric && !isSlider && isNum(sub.minimum) && isNum(sub.maximum))
+				? (expRow ? 'up to ' + EXP.withUnit(sub.maximum, unit)
+					: EXP ? EXP.rangeText(sub.minimum, sub.maximum, unit)
+					: sub.minimum + '–' + sub.maximum)
+				: '';
+			if (sub.hint || range || helpText || sub['x-special']) {
 				// block-level so it sits on its own line below the control row
 				const hint = el('div', 'hint text-secondary');
-				hint.innerHTML = hintParts.join(' · ');
-				const authored = hint.querySelector('[data-hl]');
-				if (authored) authored.appendChild(hi(sub.hint));
+				const txt = el('span', 'mj-hint-txt');
+				if (sub.hint) {
+					const authored = el('span');
+					authored.dataset.hl = sub.hint;
+					authored.appendChild(hi(sub.hint));
+					txt.appendChild(authored);
+				}
+				// Outside [data-hl] on purpose: the range is ours, not the
+				// daemon's, and marking it would highlight a number nobody
+				// searched for.
+				// The named values ride with the range: "0–500 ms · 0:
+				// Passthrough". Said on a slider too, where there is no range
+				// line, because a name is only discoverable if it is listed.
+				const named = emptySpecial !== null
+					? 'Empty: ' + specialOf(emptySpecial)
+					: (EXP ? EXP.specialsText(sub) : '');
+				const tail = [range, named].filter(Boolean).join(' · ');
+				if (tail) txt.appendChild(document.createTextNode(
+					(sub.hint ? ' · ' : '') + tail));
+				hint.appendChild(txt);
+
+				// The long text, and the mark that opens it. The mark is built
+				// hidden in the clamp world and revealed only by a positive
+				// measurement (foldHints), so a row whose height could not be
+				// read never grows a control that opens nothing.
+				let body = null;
+				if (helpText) {
+					body = el('div', 'mj-help-body');
+					body.id = 'mjh-' + dot.replace(/\./g, '-');
+					// `until-found` rather than a bare `hidden`, so the
+					// BROWSER's own find-in-page can reach the text and open
+					// the fold on its own. Set as an attribute because in a
+					// browser that has never heard of it any value still means
+					// hidden, which is exactly the old behaviour.
+					body.setAttribute('hidden', 'until-found');
+					const long = el('span');
+					long.dataset.hl = helpText;
+					long.appendChild(hi(helpText));
+					body.appendChild(long);
+				}
+				if (helpText || sub.hint) {
+					hint.classList.add('mj-hint-fold');
+					const more = el('button', 'mj-help');
+					more.type = 'button';   // a bare button in this form saves the camera
+					more.textContent = '?';
+					more.setAttribute('aria-expanded', 'false');
+					// A help row's mark is always there; a clamp row's waits
+					// for a measurement to say the hint is actually cut.
+					more.hidden = !helpText;
+					// The mark owns whatever it can open. On a row with BOTH a
+					// long hint and a help it owns the two together, because a
+					// reader pressing "more" means both and a second control
+					// beside the first would be two marks for one intent.
+					txt.id = 'mjh-' + dot.replace(/\./g, '-') + '-h';
+					more.setAttribute('aria-controls',
+						body ? body.id + ' ' + txt.id : txt.id);
+					// The two worlds do not promise the same thing and must not
+					// say they do. `hidden` takes the long text out of the
+					// accessibility tree, so the mark genuinely reveals it; a
+					// clamp hides nothing from a screen reader, which is read
+					// the whole hint either way, so there the mark is a visual
+					// control and its name says so.
+					more.dataset.nameKind = helpText ? 'more' : 'whole';
+					nameHelpMark(more, desc);
+					hint.appendChild(more);
+				}
 				p.appendChild(hint);
+				// After the hint and before the x-requires warning below: what
+				// the setting means, then what the camera is doing about it.
+				if (body) p.appendChild(body);
 			}
 		}
 
@@ -10243,6 +13646,55 @@
 		// settings coincide, or a list that must all hold for a setting that
 		// several others outrank. Every shape is decided by mj-requires.js;
 		// this only has to recognise that there is a requirement to paint.
+		// An actuator with nothing wired to it has nothing for its mode to
+		// mean. All three choices do the same nothing, and a dropdown that
+		// offers three of them is the page pretending to a decision the
+		// camera cannot act on — which is what the reporter of #492 was
+		// reading when he concluded a state must be redundant.
+		//
+		// Said rather than disabled, the same call x-requires makes: the mode
+		// is a legitimate thing to set before the wire is on, it is
+		// remembered, and it starts meaning something the moment a pad is
+		// assigned. Repainted on every edit of the row's own value and on
+		// every map change, because the pads are what it is about and they
+		// are assigned on the same page.
+		if (!live && (dot === 'nightMode.irCut' || dot === 'nightMode.backlight')) {
+			const lamp = dot === 'nightMode.backlight';
+			const warn = el('div', 'hint mj-requires');
+			const paint = () => {
+				// A control on the page wins over the saved value, per key —
+				// the precedence mj-requires uses, and for the same reason: an
+				// edit that has not been saved yet is what the operator can
+				// see. Read as two lists and merged, a pad CLEARED on the map
+				// went on being satisfied by the saved one underneath it, so
+				// the sentence came back only after a save. Assigning worked
+				// and clearing did not, which is the half nobody tests.
+				const padOf = (k) => {
+					const f = (state.fields || []).find(x => x.dot === 'nightMode.' + k);
+					return f ? f.getValue() : getDotted(state.config, 'nightMode.' + k);
+				};
+				// isNumish, not a predicate of its own: GPIO 0 is a real pad
+				// and Number(false) is 0, so a hand-edited `irCutPin1: false`
+				// would otherwise read as one — the trap ircut-check's pin()
+				// carries a paragraph about. One spelling of "is this a pad",
+				// and it is the one testBlocker already asks with.
+				const wiredPad = (lamp ? ['backlightPin'] : ['irCutPin1', 'irCutPin2'])
+					.some((k) => isNumish(padOf(k)));
+				// A dimmable lamp lives on a PWM channel and may have no pad at
+				// all, so for the lamp that is the other way to be wired.
+				const chans = lamp ? ['irLightPwmChannel', 'whiteLightPwmChannel']
+					.map(padOf) : [];
+				const wired = wiredPad || chans.some((c) => c && c !== 'none');
+				warn.textContent = wired ? '' : (lamp
+					? 'Nothing is connected to the camera light yet — assign its pad on the map above, or a PWM channel below, and this will start to mean something.'
+					: 'Nothing is connected to the IR-cut filter yet — assign its coils on the map above, and this will start to mean something.');
+				warn.hidden = wired;
+			};
+			paint();
+			p.appendChild(warn);
+			state.repaint.push(paint);
+		}
+
 		if (!live && sub['x-requires']
 			&& (sub['x-requires'].field || Array.isArray(sub['x-requires'].any)
 				|| Array.isArray(sub['x-requires'].all))) {
@@ -10307,10 +13759,47 @@
 			control.addEventListener('change', pushLive);
 		}
 
-		return { dot, key, schema: sub, type, control, p, getValue, setValue, pushes };
+		if (expRow) {
+			const row = { p, control, sub, dot, unit: sub['x-unit'] ? String(sub['x-unit']) : '' };
+			row.paint = () => paintExp(row, siblingValue, (t) => {
+				desc = t;
+				const r = p.querySelector('.mj-reset');
+				if (r) r.setAttribute('aria-label', 'Clear ' + t);
+				const more = p.querySelector('.mj-help');
+				if (more) nameHelpMark(more, t);
+			});
+			// Every edit runs state.repaint, which is what renames the row the
+			// moment the mode select moves; a refresh or a discard fires no
+			// events and runs liveSync instead.
+			(state.repaint = state.repaint || []).push(row.paint);
+			(state.liveSync = state.liveSync || []).push(row.paint);
+			control.addEventListener('input', row.paint);
+			(state.expRows = state.expRows || []).push(row);
+			// The placeholder is all a screen reader says about an empty box,
+			// and it is only half of what the row shows: the running figure
+			// beside it and the hint under it are what a sighted reader acts
+			// on. Pointed at both, so focus reads "Auto · 32", then "now
+			// 31.6×", then the hint. Not aria-live: the figure moves every
+			// two seconds and would talk over everything else.
+			const idBase = dot.replace(/\./g, '-');
+			const now = p.querySelector('.mj-now');
+			const said = [];
+			if (now) { now.id = 'mjn-' + idBase; said.push(now.id); }
+			const ht = p.querySelector('.mj-hint-txt');
+			if (ht) { if (!ht.id) ht.id = 'mjh-' + idBase + '-h'; said.push(ht.id); }
+			if (said.length) control.setAttribute('aria-describedby', said.join(' '));
+			watchExp();
+			row.paint();
+		}
+
+		return { dot, key, schema: sub, type, control, p, getValue, setValue, pushes, setStock };
 	}
 
 	function updateDirty() {
+		// A staged edit can meet or break what a held-back choice is waiting
+		// for -- typing a place frees the sun choices -- so they are repainted
+		// with every edit, not only when a row shows or hides.
+		paintEnumHolds();
 		let n = 0;
 		for (const f of state.fields) {
 			const d = f.getValue() !== state.initial[f.dot];
@@ -10335,6 +13824,11 @@
 		// fields are editable directly on a camera whose pad list could not be
 		// read, and that is exactly the camera nobody is watching this on.
 		syncTestBtn();
+		// Rows whose text depends on OTHER fields — the actuator modes, which
+		// say when nothing is wired to them — repaint here for the same reason
+		// the test button does: the pads are assigned by the map, and the map
+		// funnels through this and nothing else.
+		state.repaint.forEach((fn) => fn());
 	}
 
 	// One visibility rule for both buttons: show each only while its action can
@@ -10349,11 +13843,12 @@
 		bar.classList.toggle('d-flex', show);
 		bar.classList.toggle('d-none', !show);
 		// A sticky bar does not push anything; it sits on whatever is at the
-		// bottom of the window. On a leaf whose picture is sized from the
-		// viewport height that is the control row under the picture, so the
-		// picture gives the bar its height back while it is there — except
-		// on the Overlay leaf, which keeps that room at all times: see
-		// --mj-pv-toolbar in the stylesheet.
+		// bottom of the window — which can be a control, and a covered control
+		// is one that does nothing when pressed. The form grows by the bar's
+		// height while it is there, so the last row has somewhere to scroll
+		// to; a picture on the leaf keeps its size either way. See
+		// .mj-has-toolbar in the stylesheet for why the room comes from the
+		// page rather than from the stage.
 		if (bar.parentNode) bar.parentNode.classList.toggle('mj-has-toolbar', show);
 
 		const lbl = document.getElementById('mj-dirty-count');
@@ -10391,11 +13886,15 @@
 	function pendingCost() {
 		const dirty = state.fields.filter(f => f.getValue() !== state.initial[f.dot]);
 		if (!dirty.length) return '';
-		// Save itself never restarts anything: a pipeline-class change is saved
-		// and then owed a reload, which is what Apply does and what the streams
-		// notice. The sentence says so in that order.
+		// Not "after Save, a reload": on a HiSilicon camera the save IS the
+		// reload — the camera rebuilds its pipeline before the POST's effects
+		// can be read back — and a sentence promising a second step that never
+		// comes is a promise the camera breaks in front of the operator. Where
+		// the camera cannot rebuild on a save, Apply does it, and the streams
+		// restart then. Either way this is the change that restarts them, which
+		// is all this sentence claims.
 		return needsPipelineReload(dirty)
-			? 'After Save, a reload restarts the video streams.'
+			? 'This change restarts the video streams.'
 			: 'Save keeps the streams running.';
 	}
 
@@ -10434,11 +13933,19 @@
 	// try, so a save that had SUCCEEDED threw a ReferenceError on its way out
 	// and the catch reported "Save failed: Can't find variable: flashToolbar"
 	// over a change the camera had already taken (#273).
-	function flashToolbar(text) {
+	//
+	// `hold` keeps it up with no timer, for a message that stands until the
+	// page replaces it: the wait for a save's rebuild can outlast FLASH_MS (a
+	// reading can start just inside the deadline and take its whole timeout),
+	// and a timer running out mid-wait would take the bar away before the page
+	// has decided whether Apply is owed.
+	function flashToolbar(text, hold) {
 		if (state.flashTimer) clearTimeout(state.flashTimer);
+		state.flashTimer = null;
 		setToolbarMsg(text, 'text-secondary');
 		state.flashPending = true;
 		renderToolbar();
+		if (hold) return;
 		state.flashTimer = setTimeout(() => {
 			state.flashTimer = null;
 			setToolbarMsg('');
@@ -10585,6 +14092,10 @@
 		// when the toolbar's confirmation helper turned out never to have been
 		// defined: the save landed and the page said "Save failed" (#273).
 		let landed = false;
+		// Read before the POST, because the rebuild it may cause is what the
+		// count is compared against afterwards.
+		const pipeline = needsPipelineReload(dirty);
+		const rebuildsBefore = pipeline ? await pipelineRebuilds() : null;
 		try {
 			if (dirty.length) {
 				const res = await apiFetch('/api/v1/config', {
@@ -10607,6 +14118,16 @@
 			// refresh would let a later discard "revert" the camera to values
 			// that are no longer what was saved (#259).
 			sent.forEach((v, f) => { state.initial[f.dot] = v; });
+			// The camera empties its preview table when it applies the save --
+			// but a preview still queued or on the wire can land AFTER that
+			// apply and put an override back, which would then shadow the value
+			// just saved with nothing left on the page to drop it. So the drops
+			// are sent anyway, through the same queue: they follow any preview
+			// still in flight, and the camera ends on the config whatever the
+			// order the save and the previews arrived in. The pending debounced
+			// push is the save's own value and goes with it.
+			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+			postKnobs(liveDocOf(null));
 			// The drag's override has done its job: the config now says what it
 			// was saying, so it can come off. Left installed it would go on
 			// overriding the saved placement for the life of the daemon, and a
@@ -10629,12 +14150,22 @@
 					kept.join('; ') + '. The camera is still configured with ' +
 					'them; its firmware may be too old to clear a setting.');
 			// Ask the camera what this cost rather than assuming the worst.
-			// Only a pipeline-class change is still owed a reload; a service
-			// restart or a channel rebuild already happened inside the save,
-			// with the rest of the pipeline left running.
-			if (needsPipelineReload(dirty))
-				state.applyPending = true;
-			else if (appliedInPlace(dirty))
+			// A service restart or a channel rebuild already happened inside
+			// the save, with the rest of the pipeline left running. A
+			// pipeline-class change is owed a reload only if the save did not
+			// already run one — see rebuiltSince for when it does.
+			if (pipeline) {
+				// The count is all that holds the bar open while the camera is
+				// asked, and the bar is the only place Save's outcome is said.
+				if (rebuildsBefore !== null)
+					flashToolbar('Saved. Waiting for the camera to restart the video streams…', true);
+				if (await rebuiltSince(rebuildsBefore))
+					flashToolbar('Saved and applied. The video streams restarted to take the change.');
+				else {
+					state.applyPending = true;
+					setToolbarMsg('');
+				}
+			} else if (appliedInPlace(dirty))
 				flashToolbar(
 					'Saved and applied. The video streams were not interrupted.');
 		} catch (e) {
@@ -10655,6 +14186,65 @@
 			btn.disabled = false;
 			btn.textContent = 'Save Changes';
 			updateDirty();
+		}
+	}
+
+	// How many times the camera has torn its pipeline down and built it again
+	// since majestic started, or null when it could not be asked. Null is "could
+	// not ask", never zero: a zero would let any later reading look like a
+	// rebuild had happened.
+	async function pipelineRebuilds() {
+		const ctl = new AbortController();
+		const t = setTimeout(() => ctl.abort(), 3000);
+		try {
+			const r = await apiFetch('/metrics?comments=0',
+				{ cache: 'no-store', credentials: 'same-origin', signal: ctl.signal });
+			if (!r.ok) return null;
+			const m = /^pipeline_rebuilds_total\s+(\d+)\s*$/m.exec(await r.text());
+			return m ? Number(m[1]) : null;
+		} catch (e) {
+			return null;
+		} finally {
+			clearTimeout(t);
+		}
+	}
+
+	// How long a save is given to show its rebuild. Measured on an
+	// hi3516av300: the counter has moved by the first reading that is not
+	// answered ahead of the rebuild, about a second after the POST.
+	const REBUILD_WAIT_MS = 4000;
+
+	// Did the save just made rebuild the pipeline itself?
+	//
+	// Measured on a HiSilicon camera, a POST /api/v1/config of a
+	// pipeline-class key is followed within about a second by the same rebuild
+	// Apply sends, with no Apply pressed. A resolution saved there is in force
+	// by the time the page could offer Apply, and the operator who was told the
+	// change waits for the button watched it happen on Save instead. A camera
+	// that does not rebuild on a save still needs Apply to bring such a change
+	// into force.
+	//
+	// The page cannot tell the two kinds of camera apart, so it asks the camera
+	// what happened: the rebuild counter before the save against the counter
+	// after. Any change counts, a drop included — majestic restarting starts
+	// the count again, and a fresh start reads the saved file. Nor does it
+	// matter who asked for the rebuild: one that runs after the save builds
+	// from what the save wrote, so it carries the change — which is all Apply
+	// would have done. What cannot be told apart is a rebuild that finished
+	// between the baseline and the POST, and carried the old configuration;
+	// the baseline is read immediately before the POST to keep that gap as
+	// short as it can be. A reading taken straight after the POST was seen to
+	// come back before the rebuild had run; hence the wait. Only a counter SEEN to move removes Apply.
+	// A camera that could not be asked keeps it, because a redundant Apply costs
+	// one more blink and a missing one costs a change that never takes effect.
+	async function rebuiltSince(before) {
+		if (before === null) return false;
+		const deadline = Date.now() + REBUILD_WAIT_MS;
+		for (;;) {
+			const now = await pipelineRebuilds();
+			if (now !== null && now !== before) return true;
+			if (Date.now() >= deadline) return false;
+			await new Promise(res => setTimeout(res, 500));
 		}
 	}
 
@@ -10700,11 +14290,26 @@
 	// the setting the way the row above it does rather than by its dotted key:
 	// a key is a second vocabulary, readable only by someone who already knows
 	// the answer, and this sentence is asked of someone deciding.
-	async function onReset(dot, btn, desc, clears) {
+	//
+	// `offs` is the third thing, and it is the one that had to be said out loud:
+	// this press is about to turn a switch that is currently on off. Neither of
+	// the two questions said so. "Leave it to the camera" reads as a promise
+	// that the camera has a sensible answer of its own, and on a switch with no
+	// declared default it has exactly one, which is off; "reset to its default"
+	// says nothing about what the default IS. Pressed on this lab camera's
+	// video0.Enable, it took the main stream down — the encoder stopped and the
+	// page then correctly showed a switch nobody had touched sitting at off.
+	async function onReset(dot, btn, desc, clears, offs) {
 		const name = desc || dot;
 		if (!confirm(clears
-			? 'Clear "' + name + '" and leave it to the camera?'
-			: 'Reset "' + name + '" to its default?')) return;
+			? offs
+				? 'Clear "' + name + '"?\n\nThis camera publishes no default for it, '
+					+ 'and with no value set it reads the switch as OFF.'
+				: 'Clear "' + name + '" and leave it to the camera?'
+			: offs
+				? 'Reset "' + name + '" to its default?\n\nThe default is OFF, '
+					+ 'so this switches it off.'
+				: 'Reset "' + name + '" to its default?')) return;
 		btn.disabled = true;
 		// innerHTML, not textContent: the glyph is an inline SVG, so the button's
 		// text is the empty string — saving that and putting it back at the end
@@ -10727,6 +14332,7 @@
 			if (!res.ok) {
 				if (res.status === 404) {
 					btn.title = 'This camera has no such setting.';
+					btn.dataset.gone = '1';
 					gone = true;
 				} else {
 					const txt = await safeText(res);
@@ -10776,6 +14382,7 @@
 		// from greying the button for the rest of the visit.
 		state.ircutNoSnap = null;
 		syncLegacy();
+		if (state.sunPanel) state.sunPanel.sync();
 		syncTestBtn();
 		// The soundcheck's gate reads the two audio switches, which are fields
 		// on this very page — so a save that turns one on has to hand the panel
@@ -10829,6 +14436,38 @@
 
 	function esc(s) {
 		return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+	}
+
+	// The word a value goes by on screen, where the schema gives it one.
+	//
+	// An enum member is a machine token -- `auto`, `off`, `pwm1` -- and a page
+	// that prints it raw asks the reader to infer the behaviour from it. That
+	// is the same job `title` does for the row, so it is the schema's to
+	// answer, and `x-enum-titles` is where: the daemon's per-value title,
+	// beside the enum it belongs to.
+	//
+	// A MAP keyed by value rather than a list parallel to `enum`, for two
+	// reasons. A schema can name the one member that needs words and leave the
+	// obvious ones alone; and neither side can silently mis-align, which a
+	// parallel list does the moment a member is inserted -- relabelling every
+	// option after it with no error anywhere.
+	//
+	// The value written is untouched either way: this is what the option SAYS,
+	// never what it posts.
+	function enumTitle(sub, v) {
+		const m = sub && sub['x-enum-titles'];
+		// An ARRAY is refused rather than read. It is the shape a parallel
+		// list would arrive in, and indexing one by the member's value is
+		// nonsense for a string enum and quietly plausible for a numeric one
+		// -- `["Off","On"]` against the values 0 and 1 would appear to work
+		// and relabel by position the day a member is inserted.
+		if (!m || typeof m !== 'object' || Array.isArray(m)) return '';
+		if (!Object.prototype.hasOwnProperty.call(m, String(v))) return '';
+		const t = m[String(v)];
+		// An empty or absent title is not a title. Handing one back would
+		// print an option with no words in it, which is worse than the token
+		// it was meant to replace.
+		return typeof t === 'string' && t.trim() ? t : '';
 	}
 
 	// An empty enum member is a real choice — majestic uses it for "inherit"

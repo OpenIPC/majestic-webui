@@ -201,7 +201,7 @@ function setProgressBar(id, value, name) {
 // page has an actual terminal (xterm.js) and needs none of this.
 //
 // Shared by the two pages that stream sysupgrade — update.js over /ws/upgrade
-// and factory-reset.js over j/run.cgi. They render the identical output, so the
+// and factory-reset.js over its own POST response. They render the identical output, so the
 // lesson above only wants learning once.
 function termWriter(el) {
 	// \u001b/\u009b escaped rather than written as the literal ESC and CSI bytes
@@ -333,6 +333,34 @@ function termWriter(el) {
 // over can still switch the whole thing off (see fw-update.js, issue #120).
 let heartbeatStopped = false;
 let heartbeatTimer = null;
+
+// Every 2 s on the camera's own network; every 10 s for a share's guest. A
+// guest's pages ride one data channel to the camera, and every /metrics reply
+// queues there ahead of whatever the guest is doing. On a
+// lossy link a loss in one holds the camera's sending window, and a console's
+// echoes waited behind it: at 6% loss, 31 of 180 slowly typed keys took over
+// 150 ms with the heartbeat running and 10 with it stopped, measured on a
+// hi3516av300 through a share link. Rates are computed from the measured
+// interval, so a slower tick reads true, only less often.
+const HEARTBEAT_MS = 2000;
+const HEARTBEAT_GUEST_MS = 10000;
+function mjHeartbeatMs(win) {
+	try {
+		if (win.parent && win.parent !== win && win.parent.__share) return HEARTBEAT_GUEST_MS;
+	} catch (e) {
+		// A parent this page may not read is not the share page.
+	}
+	return HEARTBEAT_MS;
+}
+
+// How many heartbeats make `ms`, at least one. Every threshold a consumer
+// counts in heartbeats is a duration really -- "two failures" meant four
+// seconds, "30 samples" a minute -- and counted in ticks it stretched five
+// times over for a guest. Stated as time and converted here, each one holds
+// at either pace.
+function mjHeartbeatTicks(ms) {
+	return Math.max(1, Math.ceil(ms / mjHeartbeatMs(window)));
+}
 let mjMetricsSubs = [];
 let mjMetricsLast = null;
 let mjPrevSample = null;
@@ -340,26 +368,63 @@ let mjFails = 0;
 let mjTickN = 0;
 
 // Other scripts (status.js) consume the poll through here instead of running a
-// second one. A subscriber that registers after a tick gets the latest good
-// sample immediately; failures are announced but never remembered.
+// second one. A subscriber that registers after a tick is handed the most
+// recent PUBLICATION straight away — including a failed one.
+//
+// Not the most recent success, which is what this replayed before. A panel
+// mounted after the camera stopped answering was then given the last good
+// sample as though it were current, while every subscriber that had been
+// there all along had already been told the poll failed — so the same page
+// showed live and stale readings side by side depending on when each part of
+// it happened to mount.
+//
+// Returns a function that removes this subscriber, idempotently. Without one
+// there was no way to unsubscribe at all, and a page section that mounts a
+// panel on every visit left a detached closure running on every heartbeat
+// for the rest of the session.
 function mjMetricsSubscribe(fn) {
 	mjMetricsSubs.push(fn);
 	if (mjMetricsLast) fn(mjMetricsLast);
+	let gone = false;
+	return function () {
+		if (gone) return;
+		gone = true;
+		const i = mjMetricsSubs.indexOf(fn);
+		if (i >= 0) mjMetricsSubs.splice(i, 1);
+	};
 }
 
 function mjMetricsPublish(s) {
-	if (s.ok) mjMetricsLast = s;
-	mjMetricsSubs.forEach(fn => { try { fn(s); } catch (e) {} });
+	mjMetricsLast = s;
+	// A copy, because a subscriber that unsubscribes from inside its own
+	// callback would otherwise shorten the array being walked and skip the
+	// next one along.
+	mjMetricsSubs.slice().forEach(fn => { try { fn(s); } catch (e) {} });
 }
 
-// Prometheus text → { v, cpuTotal, cpuIdle, rx, tx }. `v` maps every unlabelled
-// metric to its number; of the labelled families only cpu and net are wanted,
-// summed over their labels — the rest (task_seconds, node_uname_info) are
+// Prometheus text → { v, info, cpuTotal, cpuIdle, rx, tx }. `v` maps every
+// unlabelled metric to its number; of the labelled families only cpu and net
+// are wanted, summed over their labels, and the `*_info` families, whose
+// labels ARE the reading — `info.modem_info` is the cellular modem's model,
+// SIM and serving cell, text no gauge can carry. The rest (task_seconds) are
 // skipped unread. First write wins on a duplicated name: majestic on Ingenic
 // emits isp_exptime twice, canonical ISP block first, so first-wins reads the
 // same value before and after the daemon-side fix.
 function parseMetrics(text) {
-	const m = { v: Object.create(null), cpuTotal: 0, cpuIdle: 0, rx: 0, tx: 0 };
+	// `a="x",b="y\"z"` → { a: 'x', b: 'y"z' }, undoing the exposition
+	// format's three escapes. Inside rather than beside parseMetrics so the
+	// tests that lift the parser out of this file lift it whole. The values
+	// are device text -- a modem's operator name -- kept as strings and only
+	// ever put on a page through textContent.
+	function parseLabels(ls) {
+		const out = Object.create(null);
+		const re = /([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"/g;
+		let mt;
+		while ((mt = re.exec(ls)))
+			out[mt[1]] = mt[2].replace(/\\(.)/g, (_, c) => c === 'n' ? '\n' : c);
+		return out;
+	}
+	const m = { v: Object.create(null), info: Object.create(null), cpuTotal: 0, cpuIdle: 0, rx: 0, tx: 0 };
 	const lines = text.split('\n');
 	for (let i = 0; i < lines.length; i++) {
 		const ln = lines[i];
@@ -380,6 +445,10 @@ function parseMetrics(text) {
 				if (key.indexOf('device="lo"') < 0) m.rx += val;
 			} else if (key.startsWith('node_network_transmit_bytes_total')) {
 				if (key.indexOf('device="lo"') < 0) m.tx += val;
+			} else {
+				const b = key.indexOf('{'), fam = key.slice(0, b);
+				if (fam.endsWith('_info') && !(fam in m.info))
+					m.info[fam] = parseLabels(key.slice(b + 1, key.lastIndexOf('}')));
 			}
 			continue;
 		}
@@ -402,6 +471,76 @@ function parseMetrics(text) {
 		v.node_memory_MemAvailable_bytes > v.node_memory_MemTotal_bytes)
 		v.node_memory_MemAvailable_bytes = v.node_memory_MemTotal_bytes;
 	return m;
+}
+
+// The cellular modem, read by majestic over its AT port: modem_* gauges and the
+// modem_info labels. One scale and one set of sentences for the three places
+// that show it -- Dashboard, the live player's radio section, the Network
+// page -- because a grade written three times is three grades.
+//
+// RSRP is the headline (signal from the cell), but it is not the grade on its
+// own: a cell heard at -95 dBm under SINR -5 dB is strong and unusable, and an
+// RSRP-only "fair" for it would point at coverage when the trouble is
+// interference. So the grade is the worse of the two, and says which one set
+// it.
+const MJ_LTE_SCALE = {
+	key: 'modem_rsrp_dbm', lo: -125, hi: -70, good: -90, fair: -105,
+	sinrGood: 13, sinrFair: 0,
+};
+
+function mjLteGrade(v) {
+	const sc = MJ_LTE_SCALE;
+	if (!(sc.key in v)) return null;
+	const r = v[sc.key];
+	const rl = r >= sc.good ? 0 : r >= sc.fair ? 1 : 2;
+	// No SINR is not a clean channel: the grade is then the signal's alone,
+	// and says so rather than passing for the full judgement.
+	const hasSinr = 'modem_sinr_db' in v;
+	let sl = 0;
+	if (hasSinr) {
+		const n = v.modem_sinr_db;
+		sl = n >= sc.sinrGood ? 0 : n >= sc.sinrFair ? 1 : 2;
+	}
+	const lvl = Math.max(rl, sl);
+	const word = ['good', 'fair', 'weak'][lvl] + (hasSinr ? '' : ' (strength only)');
+	const sinr = ' (SINR ' + v.modem_sinr_db + ' dB)';
+	const why = lvl === 0 ? ''
+		: sl > rl ? ' — interference' + sinr
+		: lvl === 2 && sl === 2 ? ' — little coverage, and interference' + sinr
+		: lvl === 2 ? ' — little coverage here' : '';
+	return [word + why, ['text-success', 'text-warning', 'text-danger'][lvl], lvl];
+}
+
+// What the modem is doing, as [sentence, class]; null where majestic reports
+// no modem. Registration and the data session are separate facts and kept
+// apart: a modem registered on a cell, holding an address from the network,
+// whose session is not connected to usb0 carries nothing -- that state was
+// met in the field and is the one this sentence most has to get right.
+function mjLteState(v, info) {
+	if (!('modem_reading_age_seconds' in v)) return null;
+	// majestic withholds the readings once they are a minute old, so an old
+	// age normally arrives alone; it is checked first all the same, so that
+	// a stale reading can never be worded as a live one.
+	const age = v.modem_reading_age_seconds;
+	if (age > 60)
+		return ['The modem has not answered for ' + Math.round(age) + ' s', 'text-warning'];
+	const i = info || {};
+	if (i.sim && i.sim !== 'READY')
+		return ['SIM: ' + i.sim.toLowerCase(), 'text-danger'];
+	if (!('modem_registered' in v)) return ['Waiting for the modem', 'text-secondary'];
+	if (!v.modem_registered)
+		return ['Not registered on a network' +
+			(i.state === 'SEARCH' ? ' — searching for a cell'
+				: i.state === 'LIMSRV' ? ' — limited service: the SIM is refused here' : ''),
+			'text-danger'];
+	const on = 'On ' + (i.operator || 'the network') +
+		(i.rat ? ' · ' + i.rat : '') + ('modem_band' in v ? ' band ' + v.modem_band : '');
+	if (!('modem_data_connected' in v)) return [on, 'text-secondary'];
+	if (!v.modem_data_connected)
+		return [on + ' · no data session on usb0' +
+			(v.modem_bearer_active ? ' (the network gave it ' + (i.bearer_ip || 'an address') + ')' : ''),
+			'text-danger'];
+	return [on + ' · data on usb0', 'text-success'];
 }
 
 function uptimeStr(s) {
@@ -428,8 +567,8 @@ function startHeartbeat() {
 }
 
 // Overlay usage is the one topbar figure /metrics cannot supply. It moves when
-// config is written, not per second, so the slim pulse.cgi is asked every 15th
-// tick (~30s) — fire-and-forget, never chained to the metrics fetch.
+// config is written, not per second, so the slim pulse.cgi is asked about every
+// 30 s — fire-and-forget, never chained to the metrics fetch.
 function pulseTick() {
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
@@ -480,7 +619,7 @@ function renderTopbar(s) {
 		// warning read out afresh every two seconds for as long as the page
 		// stayed open. (A plain `return` here would be worse than the noise
 		// it saves: this runs inside the heartbeat's one handler, so it
-		// would take memory, day/night and uptime down with it.)
+		// would take memory and day/night down with it.)
 		if (el.textContent !== text) {
 			el.textContent = text;
 			// Colour comes from #clock-drift in bootstrap.override.css, which
@@ -504,10 +643,6 @@ function renderTopbar(s) {
 
 	if (s.memPct != null && $('#pb-memory'))
 		setProgressBar('#pb-memory', Math.round(s.memPct), 'Memory Usage');
-
-	const up = $('#uptime');
-	if (up && s.sysUptimeS != null)
-		up.textContent = 'Uptime:️ ' + uptimeStr(s.sysUptimeS);
 }
 
 function heartbeat() {
@@ -516,8 +651,10 @@ function heartbeat() {
 	// otherwise stop the heartbeat for the rest of the page's life.
 	const ctl = new AbortController();
 	const to = setTimeout(() => ctl.abort(), 5000);
-	if (mjTickN++ % 15 === 0) pulseTick();
-	apiFetch('/metrics', { signal: ctl.signal })
+	if (mjTickN++ % mjHeartbeatTicks(30000) === 0) pulseTick();
+	// comments=0: the HELP and TYPE lines are 22 of the reply's 30 KB on a
+	// hi3516av300, and parseMetrics skips them unread.
+	apiFetch('/metrics?comments=0', { signal: ctl.signal })
 		.then(r => r.ok ? r.text() : Promise.reject(r.status))
 		.then(text => {
 			mjFails = 0;
@@ -573,6 +710,48 @@ function heartbeat() {
 				src: ('night_mode_source' in v) ? v.night_mode_source : null,
 				dwell: ('night_auto_dwell_seconds' in v)
 					? v.night_auto_dwell_seconds : null,
+				// Switches in the last hour, counted by the camera. The only
+				// day/night number here that describes a stretch of time
+				// rather than an instant, and the only one that survives this
+				// page being closed — everything else above is where the
+				// camera is standing right now, and a camera that is
+				// oscillating is never standing anywhere for long. Same
+				// null-not-zero rule: absent on a daemon that does not publish
+				// it, and 0 is a real answer meaning "it has settled".
+				flips1h: ('night_flips_1h' in v) ? v.night_flips_1h : null,
+				// What automatic tone tuning is doing, and what it has
+				// measured. Lifted here rather than polled by the Live page
+				// because the heartbeat is already asking /metrics every two
+				// seconds and a second poll of the same document on the same
+				// page is the thing this subscription exists to avoid.
+				//
+				// Same null-not-zero rule as the day/night block above, and
+				// it carries more weight here: majestic leaves every one of
+				// these ABSENT rather than zero when the controller is not
+				// running or has not yet measured, so a missing span is "no
+				// measurement" and a span of 0 is a black picture. Collapsing
+				// the two would have the panel describe a scene the camera
+				// never saw.
+				tone: {
+					state: ('image_tune_state' in v) ? v.image_tune_state : null,
+					headroom: ('image_tune_headroom' in v)
+						? v.image_tune_headroom : null,
+					dist: ('image_tune_scene_dist' in v)
+						? v.image_tune_scene_dist : null,
+					span: ('image_tune_span' in v) ? v.image_tune_span : null,
+					clipLo: ('image_tune_clip_lo_ppm' in v)
+						? v.image_tune_clip_lo_ppm : null,
+					clipHi: ('image_tune_clip_hi_ppm' in v)
+						? v.image_tune_clip_hi_ppm : null,
+					dehaze: ('image_tune_dehaze' in v)
+						? v.image_tune_dehaze : null,
+					contrast: ('image_tune_contrast' in v)
+						? v.image_tune_contrast : null,
+					luminance: ('image_tune_luminance' in v)
+						? v.image_tune_luminance : null,
+					saturation: ('image_tune_saturation' in v)
+						? v.image_tune_saturation : null,
+				},
 				rx: m.rx, tx: m.tx, m,
 				// Consumers do their own counter deltas (net, venc bytes, md rects)
 				// against this snapshot; CPU% is computed here because its state
@@ -594,7 +773,7 @@ function heartbeat() {
 			// were scheduled 2s apart no matter how long the fetch took — they
 			// piled up on exactly the busy camera that could least afford it.
 			if (!heartbeatStopped)
-				heartbeatTimer = setTimeout(heartbeat, 2000);
+				heartbeatTimer = setTimeout(heartbeat, mjHeartbeatMs(window));
 		});
 }
 
@@ -674,7 +853,13 @@ function heartbeat() {
 		}
 		if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
 		e.preventDefault();
-		const items = Array.from(menu.querySelectorAll('.dropdown-item:not(.disabled)'));
+		// Only the items a reader can actually reach. An entry inside a hidden
+		// <li> -- the MAX one, on a browser that does not read Russian -- is
+		// still matched by the selector, and focusing something that is not
+		// rendered leaves focus where it was: every ArrowDown then targets that
+		// same first item and the keys stop walking the menu at all.
+		const items = Array.from(menu.querySelectorAll('.dropdown-item:not(.disabled)'))
+			.filter(el => !el.closest('[hidden]'));
 		if (!items.length) return;
 		const cur = items.indexOf(document.activeElement);
 		let next;
@@ -778,6 +963,29 @@ document.addEventListener('click', e => {
 function initAll() {
 	$$('form').forEach(el => el.autocomplete = 'off');
 
+	// The MAX entry, for readers whose browser says they read Russian.
+	//
+	// MAX is a Russian service, its bots can only be registered by a Russian
+	// business, and the page is Russian throughout — so to everyone else it is
+	// a menu entry they can neither read nor act on. It is hidden in the markup
+	// and revealed here rather than the other way round, so a browser that runs
+	// no script shows it to nobody instead of showing it to everybody.
+	//
+	// Presence anywhere in the preference list, not first place. setup.html
+	// picks ONE language for the agreement it displays, so there precedence
+	// decides; a menu entry is not exclusive, and somebody who lists English
+	// first and Russian second can still read this page perfectly well.
+	//
+	// Hiding it is not access control. The page answers a direct link as it
+	// always did, which is what a bookmark and the webhook URLs depend on.
+	const navMax = $('#nav-max');
+	if (navMax) {
+		const langs = navigator.languages || [navigator.language || ''];
+		if (Array.prototype.some.call(langs, (l) => /^ru\b/i.test(l))) {
+			navMax.hidden = false;
+		}
+	}
+
 	// For .warning and .danger buttons, ask confirmation on action.
 	//
 	// data-confirm overrides the wording. One shared "Are you sure?" meant that
@@ -875,9 +1083,9 @@ function initAll() {
 
 	// ...and RTSP's own port is the one value on that page location cannot
 	// supply, along with whether majestic is serving everything unauthenticated.
-	// Both used to be read server-side out of /api/v1/config.json with
-	// jsonfilter, which cost the camera a shell-out to a JSON parser -- and the
-	// firmware a 63KB libubox -- to do what JSON.parse does here for nothing.
+	// Both used to be read server-side out of /api/v1/config.json, which cost
+	// the camera a shell-out to a JSON parser -- and the firmware a 63KB
+	// libubox -- to do what JSON.parse does here for nothing.
 	// Guarded on the spans so only stream-urls.cgi pays for the config fetch;
 	// mjConfig() caches, so a page that already asked does not ask twice.
 	//
@@ -901,12 +1109,12 @@ function initAll() {
 		// is indistinguishable from "unsafe is off" if you only test the leaf, and
 		// answering that with the authenticated note would be a security warning
 		// failing open. The old server-side read did fail open that way (an empty
-		// jsonfilter result rendered the authenticated note), but the read lived on
+		// parsed result rendered the authenticated note), but the read lived on
 		// the camera, where the only way to come back empty was localhost failing.
 		// From the browser the ways to come back empty are far broader, so the
 		// section has to be present before either note is trusted.
 		//
-		// The string form is accepted alongside the boolean because jsonfilter
+		// The string form is accepted alongside the boolean because the parser
 		// printed `true` for either. A majestic too old to report the key at all
 		// still has a system section, so it keeps the authenticated note, as before.
 		if (mjGet(cfg, 'system')) {
@@ -937,6 +1145,51 @@ function initAll() {
 	});
 	}
 	wireCopy(document);
+
+	// The on-board camera's RTSP rows are written out by the page, but whether
+	// majestic will answer each one is only known to majestic: the sub stream
+	// needs video1.enabled and the JPEG track jpeg.rtsp, and nothing needs RTSP
+	// at all while rtsp.enabled is off. A row it will refuse used to look
+	// exactly like one that works, and a player handed it reports only that it
+	// cannot open the stream. Such a row is shown as off, with where to switch
+	// it on, and stops offering itself for copying. Left alone when either
+	// answer is missing: no answer is not a reason to call a stream off.
+	const epRtspRows = $$('[data-ep-rtsp]');
+	if (epRtspRows.length && typeof mjSources === 'function')
+		Promise.all([mjSources(), mjConfig()]).then(([list, cfg]) => {
+			const S = window.MajesticSources;
+			// mjConfig() answers a failed fetch with {}, and that is no answer:
+			// without the rtsp section there is no telling whether RTSP is off.
+			if (!S || !list || !mjGet(cfg, 'rtsp')) return;
+			const rtspOff = mjGet(cfg, 'rtsp.enabled') === false;
+			const why = {
+				0: ['the main stream is switched off', 'video0'],
+				1: ['the sub stream is switched off', 'video1'],
+				2: ['JPEG over RTSP is switched off', 'jpeg'],
+			};
+			Array.prototype.forEach.call(epRtspRows, dt => {
+				const id = dt.getAttribute('data-ep-rtsp') | 0;
+				const served = S.rtspServes(list, id);
+				if (!rtspOff && served !== false) return;
+				const [text, tab] = rtspOff ? ['RTSP is switched off', 'rtsp'] : why[id];
+				// A clone carries no click-to-copy listener.
+				const off = dt.cloneNode(true);
+				off.classList.remove('cp2cb');
+				off.classList.add('text-secondary', 'text-decoration-line-through');
+				off.removeAttribute('title');
+				dt.replaceWith(off);
+				const dd = off.nextElementSibling;
+				if (!dd) return;
+				const note = document.createElement('span');
+				note.className = 'd-block small';
+				note.append('Off: ' + text + ' — ');
+				const a = document.createElement('a');
+				a.href = 'camera.cgi?tab=' + tab;
+				a.textContent = 'turn it on';
+				note.append(a, '.');
+				dd.appendChild(note);
+			});
+		});
 
 	// The endpoints of any camera beyond the on-board one. Rendered from
 	// /api/v1/sources rather than written out here: which stream ids exist, and

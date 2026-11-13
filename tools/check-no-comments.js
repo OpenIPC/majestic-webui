@@ -15,13 +15,19 @@
  * check.yml runs on a pull request -- so this fires on both paths from one
  * definition and cannot drift from the build it guards.
  *
- * For .cgi the test is `stripCgi(src) === src`, which makes the gate and the
- * stripper the same code by construction: anything the stripper would remove
- * is by definition a comment that should not be here, and neither can grow a
- * blind spot the other does not have. For .js the oracle is terser's own
- * parser -- print the file with comments and without, and compare -- because
- * telling a `//` from one inside a string or a regex literal is not a job for
- * a regular expression. CSS and HTML get small scanners that do track strings.
+ * For shell -- the .cgi templates, the j/*.cgi endpoints, p/*.sh, and every
+ * script in sbin/ and bin/ -- the test is `stripFile(src) === src`, which makes
+ * the gate and the stripper the same code by construction: anything the
+ * stripper would remove is by definition a comment that should not be here.
+ * The price is that a blind spot is shared rather than caught. One was: the
+ * stripper read a plain script as a template with no code in it, the gate
+ * asked it the same question, and 160 KB of shell comments shipped past both.
+ * So which files are shell is decided here by the shebang, not by the
+ * extension, and the stripper's own tests pin that it changes them.
+ *
+ * For .js the oracle is terser's own parser -- print the file with comments
+ * and without, and compare -- because telling a `//` from one inside a string
+ * or a regex literal is not a job for a regular expression. CSS and HTML get small scanners that do track strings.
  *
  * ALLOW is the whole list of exceptions and each is pinned to an exact count,
  * so a new one cannot arrive quietly. Both entries are comments that are
@@ -36,7 +42,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { stripCgi } = require('./strip-cgi-comments.js');
+const { stripFile, isShellScript } = require('./strip-cgi-comments.js');
 
 const ALLOW = [
 	{ file: 'www/setup.html', marker: '<!--!', count: 1 },
@@ -141,14 +147,15 @@ async function main() {
 	for (const p of files) {
 		const rel = path.relative(root, p).split(path.sep).join('/');
 		const ext = path.extname(p);
-		if (!['.cgi', '.js', '.css', '.html'].includes(ext)) continue;
 		const src = fs.readFileSync(p, 'utf8');
+		const shell = ext === '.cgi' || ext === '.sh' || isShellScript(src);
+		if (!shell && !['.js', '.css', '.html'].includes(ext)) continue;
 		checked++;
 
-		if (ext === '.cgi') {
+		if (shell) {
 			let stripped;
 			try {
-				stripped = stripCgi(src, rel);
+				stripped = stripFile(src, rel);
 			} catch (e) {
 				findings.push(`${rel}: cannot be checked: ${e.message}`);
 				continue;

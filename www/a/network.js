@@ -19,13 +19,25 @@
 	// than disabled, because a disabled input is dropped from the submission
 	// and skipped by the keyboard, and neither is true of a value the page is
 	// showing you on purpose.
+	// What a typical home network looks like, shown under Manual as an example
+	// in an empty field and never as a value: nothing here is saved unless it
+	// is typed. Not under Automatic, where the fields are what the router
+	// handed out and grey text in them would read as an answer it gave (#690).
+	const EXAMPLE = {
+		network_netmask: '255.255.255.0',
+		network_gateway: '192.168.1.1',
+		network_nameserver: '192.168.1.1',
+	};
+
 	function toggleStatic() {
 		const on = auto && auto.checked;
 		const grid = $('.mj-ip-grid');
 		if (grid) grid.classList.toggle('is-auto', on);
 		['network_address', 'network_netmask', 'network_gateway', 'network_nameserver'].forEach(id => {
 			const inp = $('#' + id);
-			if (inp) inp.readOnly = on;
+			if (!inp) return;
+			inp.readOnly = on;
+			if (EXAMPLE[id]) inp.placeholder = on ? '' : EXAMPLE[id];
 		});
 		const note = $('#ip-auto-note');
 		if (note) note.hidden = !on;
@@ -80,5 +92,153 @@
 	const sel = $('#wifi-results');
 	if (sel) sel.addEventListener('change', () => { const i = $('#network_wlan_ssid'); if (sel.value && i) i.value = sel.value; });
 
+	// The Cellular modem card: every row the modem itself answers comes from
+	// majestic's modem_* gauges and modem_info labels on the shared heartbeat,
+	// graded and worded by main.js (mjLteGrade, mjLteState) exactly as the
+	// Dashboard does. A row the modem has not answered keeps its dash rather
+	// than turning into a zero. The IMEI and the SIM's ICCID are not in
+	// /metrics, which answers without a login: they come from
+	// /api/v1/modem, which does not.
+	const cellSet = (id, text, cls) => {
+		const el = $('#' + id);
+		if (!el) return;
+		// The markup's own classes (text-break on the long ones) stay; only
+		// the state colour is swapped.
+		if (el.dataset.base === undefined) el.dataset.base = el.className;
+		el.textContent = text == null || text === '' ? '–' : text;
+		el.className = (el.dataset.base + ' ' + (cls || '')).trim();
+	};
+	const cellState = (text, cls) => {
+		const el = $('#cell-state');
+		if (!el) return;
+		el.textContent = text;
+		el.className = 'x-small mb-2 ' + cls;
+	};
+	let cellIdAt = 0, cellIdDone = false;
+	function cellIdentity() {
+		// Asked again until both are known: a modem read for the first time,
+		// or one without a SIM yet, answers with nulls.
+		if (cellIdDone || Date.now() - cellIdAt < 30000) return;
+		cellIdAt = Date.now();
+		apiFetch('/api/v1/modem', { credentials: 'same-origin' })
+			.then(r => r.ok ? r.json() : null)
+			.then(d => {
+				if (!d) return;
+				cellSet('cell-imei', d.imei);
+				cellSet('cell-iccid', d.iccid);
+				cellIdDone = !!(d.imei && d.iccid);
+			})
+			.catch(() => {});
+	}
+	function cellular(s) {
+		// A failed poll proves nothing about the modem, but the rows below
+		// are no longer current either, and a green "data on usb0" left
+		// standing would say they were. Two failures, as the banner waits.
+		if (!s.ok) {
+			if (s.fails >= 2)
+				cellState('The camera is not answering — the readings below are the last ones received',
+					'text-warning');
+			return;
+		}
+		const v = s.m.v, i = s.m.info.modem_info || {};
+		const num = (k, unit) => (k in v) ? v[k] + unit : null;
+		const st = mjLteState(v, i);
+		// No modem gauges is what majestic says when it finds no modem it
+		// knows on USB -- which is not the same as no modem.
+		cellState(st ? st[0]
+			: 'majestic reads no modem on USB: it is powered down, unplugged, or a model majestic does not read',
+			st ? st[1] : 'text-secondary');
+		if (st) cellIdentity();
+		const g = mjLteGrade(v);
+		cellSet('cell-rsrp', num('modem_rsrp_dbm', ' dBm') != null
+			? v.modem_rsrp_dbm + ' dBm' + (g ? ' · ' + g[0] : '') : null, g ? g[1] : '');
+		cellSet('cell-rsrq', num('modem_rsrq_db', ' dB'));
+		cellSet('cell-sinr', num('modem_sinr_db', ' dB'));
+		cellSet('cell-rssi', num('modem_rssi_dbm', ' dBm'));
+		cellSet('cell-csq', ('modem_csq' in v) ? v.modem_csq + ' of 31' : null);
+		cellSet('cell-op', i.operator
+			? i.operator + (i.mcc ? ' (' + i.mcc + '/' + i.mnc + ')' : '') : null);
+		cellSet('cell-cell', i.cell
+			? i.cell + (i.tac ? ' · TAC ' + i.tac : '') +
+				('modem_pci' in v ? ' · PCI ' + v.modem_pci : '') +
+				(i.state ? ' · ' + ({ NOCONN: 'idle', CONNECT: 'transferring',
+					SEARCH: 'searching', LIMSRV: 'limited service' }[i.state] ||
+					i.state.toLowerCase()) : '')
+			: null);
+		cellSet('cell-band', ('modem_band' in v)
+			? (i.rat || '') + ' band ' + v.modem_band +
+				('modem_earfcn' in v ? ' · EARFCN ' + v.modem_earfcn : '')
+			: (i.rat || null));
+		cellSet('cell-bearer', ('modem_bearer_active' in v)
+			? (v.modem_bearer_active ? 'active' + (i.bearer_ip ? ', ' + i.bearer_ip : '') : 'none')
+			: null);
+		cellSet('cell-netdev', ('modem_data_connected' in v)
+			? (v.modem_data_connected ? 'connected' : 'not connected — usb0 carries nothing')
+			: null, ('modem_data_connected' in v)
+			? (v.modem_data_connected ? 'text-success' : 'text-danger') : '');
+		cellSet('cell-model', i.model);
+		cellSet('cell-rev', i.revision);
+		cellSet('cell-sim', i.sim ? i.sim.toLowerCase() : null,
+			i.sim && i.sim !== 'READY' ? 'text-danger' : '');
+		const age = $('#cell-age');
+		if (age) age.textContent = ('modem_reading_age_seconds' in v)
+			? 'Read from the modem ' + Math.round(v.modem_reading_age_seconds) + ' s ago.' : '';
+	}
+	if ($('#cellular') && typeof mjMetricsSubscribe === 'function')
+		mjMetricsSubscribe(cellular);
+
+	// Addresses as four octets (ip-octets.js, #695). The text fields stay in
+	// the form and are what is posted, so this is presentation too: without
+	// it, or for a value that is not IPv4, they are the plain boxes they were.
+	// A resolver may be IPv6, so pasting one there turns that field back into
+	// text rather than being refused.
+	const IO = window.MajesticIpOctets;
+	if (IO) {
+		['network_address', 'network_netmask', 'network_gateway', 'network_fallback'].forEach((id) => IO.mount($('#' + id)));
+		IO.mount($('#network_nameserver'), { textOk: true });
+	}
+
 	toggleStatic();
+
+	// A change sbin/netapply is holding open (network.cgi's #net-applying). It
+	// is kept only once the browser reaches network.cgi?confirm= after the new
+	// settings are in effect; until then the camera puts the old ones back by
+	// itself.
+	const ap = $('#net-applying');
+	if (ap) {
+		const tok = ap.dataset.token, to = ap.dataset.to, iface = ap.dataset.iface;
+		const back = (base) => base + '/cgi-bin/network.cgi?iface=' + encodeURIComponent(iface) + '&confirm=' + tok;
+		if (ap.dataset.same === '1' && /^(\d{1,3}\.){3}\d{1,3}$/.test(to) && to !== location.hostname) {
+			// The address this page came from is going away: follow the
+			// camera to its new one once it has had time to move.
+			const port = location.port ? ':' + location.port : '';
+			setTimeout(() => { location.href = back(location.protocol + '//' + to + port); }, 10000);
+		} else {
+			// Nothing this page relies on is moving -- or a DHCP lease that
+			// may well keep the address -- so ask over this connection, and
+			// confirm once the change is in effect; every answer after that
+			// is an outcome, which the confirm URL puts into words. A failed
+			// request is the link bouncing, not an answer: ask again. But a
+			// page reached by name cannot tell from the name whether it is on
+			// the interface being changed, and when it was, the address
+			// behind the name has gone: after a run of failures with a new
+			// fixed address to go to, it is followed there.
+			let tries = 0, fails = 0;
+			const moving = /^(\d{1,3}\.){3}\d{1,3}$/.test(to) && to !== location.hostname;
+			const ask = () => fetch('/cgi-bin/j/netapply.cgi?token=' + tok, { cache: 'no-store' })
+				.then((r) => r.json())
+				.then((j) => {
+					fails = 0;
+					if (j.state === 'applying') later();
+					else if (j.state === 'unknown' || j.state === 'bad') location.href = 'network.cgi?iface=' + encodeURIComponent(iface);
+					else location.href = back('');
+				})
+				.catch(() => {
+					if (moving && ++fails >= 4) location.href = back(location.protocol + '//' + to + (location.port ? ':' + location.port : ''));
+					else later();
+				});
+			const later = () => { if (++tries < 60) setTimeout(ask, 2000); };
+			setTimeout(ask, 3000);
+		}
+	}
 })();

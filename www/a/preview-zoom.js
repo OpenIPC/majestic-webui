@@ -60,6 +60,7 @@
 	let ox = 0, oy = 0;    // the picture's left/top inside the stage
 	let placed = false;    // has a layout run against a known frame
 	let onScale = null;    // who to tell when the scale moves
+	const onView = [];     // and who to tell when the VIEW moves
 
 	const saved = read(KEY);
 	if (MODES.indexOf(saved) >= 0) mode = saved;
@@ -76,6 +77,51 @@
 		if (onScale && prev !== scale) {
 			try { onScale(); } catch (e) {}
 		}
+	}
+
+	// The VISIBLE RECTANGLE moved, which is a different event from the scale
+	// moving and fires far more often: a pan changes what is on screen without
+	// changing the scale at all, and announce() above is deliberately silent
+	// there because the chip it repaints prints only a percentage.
+	//
+	// A list rather than a slot. onScale is a slot, and preview-page.js has
+	// already taken it; a second consumer assigning over it would stop the chip
+	// repainting and nothing would report that. Guarded per listener so one
+	// that throws cannot stop the next -- and cannot stop the pan either, since
+	// this is called from the middle of the gesture.
+	function announceView() {
+		for (let i = 0; i < onView.length; i++) {
+			try { onView[i](viewNow()); } catch (e) {}
+		}
+	}
+
+	// What of the frame is on screen.
+	//
+	// In FRAME pixels -- the stream's own -- because that is the only space
+	// that means anything to the camera, which is the one consumer this has.
+	// The frame rides along because a rectangle is meaningless without the
+	// picture it is a part of, and handing the two over separately is an
+	// invitation to pass one that does not match the other.
+	//
+	// Null until a layout has run against a known frame, which a caller must
+	// treat as "not yet" rather than as a frame of no size.
+	function viewNow() {
+		if (!frame || !placed) return null;
+		const p = picRect();
+		return {
+			frame: { w: frame.w, h: frame.h },
+			visible: {
+				x: (p.x - ox) / scale, y: (p.y - oy) / scale,
+				w: (p.r - p.x) / scale, h: (p.b - p.y) / scale,
+			},
+			// Where that rectangle actually IS, in stage pixels, and how many
+			// stage pixels one frame pixel covers. A caller drawing its own
+			// picture over this one needs both: `visible` alone says what is on
+			// screen but not where, and assuming it fills the stage is wrong
+			// under Fit and wrong again the moment a letterbox appears.
+			pic: { x: p.x, y: p.y, w: p.r - p.x, h: p.b - p.y },
+			scale: scale,
+		};
 	}
 
 	// ---- laying the picture out -------------------------------------------
@@ -157,10 +203,26 @@
 	// happen, drag a box round it, and you are on it, no control to visit
 	// first. Where the picture DOES overflow the drag is the pan, and the Area
 	// button is how you ask for a rectangle instead.
+	//
+	// A third, on a camera that turns: in Fit and Fill the drag steers it
+	// (setSteer(), preview-ptz.js) -- the picture slides under the finger and
+	// the head follows on release -- and neither a pan of a Fill crop nor a
+	// box drawn without Area is what it does there. Zoomed in, the drag pans
+	// the zoomed picture as ever, and Area still draws.
+	let affordance = null;
 	function setAffordance(sw, sh, picW, picH) {
+		affordance = [sw, sh, picW, picH];
 		const pannable = picW > sw + 1 || picH > sh + 1;
-		stage.classList.toggle('mj-pannable', pannable);
-		stage.classList.toggle('mj-drawable', placed && !pannable);
+		const steerable = steers();
+		// A view that stops steering -- 1:1, a zoom -- ends a steer under way:
+		// called off, picture back, nothing sent.
+		if (steering && !steerable) {
+			steering = null;
+			if (steer) steer.cancel();
+		}
+		stage.classList.toggle('mj-steerable', steerable);
+		stage.classList.toggle('mj-pannable', pannable && !steerable);
+		stage.classList.toggle('mj-drawable', placed && !pannable && !steerable);
 	}
 
 	function layout() {
@@ -194,17 +256,31 @@
 		annotate(sw, sh, picW, picH);
 		setAffordance(sw, sh, picW, picH);
 		announce(prev);
+		announceView();
 	}
 
 	// Free zoom is bounded by what is worth looking at. Out: no further than
-	// the whole frame, or native when the frame is smaller than the stage --
-	// past either it is only black. In: 3x native, EXCEPT that Fill itself can
+	// the whole frame fitting the stage -- past that it is only black. Not
+	// native when the frame is smaller than the stage, which this used to be:
+	// a 704x576 substream then shrank to a postage stamp on a large monitor,
+	// while the main stream stopped at the stage. Except from 1:1, which is
+	// below Fit on such a frame by choice: there the floor is native, or the
+	// first notch out would enlarge the picture to Fit. In: 3x native, EXCEPT that Fill itself can
 	// need more than that (a 704x576 substream on a 1440p monitor is 364%), and
 	// a bound below the preset in force would drag the picture back the moment
 	// you touched it. Not `kFill * 3`: that read the enlargement Fill already
 	// needed as the thing to triple, and offered 1092% on that substream.
-	function zoomFloor(kFit) { return Math.min(kFit, 1); }
-	function zoomCeiling(kFill) { return Math.max(kFill, 3); }
+	function zoomFloor(kFit) { return lastPreset === 'one' ? Math.min(kFit, 1) : kFit; }
+	// And a caller can raise the ceiling. The peer overlay does, while another
+	// camera's picture sits on this one: 3x of THAT picture's pixels is then
+	// what is worth looking at, and it can be a dozen times this frame's. The
+	// hook answers a scale in this frame's terms, or nothing.
+	let ceilingHook = null;
+	function zoomCeiling(kFill) {
+		let more = 0;
+		if (ceilingHook) { try { more = +ceilingHook() || 0; } catch (e) { more = 0; } }
+		return Math.max(kFill, 3, more);
+	}
 
 	function panBy(dx, dy) {
 		if (!frame || !placed) return;
@@ -213,6 +289,7 @@
 		if (picW > sw) ox = clamp(ox + dx, sw - picW, 0);
 		if (picH > sh) oy = clamp(oy + dy, sh - picH, 0);
 		place(picW, picH);
+		announceView();
 	}
 
 	// Zoom to a rectangle drawn on the picture. The scale falls out of the
@@ -253,6 +330,7 @@
 		setAffordance(sw, sh, picW, picH);
 		syncRadios();
 		announce(prev);
+		announceView();
 	}
 
 	// Zoom about a point on the screen -- the pointer, or the midpoint between
@@ -281,6 +359,7 @@
 		setAffordance(sw, sh, picW, picH);
 		syncRadios();
 		announce(prev);
+		announceView();
 	}
 
 	// ---- the control -------------------------------------------------------
@@ -310,6 +389,14 @@
 	function setFrame(w, h) {
 		if (!w || !h) return;
 		const changed = !frame || frame.w !== w || frame.h !== h;
+		// A frame that has not changed asks for no layout, and that is not an
+		// optimisation. The multipart rung fires `load` on EVERY JPEG, and each
+		// one arrives here with the size it had last time -- so a layout per
+		// frame would publish a view per frame, and anything debouncing on the
+		// view (the encoder region does, at 350 ms) would have its timer reset
+		// twenty times a second and never fire. A continuous preview would
+		// silently never reach the camera.
+		if (!changed && placed) return;
 		frame = { w: w, h: h };
 		if (changed && mode === 'free') {
 			mode = lastPreset;
@@ -356,9 +443,17 @@
 	// screen changes until the replacement is known to work" forbids. The
 	// promotion carries its own report -- the stats tick that says `playing`
 	// is the one that names the size -- so nothing is lost by ignoring this.
+	//
+	// And only from the page's own media -- the elements this module places,
+	// which carry .mj-stage-media. Anything else that plays inside the stage
+	// (the peer control lays another camera's picture over this one, with a
+	// player of its own) reports its OWN size through the same events, and
+	// taking it for the picture's re-laid the whole page out against a frame
+	// that was never on it.
 	function fromMedia(e) {
 		const el = e.target;
 		if (!el || !el.videoWidth) return;
+		if (!el.classList || !el.classList.contains('mj-stage-media')) return;
 		if (getComputedStyle(el).display === 'none') return;
 		setFrame(el.videoWidth, el.videoHeight);
 	}
@@ -389,19 +484,35 @@
 	let pinchDist = 0, pinchX = 0, pinchY = 0;
 	let lastType = 'mouse';
 
-	// Zoom-to-area. `armed` is the button's state; `band` is the drag in
-	// progress, in stage coordinates.
-	const areaBtn = $('#mj-area'), band = $('#mj-marquee');
-	let armed = false, drawing = null;
+	// The steer: whoever turns the camera with a drag (setSteer()), and the
+	// pointer doing it now.
+	let steer = null, steering = null;
+	function steers() {
+		return !!(steer && placed && (mode === 'fit' || mode === 'fill'));
+	}
 
-	function setArmed(on) {
+	// Zoom-to-area. `armed` is the button's state; `band` is the drag in
+	// progress, in stage coordinates; `picker` is whoever asked for the next
+	// rectangle instead of the zoom -- pickRect(), below.
+	const areaBtn = $('#mj-area'), band = $('#mj-marquee');
+	let armed = false, drawing = null, picker = null;
+
+	function setArmed(on, cb) {
+		const dropped = picker;
 		armed = !!on && !!band;
+		picker = armed && typeof cb === 'function' ? cb : null;
 		drawing = null;
 		if (band) band.hidden = true;
 		stage.classList.toggle('mj-armed', armed);
 		// The checkbox is the control's state, so it is written rather than
 		// asked -- Esc and the end of a drag both disarm without touching it.
-		if (areaBtn && areaBtn.checked !== armed) areaBtn.checked = armed;
+		// Lit for ITS OWN arming only: a rectangle asked for by another control
+		// leaves it dark, or a lit Area would promise a zoom that is not coming.
+		const lit = armed && !picker;
+		if (areaBtn && areaBtn.checked !== lit) areaBtn.checked = lit;
+		// Whoever was waiting for a rectangle and no longer is -- Esc, the Area
+		// button, a later asker -- is told so once, with nothing.
+		if (dropped && dropped !== picker) dropped(null);
 	}
 	if (areaBtn) areaBtn.addEventListener('change', () => setArmed(areaBtn.checked));
 
@@ -439,15 +550,65 @@
 		lastType = e.pointerType;
 		if (e.button != null && e.button > 0) return;
 		if (e.target.closest && e.target.closest(CHROME)) return;
-		// A rectangle belongs to the pointer that began it. A second finger
+		// A rectangle belongs to the pointer that began it. A second pointer
 		// arriving mid-drag is not a new origin, and it must not start a pan
-		// either.
-		if (drawing) return;
+		// either -- except a second FINGER, which says the first one was never
+		// drawing. Two fingers cannot land in the same instant, so the first is
+		// always alone long enough to start a band, and in Fit that turned
+		// every spread into a rectangle traced by whichever finger touched
+		// first: the view jumped to some part of the picture off to one side,
+		// while the same spread on a picture already zoomed in was a pinch.
+		// The band is dropped and both fingers go to the pinch below. Armed
+		// stays armed, and a pending pickRect() stays pending: this drag was
+		// not a rectangle, which is not the same as the asker giving up.
+		if (drawing) {
+			if (drawing.type !== 'touch' || e.pointerType !== 'touch') return;
+			const first = drawing;
+			drawing = null;
+			if (band) band.hidden = true;
+			pts.set(first.id, { x: first.cx, y: first.cy });
+			pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+			pinchDist = 0;
+			return;
+		}
+		// The same for a steer: a second finger says it was a pinch all
+		// along. The steer is called off -- the picture goes back, nothing is
+		// sent -- and both fingers go to the pinch.
+		if (steering) {
+			if (steering.type !== 'touch' || e.pointerType !== 'touch') return;
+			const id = steering.id;
+			steering = null;
+			const at = steer.cancel() || {};
+			pts.set(id, { x: at.x, y: at.y });
+			pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+			pinchDist = 0;
+			return;
+		}
+		// One pointer on a picture in Fit or Fill, on a camera that turns:
+		// the steer's, if it wants it.
+		if (!armed && pts.size === 0 && steers() && steer.wants(e)) {
+			steering = { id: e.pointerId, type: e.pointerType };
+			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+			steer.start(e);
+			return;
+		}
 
-		// Armed, or simply nothing to pan: either way the drag draws.
-		if (armed || stage.classList.contains('mj-drawable')) {
+		// Armed, or simply nothing to pan: either way the drag draws -- unless
+		// this is a finger and another is already down, in which case it joins
+		// it. A pinch squeezed back to Fit leaves the picture drawable under a
+		// finger still resting on it, and the next one down is that pinch
+		// resuming. Only a finger: a pen or a mouse pressed beside a resting
+		// hand is not half of a pinch, and with Area armed it came to draw.
+		const joins = pts.size > 0 && e.pointerType === 'touch';
+		if (!joins && (armed || stage.classList.contains('mj-drawable'))) {
 			const r = stage.getBoundingClientRect();
-			drawing = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
+			drawing = {
+				id: e.pointerId, type: e.pointerType,
+				x: e.clientX - r.left, y: e.clientY - r.top,
+				// Where the finger is now, in client pixels, for the pinch a
+				// second finger turns this into.
+				cx: e.clientX, cy: e.clientY,
+			};
 			try { stage.setPointerCapture(e.pointerId); } catch (err) {}
 			return;
 		}
@@ -461,9 +622,19 @@
 	});
 
 	stage.addEventListener('pointermove', (e) => {
+		if (steering) {
+			if (e.pointerId === steering.id) steer.move(e);
+			return;
+		}
 		if (drawing) {
 			if (e.pointerId !== drawing.id) return;
+			drawing.cx = e.clientX; drawing.cy = e.clientY;
 			const b = bandRect(e);
+			// On touch the band waits until it is a rectangle at all. The
+			// first finger of a pinch is alone for a moment and usually
+			// moves, and a band that flickers up under it before the second
+			// finger takes the gesture over says a box was being drawn.
+			if (drawing.type === 'touch' && band.hidden && !deliberate(b)) return;
 			band.hidden = false;
 			band.style.left = b.x + 'px';
 			band.style.top = b.y + 'px';
@@ -490,6 +661,15 @@
 		panBy(dx, dy);
 	});
 
+	// A rectangle has to be deliberate. Below this it is a slip or a click,
+	// and zooming 40x into a stray 3px drag is the worst possible answer to
+	// one. The floor is a share of the stage with an absolute minimum, so it
+	// means the same thing on a 2560px monitor and a 390px phone.
+	function deliberate(b) {
+		return b.w >= Math.max(16, stage.clientWidth * 0.02)
+			&& b.h >= Math.max(16, stage.clientHeight * 0.02);
+	}
+
 	// `commit` is false for pointercancel: the browser took the gesture away —
 	// a system edge swipe, a device rotation, another element capturing the
 	// pointer — and a gesture that was interrupted is not a gesture that was
@@ -499,20 +679,30 @@
 		const b = commit ? bandRect(e) : null;
 		try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
 		drawing = null;
+		// Taken before disarming, which would otherwise answer it with nothing.
+		const asker = picker;
+		picker = null;
+		let rect = null;
 		if (b) {
-			// A rectangle has to be deliberate. Below this it is a slip or a
-			// click, and zooming 40x into a stray 3px drag is the worst
-			// possible answer to one. The floor is a share of the stage with
-			// an absolute minimum, so it means the same thing on a 2560px
-			// monitor and a 390px phone.
-			const minW = Math.max(16, stage.clientWidth * 0.02);
-			const minH = Math.max(16, stage.clientHeight * 0.02);
-			if (b.w >= minW && b.h >= minH) zoomToRect(b.x, b.y, b.w, b.h);
+			if (deliberate(b)) rect = b;
 		}
 		// One drag, then it disarms itself: a mode you can forget you are in is
 		// the wrong thing to leave over a picture that also steers a camera.
 		setArmed(false);
+		if (asker) asker(rect && frame && placed ? frameRect(rect) : null);
+		else if (rect) zoomToRect(rect.x, rect.y, rect.w, rect.h);
 		return true;
+	}
+
+	// A stage rectangle in the frame's own pixels, with the frame it is part
+	// of -- the same conversion zoomToRect() opens with, for an asker who
+	// wants the rectangle rather than the zoom.
+	function frameRect(b) {
+		return {
+			x: (b.x - ox) / scale, y: (b.y - oy) / scale,
+			w: b.w / scale, h: b.h / scale,
+			frame: { w: frame.w, h: frame.h },
+		};
 	}
 
 	function endPointer(e) {
@@ -523,8 +713,21 @@
 			try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
 		}
 	}
-	stage.addEventListener('pointerup', (e) => { if (!finishDraw(e, true)) endPointer(e); });
-	stage.addEventListener('pointercancel', (e) => { if (!finishDraw(e, false)) endPointer(e); });
+	// The steer's pointer ends the steer: lifted, it is sent; taken away by
+	// the browser (pointercancel), it is not.
+	function finishSteer(e, commit) {
+		if (!steering || e.pointerId !== steering.id) return false;
+		steering = null;
+		try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
+		steer.end(e, commit);
+		return true;
+	}
+	stage.addEventListener('pointerup', (e) => {
+		if (!finishSteer(e, true) && !finishDraw(e, true)) endPointer(e);
+	});
+	stage.addEventListener('pointercancel', (e) => {
+		if (!finishSteer(e, false) && !finishDraw(e, false)) endPointer(e);
+	});
 
 	// The wheel zooms, about the pointer. It used to pan the overflowing axis,
 	// which is what a Mac trackpad's two fingers want -- but a mouse wheel is
@@ -586,6 +789,55 @@
 	window.MajesticZoom = {
 		// The stream's real pixel size, from the player's codec report.
 		setFrame: setFrame,
+
+		// Who turns the camera with a drag in Fit and Fill, or null for no
+		// one: { wants(e), start(e), move(e), end(e, commit), cancel() }.
+		// wants() is asked at the press and may decline it; cancel() answers
+		// where the pointer last was, {x, y} in client pixels, for the pinch
+		// a second finger turns the steer into.
+		setSteer: function (h) {
+			if (steering && steer) steer.cancel();
+			steering = null;
+			steer = h && typeof h.wants === 'function' ? h : null;
+			if (affordance) setAffordance.apply(null, affordance);
+		},
+
+		// How far in a zoom may go beyond 3x native: a function answering a
+		// scale in the frame's own terms (or 0), read at every zoom; null to
+		// withdraw it. A free zoom already past the ceiling that leaves is
+		// pulled back to it, about the middle of the stage.
+		setCeiling: function (fn) {
+			ceilingHook = typeof fn === 'function' ? fn : null;
+			// The way a stage resize pulls a free zoom back inside its
+			// bounds: layout() clamps the scale about what the middle of the
+			// stage was looking at. One path for that, not two.
+			if (mode === 'free') layout();
+		},
+
+		// What of the frame is on screen, or null before the first layout,
+		// in the stream's own pixels -- the space the camera reasons in.
+		view: viewNow,
+
+		// Every time that rectangle moves, PANS INCLUDED. A list, unlike
+		// onScale, because that one is already spoken for.
+		onView: function (fn) { if (typeof fn === 'function') onView.push(fn); },
+
+		// The next rectangle the person draws, handed to `fn` instead of
+		// zoomed to: {x, y, w, h} in the frame's own pixels with the frame
+		// alongside, or null for a click, an interrupted gesture, Esc, or the
+		// Area button taking the stage back. Arms the stage exactly as Area
+		// does -- band, crosshair, one drag and it disarms -- without lighting
+		// Area's own LED. Returns a function that withdraws the request without
+		// calling back, or null where there is no band to draw with. Focus by
+		// ear uses it to choose the part of the picture to listen to.
+		pickRect: function (fn) {
+			if (typeof fn !== 'function') return null;
+			setArmed(true, fn);
+			if (!armed) return null;
+			return function () {
+				if (picker === fn) { picker = null; setArmed(false); }
+			};
+		},
 
 		// Called whenever the scale moves for a reason the player does not know
 		// about — a preset, a pinch, a resize. preview-page.js repaints the

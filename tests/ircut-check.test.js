@@ -122,14 +122,41 @@ group('irLook needs BOTH statistics, or a night frame fires it');
 		!ic.irLook(st(GREY)) && !ic.colourLook(st(GREY)));
 }
 
-group('irLook refuses to answer from too few pixels');
+group('irLook refuses to answer from a frame with no picture in it');
 {
-	// 10x10 = 100 usable pixels, below the floor: an almost-dark frame must not
-	// be allowed to reach a verdict on a handful of lit pixels.
-	const tiny = st(MAGENTA, 10, 10);
-	check('100 pixels is below the floor', tiny.n === 100, tiny.n);
-	check('and yields no verdict either way',
-		!ic.irLook(tiny) && !ic.colourLook(tiny));
+	// The floor is a SHARE of the frame, so the sample's size cannot outvote
+	// it. It used to be a count — 200 — against a 14,400-pixel sample, which
+	// let 1.4% of a frame speak for all of it: the thing the count's own
+	// comment said must never happen.
+	const mostlyDark = ic.stats(
+		frame(160, 90, i => (i < 1440 ? MAGENTA : DARK)), 160, 90);
+	check('a tenth of the frame lit is enough pixels to count',
+		mostlyDark.n === 1440, mostlyDark.n);
+	check('...and still no verdict either way',
+		!ic.irLook(mostlyDark) && !ic.colourLook(mostlyDark), mostlyDark.lit);
+	// Where the line is: half the frame lit is a frame, and it answers.
+	const half = ic.stats(frame(160, 90, i => (i % 2 ? MAGENTA : DARK)), 160, 90);
+	check('half a frame of magenta does read as an open filter',
+		ic.irLook(half) === true, half.lit);
+
+	// THE REGRESSION, and it is the whole of #492. A camera with no
+	// illumination shows a black picture at night, and a black picture is not
+	// black: it is the sensor's noise floor with the white-balance gains on
+	// it, a few counts of red and blue above green. The magenta excess is
+	// normalised by the pixel's own brightness, so those few counts ARE a
+	// magenta frame at a luminance of 21 — 0.23 against a bar of 0.15 — and
+	// green is the minimum in every pixel of it. Both statistics fired, on a
+	// picture its owner would describe as completely black, and the dashboard
+	// warned that the IR-cut filter was open. It could not be dismissed
+	// because nothing about it was dismissible: it was wrong.
+	const NOISE = [24, 18, 22];
+	const noise = st(NOISE);
+	check('a noise floor puts green at the minimum everywhere',
+		noise.gmin === 1, noise.gmin);
+	check('...and clears the magenta bar on three counts of imbalance',
+		noise.mex25 >= 0.15, noise.mex25);
+	check('...and is refused anyway, because none of it is lit',
+		ic.irLook(noise) === false && ic.look(noise) === 'none', noise.lit);
 }
 
 // ---------------------------------------------------------------------------
@@ -693,6 +720,20 @@ function runRest() {
 		check('pins wired but no monitor is only an observation',
 			ic.diagnose({ irCutPin1: 11 }, null, null)
 				.some(x => x.id === 'manual-only' && x.level === 'info'));
+		// But not about a filter nobody can drive. That observation offers the
+		// API as the thing moving the filter instead of dusk, and a filter set
+		// to off is not the API's to move either — so on a parked filter it
+		// contradicted the finding printed directly above it (#555).
+		const parkedManual = ic.diagnose({ irCutPin1: 11, irCut: 'off' },
+			null, null);
+		check('...but a parked filter is not offered the API as a way out',
+			!parkedManual.some(x => x.id === 'manual-only'),
+			parkedManual.map(x => x.id).join(', '));
+		check('...while still saying it is switched off',
+			parkedManual.some(x => x.id === 'ircut-parked'));
+		check('manual mode is still driveable, so it keeps the observation',
+			ic.diagnose({ irCutPin1: 11, irCut: 'manual' }, null, null)
+				.some(x => x.id === 'manual-only'));
 		const auto = ic.diagnose({ irCutPin1: 11, lightMonitor: true },
 			{ night: 0, ircut: 0, light: 0, src: 4 }, null);
 		check('an automatic monitor is an observation, not a fault',
@@ -758,6 +799,61 @@ function runRest() {
 				lightSensorPin: 15, maxThreshold: 14000 },
 			{ night: 0, ircut: 0, light: 0, src: 1 }, null)
 				.some(x => x.id === 'threshold-half'));
+	}
+
+	group('monitorView: the sun and the set times');
+	{
+		// Neither has a reading of the scene to plot, so the whole of what the
+		// panel can say is who decides and when the next switch is -- and a
+		// countdown the camera did not publish must not turn into one.
+		const sun = ic.monitorView({ lightMonitor: true, switchBy: 'sun' }, {
+			night_mode_source: 5, night_enabled: 1,
+			night_sun_elevation_millidegrees: -23400, night_sun_next_day_seconds: 15811,
+		});
+		check('the sun decides, and is drawn as a sentence', sun.mode === 'sun' && !sun.chart, sun.mode);
+		check('where it is, below the horizon', /23\.4° below the horizon/.test(sun.line), sun.line);
+		check('day again in hours, not hundreds of minutes', /Day again in 4 h 24 min/.test(sun.line), sun.line);
+
+		const white = ic.monitorView({ lightMonitor: true, switchBy: 'sun' }, {
+			night_mode_source: 5, night_enabled: 0, night_sun_elevation_millidegrees: 4100,
+		});
+		check('a night that does not come within the lookahead is not given a time',
+			!/Night in/.test(white.line) && /4\.1° above/.test(white.line), white.line);
+
+		const clock = ic.monitorView({ lightMonitor: true, switchBy: 'clock' }, {
+			night_mode_source: 6, night_enabled: 0, night_clock_next_night_seconds: 3546,
+		});
+		check('the set times decide', clock.mode === 'clock' && /Night in 59 min/.test(clock.line), clock.line);
+		const unsure = ic.monitorView({ lightMonitor: true, switchBy: 'sun' }, {
+			night_mode_source: 5, night_sun_elevation_millidegrees: -23400,
+			night_sun_next_day_seconds: 15811, night_sun_next_night_seconds: 60000,
+		}).line;
+		check('no countdown when day or night is itself unknown', !/ in \d/.test(unsure), unsure);
+	}
+
+	group('monitorView: the picture, when the sun or the clock hands back');
+	{
+		const handed = (st) => ic.monitorView({ lightMonitor: true, switchBy: 'sun' }, {
+			night_mode_source: 4, night_enabled: 0, night_auto_gain_milli: 1500,
+			night_sun_state: st,
+		}).line;
+		check('no place is said', /has not been said/.test(handed(1)), handed(1));
+		check('no clock is said', /clock is not set/.test(handed(2)), handed(2));
+		check('a night the sun does not reach is said', /does not get down/.test(handed(3)), handed(3));
+		check('a sun that could answer adds nothing', !/sun is not deciding/.test(handed(0)), handed(0));
+
+		const gated = (closed, n) => ic.monitorView({ lightMonitor: true, switchBy: 'pictureNearSun' }, {
+			night_mode_source: 4, night_enabled: 1, night_auto_gain_milli: 1100,
+			night_window_closed: closed, night_days_refused_total: n,
+		}).line;
+		check('a closed window is said, with the count since start', /No day until the window around dawn opens — refused 5 times since the camera started/.test(gated(1, 5)), gated(1, 5));
+		const byDay = ic.monitorView({ lightMonitor: true, switchBy: 'pictureNearSun' }, {
+			night_mode_source: 4, night_enabled: 0, night_auto_gain_milli: 1100,
+			night_window_closed: 1, night_days_refused_total: 5,
+		}).line;
+		check('a camera still in day is not being held by the window', !/window/.test(byDay), byDay);
+		check('an open window says nothing', !/window/.test(gated(0, 5)), gated(0, 5));
+		check('an absent window gauge says nothing either', !/window/.test(gated(undefined, undefined)));
 	}
 
 	group('monitorView: automatic mode says what night is waiting for');
@@ -1150,6 +1246,13 @@ function runRest() {
 			adcHi.marks[0].v === 40 && adcHi.marks[0].label === 'night' &&
 			adcHi.marks[1].v === 120 && adcHi.marks[1].label === 'day',
 			JSON.stringify(adcHi.marks));
+		// The legend says the side in words (OpenIPC/majestic#359), and the
+		// side follows the rule, not the name: whichever state the lower rule
+		// names lies below it, in either sense of the pad.
+		check('the lower rule\'s state lies below it and the upper\'s above, either way round',
+			adc.marks[0].side === 'below' && adc.marks[1].side === 'above' &&
+			adcHi.marks[0].side === 'below' && adcHi.marks[1].side === 'above',
+			JSON.stringify([adc.marks, adcHi.marks]));
 		check('...and the sentence reverses with it',
 			/reads high in daylight, so night is below the lower threshold/
 				.test(adcHi.line), adcHi.line);
@@ -1233,7 +1336,7 @@ function runRest() {
 	group('diagnose: parked actuators are decisions, not defects');
 	{
 		const wired = { irCutPin1: 11, irCutPin2: 10 };
-		const parked = Object.assign({ irCutEnabled: false }, wired);
+		const parked = Object.assign({ irCut: 'off' }, wired);
 		const f = ic.diagnose(parked, { night: 1, ircut: 0, light: 0 },
 			{ conflictS: 999, flips: 0 });
 		check('a parked filter is an observation',
@@ -1257,7 +1360,7 @@ function runRest() {
 		// in a file of its own — is gone with everything that went wrong with
 		// it (#367). Nothing here says it out loud, so nothing but this test
 		// would notice it coming back.
-		const unfitted = { irCutEnabled: false };
+		const unfitted = { irCut: 'off' };
 		check('switched off with nothing wired says nothing at all',
 			ic.diagnose(unfitted, { night: 0, ircut: 0, light: 0 },
 				{ conflictS: 999, flips: 0 }).length === 0);
@@ -1270,23 +1373,49 @@ function runRest() {
 			ic.diagnose({}, null, null).some(x => x.id === 'no-pins'));
 		const noPins = (nm) =>
 			ic.diagnose(nm, null, null).filter(x => x.id === 'no-pins')[0].detail;
-		check('and that finding names the switch that answers it',
-			/turn off "Drive the IR-cut filter"/.test(noPins({})));
+		check('and that finding names the setting that answers it',
+			/set "IR-cut filter" to off/.test(noPins({})));
 		check('alongside the fault itself',
 			/Nothing is connected to the filter/.test(noPins({})));
+		// The way back is BOTH modes, and in the words the select prints.
+		// auto hands the actuator to dusk and manual hands it to the operator
+		// — a sentence offering only auto tells a manual-mode owner the wrong
+		// thing, and the Live toggle stays live in manual precisely because it
+		// is a way to move the filter. Nothing pinned these sentences before,
+		// which is how they went on naming a switch the daemon had removed.
+		const parkedSaid = f.filter(x => x.id === 'ircut-parked')[0].detail;
+		check('a parked filter offers both ways back, as the page spells them',
+			/set back to auto/.test(parkedSaid) && /manual/.test(parkedSaid),
+			parkedSaid);
+		check('...and names no control the daemon has taken away',
+			!/Drive the /.test(parkedSaid), parkedSaid);
+
 		check('a parked lamp with wiring says so',
-			ic.diagnose({ backlightEnabled: false, backlightPin: 52 },
+			ic.diagnose({ backlight: 'off', backlightPin: 52 },
 				null, null)
 				.some(x => x.id === 'light-parked' && x.level === 'info'));
+		const lampSaid = ic.diagnose({ backlight: 'off', backlightPin: 52 },
+			null, null).filter(x => x.id === 'light-parked')[0].detail;
+		check('and the lamp offers both ways back too',
+			/set back to auto/.test(lampSaid) && /manual/.test(lampSaid),
+			lampSaid);
+		check('...naming the row rather than a switch that is gone',
+			/"Camera light"/.test(lampSaid) && !/Drive the /.test(lampSaid),
+			lampSaid);
 		check('a parked lamp on a PWM channel says so too',
-			ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 'pwm1' },
+			ic.diagnose({ backlight: 'off', irLightPwmChannel: 'pwm1' },
+				null, null)
+				.some(x => x.id === 'light-parked'));
+		check('...and so does one with only a white lamp',
+			ic.diagnose({ backlight: 'off', whiteLightPwmChannel: 'pwm3' },
 				null, null)
 				.some(x => x.id === 'light-parked'));
 		check('a lamp with no wiring at all stays silent',
-			!ic.diagnose({ backlightEnabled: false }, null, null)
+			!ic.diagnose({ backlight: 'off' }, null, null)
 				.some(x => x.id === 'light-parked'));
 		check('channel "none" is not wiring',
-			!ic.diagnose({ backlightEnabled: false, backlightPwmChannel: 'none' },
+			!ic.diagnose({ backlight: 'off', irLightPwmChannel: 'none',
+				whiteLightPwmChannel: 'none' },
 				null, null)
 				.some(x => x.id === 'light-parked'));
 	}
@@ -1330,6 +1459,68 @@ function runRest() {
 		check('day with a closed filter agrees',
 			!ic.diagnose(cfg, { night: 0, ircut: 0 }, { conflictS: 600, flips: 0 })
 				.some(x => x.id === 'conflict'));
+
+		// A filter told not to follow day/night is not merely allowed to
+		// disagree with the mode — disagreeing IS the setting working. The
+		// camera goes to night, the filter stays where its owner put it, and
+		// the two gauges differ for as long as that lasts, which is for ever.
+		// Convicting on it would make the one configuration that asks for this
+		// unusable, which is how it reached the daemon in the first place.
+		const notFollowing = Object.assign({ irCut: 'manual' }, cfg);
+		check('a filter that does not follow day/night may disagree with it',
+			!ic.diagnose(notFollowing, conflicted, { conflictS: 600, flips: 0 })
+				.some(x => x.id === 'conflict'));
+		// Absent is not off: every camera before this key followed.
+		check('...while an absent switch still means it follows',
+			ic.diagnose(cfg, conflicted, { conflictS: 600, flips: 0 })
+				.some(x => x.id === 'conflict'));
+		check('...and so does an explicit true',
+			ic.diagnose(Object.assign({ irCut: 'auto' }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
+		// It is the conflict rule that stands down, not the whole section: a
+		// camera hunting between day and night is hunting whatever the filter
+		// is doing.
+		check('the hunting finding is untouched by it',
+			ic.diagnose(notFollowing, conflicted, { conflictS: 0, flips: 9 })
+				.some(x => x.id === 'hunting'));
+
+		// An unquoted `off` in a hand-edited majestic.yaml is YAML's boolean
+		// false by the time it reaches a browser, and nothing on the way in
+		// retypes it. Reading that as following would raise the banner on
+		// exactly the camera the mode exists for.
+		check('an off that arrived as a boolean is still off',
+			!ic.diagnose(Object.assign({ irCut: false }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
+		check('...and the string spelling of it too',
+			!ic.diagnose(Object.assign({ irCut: 'false' }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
+		// A mode nobody recognises — a typo, or a value a newer daemon has
+		// learnt — reads as auto. That is the state every camera was in before
+		// the key existed, and the one that keeps ASKING: reading it as off
+		// would stand a real fault down on a misspelling.
+		check('an unreadable mode still follows day/night',
+			ic.diagnose(Object.assign({ irCut: 'atuo' }, cfg), conflicted,
+				{ conflictS: 600, flips: 0 }).some(x => x.id === 'conflict'));
+
+		// The clock, not just the sentence. Disagreement while the filter is
+		// not following is not a fault being tolerated, it is not a fault —
+		// so it must not be BANKED either, or turning following back on hands
+		// the finding an hour it was never entitled to.
+		const tr = ic.tracker();
+		tr.push(conflicted, 0, false);
+		const banked = tr.push(conflicted, 600, false);
+		check('time does not accrue while the filter may disagree',
+			banked.conflictS === 0, banked.conflictS);
+		const after = tr.push(conflicted, 601, true);
+		check('and the clock starts from when it began to matter',
+			after.conflictS === 0, after.conflictS);
+		check('...then runs normally', tr.push(conflicted, 661, true).conflictS === 60);
+		// Flips are the camera swinging between day and night, which it does
+		// whatever the filter follows.
+		const fl = ic.tracker();
+		fl.push({ night: 0, ircut: 0 }, 0, false);
+		fl.push({ night: 1, ircut: 1 }, 1, false);
+		check('flips are counted either way', fl.push({ night: 0, ircut: 0 }, 2, false).flips === 2);
 	}
 
 	group('projector: the local clock the countdown is read forward by');
@@ -1403,18 +1594,17 @@ function runRest() {
 		// Nothing filled in, nothing being ignored, nothing to say.
 		check('automatic mode deciding says nothing',
 			!said(both, 4));
-		// src 3 is the ADC pad, a different mechanism with no control on this
-		// page. It shared the sensor-pin sentence, which was merely loose
-		// until the advice became concrete — at which point it sent the owner
-		// of an ADC camera to clear a pin that is not what is deciding.
-		check('the ADC source is covered too', !!said(both, 3));
-		check('and named as a voltage reading, not as a wired sensor',
-			/analog voltage reading/.test(said(both, 3).detail) &&
-			!/daylight sensor is wired/.test(said(both, 3).detail),
-			said(both, 3).detail);
-		check('and is not told to clear a pin that is not deciding',
-			!/wiring map/.test(said(both, 3).detail) &&
-			/not configured on this page/.test(said(both, 3).detail));
+		// src 3 is the ADC pad, and the camera reads it only with both
+		// thresholds set: they are what its reading is compared against. So
+		// an ADC camera is a threshold camera in the ADC's units — the Legacy
+		// switch is on and the automatic rows are off the page, exactly as
+		// for src 2. It used to be treated like the pin, which first called
+		// the levels a working photocell switches at "ignored"
+		// (OpenIPC/majestic#367), then named hidden automatic rows and said
+		// turning the ADC off would hand day/night to them, when it hands it
+		// to the same pair read as gain.
+		check('the ADC deciding is left to the Legacy switch as well',
+			!said(both, 3), said(both, 3) && said(both, 3).detail);
 		// A camera that has not reported a source is not accused of anything.
 		check('an unknown source says nothing either', !said(both, null));
 
@@ -1431,6 +1621,8 @@ function runRest() {
 			said(thrOnly, 1).detail);
 		check('and the countdown clause is only spoken about automatic mode',
 			!/no countdown/.test(said(thrOnly, 1).detail));
+		check('under the ADC a threshold pair alone is not reported as ignored',
+			!said(thrOnly, 3));
 		check('both shadowed sets are named together',
 			/gain multiples and delays and the day and night thresholds/
 				.test(said(both, 1).detail.replace(/\s+/g, ' ')),
@@ -1504,6 +1696,150 @@ function runRest() {
 				({ danger: 3, warning: 2, info: 1 })[f.level] <=
 				({ danger: 3, warning: 2, info: 1 })[many[i - 1].level]),
 			many.map(x => x.level).join(','));
+	}
+
+	group('diagnose: the config that cannot settle, before anything is seen');
+	{
+		// The configuration a gk7205v300 + IMX335 flaps on. Every runtime
+		// check in this file needed somebody to be watching; these need
+		// nothing but the config, which is what a distant owner opening this
+		// page for ten seconds actually has.
+		const bad = { lightMonitor: true, irCutPin1: 11, irCutPin2: 10,
+			autoNightDelay: 5, autoDayDelay: 5,
+			autoNightGain: 1, autoDayGain: 200 };
+		const f = ic.diagnose(bad, null, null);
+		const taut = f.filter(x => x.id === 'nightgain-tautology')[0];
+		check('a 1x night threshold is called out with no sample at all',
+			!!taut);
+		check('and as a fault, not a nuisance',
+			taut && taut.level === 'danger', taut && taut.level);
+		check('it says why raising the delays will not help',
+			taut && /only makes the cycle slower/.test(taut.detail),
+			taut && taut.detail);
+		check('the out-of-range day gain is reported too',
+			f.some(x => x.id === 'range-autoDayGain'));
+		check('and the in-range night gain is not',
+			!f.some(x => x.id === 'range-autoNightGain'));
+
+		// 2x is the lowest threshold that can ever be false. A camera
+		// deliberately switching at the first doubling of gain is a normal
+		// setup and must sail through.
+		check('2x is a workable threshold and is left alone',
+			!ic.diagnose(Object.assign({}, bad, { autoNightGain: 2,
+				autoDayGain: 2 }), null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+
+		// Which mechanism is live is the camera's to say, not something to
+		// rebuild out of config keys -- the settings page states that rule
+		// for the notes it puts under these same fields. It matters here
+		// because the ADC source has no control on this page at all: a
+		// config-only test cannot name it, so a camera on its light sensor
+		// pad would be read as running on gain and accused of a fault that
+		// is not deciding anything.
+		const withSrc = (src) => ic.diagnose(
+			{ lightMonitor: true, irCutPin1: 11, autoNightGain: 1 },
+			{ night: 0, ircut: 0, src: src }, null);
+		check('the camera saying "automatic" is what raises it',
+			withSrc(4).some(x => x.id === 'nightgain-tautology'));
+		check('a camera on its ADC pad is not accused',
+			!withSrc(3).some(x => x.id === 'nightgain-tautology'));
+		check('nor one on a sensor pin it reported itself',
+			!withSrc(1).some(x => x.id === 'nightgain-tautology'));
+		check('nor one on thresholds it reported itself',
+			!withSrc(2).some(x => x.id === 'nightgain-tautology'));
+		// The fallback is the whole value of this finding: it must still
+		// answer before the first heartbeat, and on a daemon too old to
+		// publish the gauge at all.
+		check('with no sample yet the config still answers',
+			ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+				autoNightGain: 1 }, null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+
+		// The key is inert under any other source, and a finding about a
+		// setting that is not running sends someone to fix the wrong thing.
+		check('a camera on a light sensor pin is not accused of it',
+			!ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+				lightSensorPin: 66, autoNightGain: 1 }, null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+
+		// Both are declared as whole numbers. 2.5 sits inside the bounds and
+		// is still not a value the form or the API would take, so a bounds
+		// test alone lets through exactly the shape a hand edit produces.
+		const dec = ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+			autoNightGain: 2.5 }, { night: 0, ircut: 0, src: 4 }, null)
+			.filter(x => x.id === 'range-autoNightGain')[0];
+		check('a fractional gain is caught even though it is in range', !!dec);
+		check('and is named as the fraction it is, not as out of range',
+			dec && /not a whole number/.test(dec.detail), dec && dec.detail);
+
+		// One boot must not say a value is both shadowed and in use.
+		const shadowed = ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+			autoDayGain: 200 }, { night: 0, ircut: 0, src: 1 }, null)
+			.filter(x => x.id === 'range-autoDayGain')[0];
+		check('a shadowed out-of-range value is still reported', !!shadowed);
+		check('but not as one the camera is running on',
+			shadowed && !/running on it/.test(shadowed.detail),
+			shadowed && shadowed.detail);
+		check('and it says when it would bite instead',
+			shadowed && /would be used as written if/.test(shadowed.detail));
+		check('nor one on a threshold pair',
+			!ic.diagnose({ lightMonitor: true, irCutPin1: 11,
+				minThreshold: 100, maxThreshold: 200, autoNightGain: 1 },
+			null, null).some(x => x.id === 'nightgain-tautology'));
+		check('nor one with automatic day/night switched off',
+			!ic.diagnose({ lightMonitor: false, irCutPin1: 11,
+				autoNightGain: 1 }, null, null)
+				.some(x => x.id === 'nightgain-tautology'));
+	}
+
+	group('diagnose: the camera\'s own hour beats the browser\'s five minutes');
+	{
+		const cfg = { irCutPin1: 11, irCutPin2: 10, lightMonitor: true,
+			autoNightGain: 8, autoDayGain: 2 };
+		const at = (flips1h, trackFlips) => ic.diagnose(cfg,
+			{ night: 0, ircut: 0, src: 4, flips1h: flips1h },
+			{ flips: trackFlips, conflictS: 0 })
+			.filter(x => x.id === 'hunting')[0];
+
+		// The whole point: the tracker has seen nothing, because this page
+		// has only just loaded. The camera has been counting the entire time.
+		check('a flap is caught on a freshly opened page',
+			!!at(40, 0));
+		check('and reported as wear, not a nuisance',
+			at(40, 0).level === 'danger', at(40, 0).level);
+		check('the count is attributed to the camera, not to us',
+			/40 switches in the last hour, counted by the camera itself/
+				.test(at(40, 0).detail), at(40, 0).detail);
+		check('a settled camera says nothing however long we watch',
+			!at(0, 9));
+		check('and two honest switches in an hour are not a flap',
+			!at(2, 0));
+
+		// The fallback has to keep working, or every camera running a daemon
+		// older than these gauges silently loses the check it already had.
+		const old = ic.diagnose(cfg, { night: 0, ircut: 0, src: 4 },
+			{ flips: 3, conflictS: 0 }).filter(x => x.id === 'hunting')[0];
+		check('a daemon that publishes no count falls back to the tracker',
+			!!old);
+		check('and is still only a warning, since five minutes is weaker',
+			old.level === 'warning', old.level);
+		check('with the count worded as ours',
+			/3 switches in the last 5 minutes/.test(old.detail), old.detail);
+
+		// Two banners for one fault, with contradictory advice, is worse than
+		// one: sitting out a passing security lamp is the fix for a scene
+		// problem and is exactly wrong for a config that can never settle.
+		const both = ic.diagnose(
+			Object.assign({}, cfg, { autoNightGain: 1 }),
+			{ night: 0, ircut: 0, src: 4, flips1h: 40 },
+			{ flips: 0, conflictS: 0 });
+		const h = both.filter(x => x.id === 'hunting')[0];
+		check('with the cause already named, the advice defers to it',
+			!/security lamp/.test(h.detail), h.detail);
+		check('and says what the flapping is costing',
+			/wearing it out/.test(h.detail), h.detail);
+		check('the fault sorts above the symptom',
+			both[0].id === 'nightgain-tautology', both[0].id);
 	}
 
 	group('tracker: durations from the clock, never from a sample count');
@@ -1653,6 +1989,92 @@ function runRest() {
 		check('a good picture produces no reassurance either',
 			ic.diagnose(wired, day, {}, { look: 'colour', streak: 99 })
 				.every(x => x.level !== 'ok'));
+	}
+
+	// -----------------------------------------------------------------------
+	// The picture raises a suspicion and says so; the test is the measurement
+	// that answers it. A page that goes on asking after the answer is a page
+	// with no way out of a question it asked — which is what sent the reporter
+	// of #492 looking for a dismiss button (#498).
+	group('diagnose: a verdict settles what the picture only suspected');
+	{
+		const day = { night: 0, ircut: 0 };
+		const wired = { irCutPin1: 11, irCutPin2: 10 };
+		const open = { look: 'open', streak: 9 };
+		const said = (nm, tested) => ic.diagnose(nm, day, {}, open, tested)
+			.some(x => x.id === 'picture-open');
+		const ok = (nm) => ({ id: 'ok', wiring: ic.wiringKey(nm), at: 1 });
+
+		check('with no test on record the picture is still asked about',
+			said(wired, null));
+		check('a test that found the filter moves settles it',
+			!said(wired, ok(wired)));
+
+		// Each of the four settings a verdict depends on, because a verdict
+		// about one wiring is not a verdict about another. The daylight sensor
+		// and the lamp are deliberately NOT in that set: moving them changes
+		// nothing about what a pulse does.
+		check('...but not after the coils are swapped',
+			said(wired, ok({ irCutPin1: 10, irCutPin2: 11 })));
+		check('...nor after a coil is cleared',
+			said(wired, ok({ irCutPin1: 11 })));
+		check('...nor after the single-pad invert is turned on',
+			said(wired, ok({ irCutPin1: 11, irCutPin2: 10, irCutSingleInvert: true })));
+		check('...nor after the filter is parked and driven again',
+			said(wired, ok({ irCutPin1: 11, irCutPin2: 10, irCut: 'off' })));
+		check('while moving the daylight sensor keeps it',
+			!said(Object.assign({ lightSensorPin: 66 }, wired), ok(wired)));
+
+		// A verdict that found a FAULT is not an answer that silences: the
+		// fault is the news. The page forgets rather than storing those, and
+		// one arriving here from an older store must not silence either.
+		['inverted', 'stuck-open', 'stuck-closed', 'unclear'].forEach((id) =>
+			check('a verdict of "' + id + '" does not silence the picture',
+				said(wired, { id: id, wiring: ic.wiringKey(wired), at: 1 })));
+
+		// Shape, because the record comes out of a store anyone can edit.
+		check('a record with no wiring silences nothing',
+			said(wired, { id: 'ok' }));
+		check('an empty record silences nothing', said(wired, {}));
+
+		// It settles the PICTURE, and nothing else. A camera that cannot move
+		// its filter at all is a configuration fault, and no measurement of a
+		// different wiring speaks to it.
+		const noPins = ic.diagnose({}, day, {}, open,
+			{ id: 'ok', wiring: ic.wiringKey({}), at: 1 });
+		check('a settled verdict does not silence the missing-pin finding',
+			noPins.some(x => x.id === 'no-pins'), noPins.map(x => x.id).join(','));
+	}
+
+	group('wiringKey: what a verdict is about');
+	{
+		const k = ic.wiringKey;
+		check('two spellings of the same wiring agree',
+			k({ irCutPin1: 11, irCutPin2: 10 }) === k({ irCutPin1: '11', irCutPin2: '10' }));
+		// Absent and parked are different states of the same camera, and a
+		// verdict taken in one says nothing about the other.
+		check('an absent key is not the same as a set one',
+			k({ irCutPin1: 11 }) !== k({ irCutPin1: 11, irCutPin2: 0 }));
+		// GPIO 0 is a real pad, so it must not read as "no pad".
+		check('pad 0 is a pad', k({ irCutPin1: 0 }) !== k({}));
+		// Absent means the daemon drives the filter: an older majestic has no
+		// such key, and reading that as parked would discard every verdict
+		// taken on one.
+		check('an absent drive switch reads as on',
+			k({ irCutPin1: 11 }) === k({ irCutPin1: 11, irCut: 'auto' }));
+
+		// The stamp is whether the filter is DRIVEN, not which of the two
+		// driven modes it is in. A verdict says the filter moves when the
+		// camera pulses the pads; moving day/night in or out of the job does
+		// not change what a pulse does, and stamping the mode itself would
+		// throw a good measurement away the moment somebody turned automatic
+		// switching on.
+		check('manual and auto are the same wiring to a verdict',
+			k({ irCutPin1: 11, irCut: 'manual' }) === k({ irCutPin1: 11, irCut: 'auto' }));
+		check('...and off is not',
+			k({ irCutPin1: 11, irCut: 'off' }) !== k({ irCutPin1: 11, irCut: 'auto' }));
+		check('an unreadable mode reads as driven',
+			k({ irCutPin1: 11, irCut: 'atuo' }) === k({ irCutPin1: 11, irCut: 'auto' }));
 	}
 
 	// -----------------------------------------------------------------------

@@ -33,7 +33,14 @@ Cache-Control: no-store
 Pragma: no-cache
 
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="<% attr_escape "${webui_theme:=dark}" %>">
+<%
+# The document's language. Every page but one is English; the MAX page is
+# Russian throughout, and a page that says lang="en" while its text is Russian
+# tells a screen reader to pronounce it with the wrong voice. A page sets
+# page_lang before including this file, exactly as it may set page_title.
+: "${page_lang:=en}"
+%>
+<html lang="<% attr_escape "$page_lang" %>" data-bs-theme="<% attr_escape "${webui_theme:=dark}" %>">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
@@ -64,6 +71,7 @@ Pragma: no-cache
 	<script src="/a/update-check.js" defer></script>
 	<script src="/a/storage-verdict.js" defer></script>
 	<script src="/a/storage-check.js" defer></script>
+	<script src="/a/share.js" defer></script>
 </head>
 
 <body id="page-<% attr_escape "$pagename" %>" class="<% attr_escape "$fw_variant" %>">
@@ -95,6 +103,16 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownCamera" role="button">Camera</a>
 						<ul aria-labelledby="dropdownCamera" class="dropdown-menu">
 							<li><a class="dropdown-item" href="camera.cgi"><% page_label camera %></a></li>
+							<!-- On a camera whose majestic counts at all, and whose
+							     firmware carries the page: one without object detection
+							     has no counting section, and the page would only ever say
+							     it cannot count; a build without the page option
+							     (BR2_PACKAGE_MAJESTIC_WEBUI_COUNTING) has nothing to link to.
+							     Under Camera rather than on the bar: the bar is for the
+							     pages everyone opens. -->
+							<% if [ "$counting_support" = 1 ] && [ -f /var/www/cgi-bin/counting.cgi ]; then %>
+								<li><a class="dropdown-item" href="counting.cgi"><% page_label counting %></a></li>
+							<% fi %>
 							<!-- Only where the USB port can actually be switched. Same
 							     shape as the SD Card guard: a camera whose port is
 							     soldered to one role has nothing to choose, and the
@@ -106,6 +124,7 @@ Pragma: no-cache
 								<li><a class="dropdown-item" href="usb.cgi"><% page_label usb %></a></li>
 							<% fi %>
 							<li><a class="dropdown-item" href="stream-urls.cgi"><% page_label stream-urls %></a></li>
+							<li><a class="dropdown-item" href="raw.cgi"><% page_label raw %></a></li>
 							<li><a class="dropdown-item" href="config.cgi"><% page_label config %></a></li>
 						</ul>
 					</li>
@@ -114,6 +133,14 @@ Pragma: no-cache
 						<ul aria-labelledby="dropdownSystem" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Setup</h6></li>
 							<li><a class="dropdown-item" href="network.cgi"><% page_label network %></a></li>
+							<!-- A cellular modem's messages and short codes. Shown where the
+							     firmware carries the page -- it is a build option, for boards
+							     with a modem -- and there is a serial port a modem could answer
+							     on; the page itself says so when that port turns out not to be
+							     one. -->
+							<% if [ -x /usr/sbin/modem-at ] && [ -n "$(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null)" ]; then %>
+								<li><a class="dropdown-item" href="sms.cgi"><% page_label sms %></a></li>
+							<% fi %>
 							<li><a class="dropdown-item" href="time.cgi"><% page_label time %></a></li>
 							<li><a class="dropdown-item" href="access.cgi"><% page_label access %></a></li>
 							<li><h6 class="dropdown-header">Maintenance</h6></li>
@@ -155,6 +182,19 @@ Pragma: no-cache
 						<a aria-expanded="false" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#" id="dropdownServices" role="button">Services</a>
 						<ul aria-labelledby="dropdownServices" class="dropdown-menu">
 							<li><h6 class="dropdown-header">Notifications</h6></li>
+							<!-- First, and hidden from almost everyone.
+							     MAX is a Russian service whose bots only a Russian
+							     business can register, and this page is Russian
+							     throughout, so it is revealed only to a browser that
+							     says its reader speaks Russian -- for whom it is the
+							     most likely choice of the three, which is why it leads.
+							     Everyone else sees the list starting at OpenWall, with
+							     no gap where this was: an entry nobody else can read is
+							     not a thing they are missing.
+							     main.js does the revealing. Hiding it is not access
+							     control -- the page still answers a direct link, which
+							     is what a bookmark and the webhook URLs rely on. -->
+							<li id="nav-max" hidden><a class="dropdown-item" href="max.cgi"><% page_label max %></a></li>
 							<li><a class="dropdown-item" href="openwall.cgi"><% page_label openwall %></a></li>
 							<li><a class="dropdown-item" href="telegram.cgi"><% page_label telegram %></a></li>
 							<li><a class="dropdown-item" href="ntfy.cgi"><% page_label ntfy %></a></li>
@@ -188,7 +228,8 @@ Pragma: no-cache
 						</a>
 						<ul aria-labelledby="cam-switch-toggle" class="dropdown-menu dropdown-menu-end" id="cam-switch-menu"></ul>
 					</li>
-					<li class="nav-item nav-push-end"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
+					<li class="nav-item nav-push-end"><a class="nav-link" data-camera="<% attr_escape "$network_hostname" %>" href="#" id="nav-share" title="Share this camera by link">Share</a></li>
+					<li class="nav-item"><a class="nav-link" href="#" id="nav-logout" title="Sign out">Sign out</a></li>
 				</ul>
 			</div>
 		</div>
@@ -196,13 +237,46 @@ Pragma: no-cache
 
 <%
 # A camera that recovered from a crash raises it on every page until the owner
-# looks: the firmware leaves /etc/crash/pending (a preserved kernel log) or
-# /etc/crash/failsafe (a boot-failure fall-back) and this links to the report.
+# has done something about it: the firmware leaves /etc/crash/pending (a
+# preserved kernel log) or /etc/crash/failsafe (a boot-failure fall-back), and
+# keeps earlier crashes under /etc/crash/older until they are dismissed;
+# majestic leaves /etc/crash/majestic.dump when it dies of a signal, and the
+# firmware /etc/crash/majestic.loop when it stopped restarting it. This links to
+# the report.
+# A crash already sent to openipc.org -- by Send, or on its own -- raises
+# nothing: sending is what the banner asks for, and with sending on its own the
+# owner would otherwise have to Dismiss every crash cron had already sent.
+# Which crashes are sent is sbin/crashlog-send's to say, from its own notes
+# (--unsent). That reads every dump through md5sum, so its answer is kept in
+# /tmp against a listing of /etc/crash, and asked again only when a file there
+# changed. majestic stopped is raised however it was sent: there is no video
+# until someone acts.
 # Suppressed on the report page itself, which says the same thing in full.
-if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ]; } && [ "$pagename" != "crashlog" ]; then %>
+crash_banner() {
+	local key
+	[ -f /etc/crash/majestic.loop ] && ! pidof majestic >/dev/null 2>&1 && return 0
+	key=$(ls -ln --full-time /etc/crash /etc/crash/older 2>/dev/null)
+	[ -n "$key" ] || { /usr/sbin/crashlog-send --unsent; return; }
+	key=$(echo "$key" | md5sum | cut -d' ' -f1)
+	case "$(cat /tmp/crashlog-banner 2>/dev/null)" in
+	"$key yes") return 0 ;;
+	"$key no") return 1 ;;
+	esac
+	if /usr/sbin/crashlog-send --unsent; then
+		echo "$key yes" > /tmp/crashlog-banner
+		return 0
+	fi
+	echo "$key no" > /tmp/crashlog-banner
+	return 1
+}
+if [ "$pagename" != "crashlog" ] && [ -d /etc/crash ] && crash_banner; then %>
 	<div class="container mt-3">
 		<div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0" role="alert">
+			<% if [ -f /etc/crash/majestic.loop ] && ! pidof majestic >/dev/null 2>&1; then %>
+			<span><strong>majestic kept crashing and was stopped: there is no video.</strong> Open the crash report.</span>
+			<% else %>
 			<span><strong>This camera recovered from a crash.</strong> Open the crash report.</span>
+			<% fi %>
 			<a class="btn btn-sm btn-warning" href="crashlog.cgi">View crash report</a>
 		</div>
 	</div>
@@ -281,10 +355,6 @@ if { [ -f /etc/crash/pending ] || [ -f /etc/crash/failsafe ]; } && [ "$pagename"
 <% if [ "${network_macaddr#00:00:23:34:45:}" != "$network_macaddr" ] && [ -f /etc/shadow- ] && [ -n $(grep root /etc/shadow- | cut -d: -f2) ]; then %>
 <% if command -v get_mac >/dev/null 2>&1; then mac_advice="Set a different one here."; else mac_advice="Firmware that replaces it at boot is available, and upgrading is the lasting fix."; fi %>
 <% notice danger "<b>This camera's MAC address is a placeholder</b> &mdash; <code>$(esc "$network_macaddr")</code> is one of the addresses a bootloader hands out when the camera's own was never set, and two cameras carrying it on one network will collide. $mac_advice" '<a class="btn btn-sm btn-primary" href="network.cgi#mac">Set the MAC address</a>' %>
-<% fi %>
-
-<% if [ ! -e $(get_config) ]; then %>
-<% notice danger '<b>No camera configuration found</b> &mdash; there is no settings file for the camera to read.' '<a class="btn btn-sm btn-primary" href="config.cgi">Configuration file</a>' %>
 <% fi %>
 
 <%# Warning rather than danger: it reports something you asked for and have not
