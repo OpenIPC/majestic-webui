@@ -269,11 +269,16 @@
 			.finally(() => { busy = false; });
 	}
 
-	function callPreset(p) {
-		if (busy) return;
+	function callPreset(p, onDone) {
+		if (busy) {
+			if (onDone) onDone();
+			return;
+		}
 		busy = true;
 		modal.hidden = true;
-		document.dispatchEvent(new CustomEvent('mj-ptz-move', { detail: { durationMs: 14000 } }));
+		if (p.run_af) {
+			document.dispatchEvent(new CustomEvent('mj-ptz-move', { detail: { durationMs: 14000 } }));
+		}
 		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=goto&id=' + encodeURIComponent(p.id), {
 			method: 'POST',
 			credentials: 'same-origin'
@@ -286,7 +291,10 @@
 				}
 			})
 			.catch(() => {})
-			.finally(() => { busy = false; });
+			.finally(() => {
+				busy = false;
+				if (onDone) onDone();
+			});
 	}
 
 	function deletePreset(id) {
@@ -365,8 +373,7 @@
 			tourIdx = (tourIdx + 1) % presets.length;
 			const p = presets[tourIdx];
 			updateTourUi('Touring: #' + p.id + ' ' + p.name + ' (' + (tourIdx + 1) + '/' + presets.length + ')');
-			callPreset(p);
-			scheduleNextTourStep();
+			callPreset(p, scheduleNextTourStep);
 		}, dwellSec * 1000);
 	}
 
@@ -380,8 +387,7 @@
 		tourIdx = 0;
 		const p = presets[0];
 		updateTourUi('Touring: #' + p.id + ' ' + p.name + ' (1/' + presets.length + ')');
-		callPreset(p);
-		scheduleNextTourStep();
+		callPreset(p, scheduleNextTourStep);
 	}
 
 	const dwellSelect = modal.querySelector('[data-pr="dwell"]');
