@@ -883,16 +883,18 @@
 	// bounded and never dropped — a stop that vanished leaves a motor running
 	// to its deadline, which is the one failure with a physical cost.
 	let outstanding = 0;
-	let pendingTrackPan = 0, pendingTrackTilt = 0, trackFlushTimer = 0, activeTrack = null;
+	let pendingTrackPan = 0, pendingTrackTilt = 0, pendingTrackFocus = 0, trackFlushTimer = 0, activeTrack = null;
 	function flushTrackPos() {
 		clearTimeout(trackFlushTimer);
 		trackFlushTimer = 0;
 		const dp = Math.round(pendingTrackPan);
 		const dt = Math.round(pendingTrackTilt);
-		if (!dp && !dt) return;
+		const df = Math.round(pendingTrackFocus);
+		if (!dp && !dt && !df) return;
 		pendingTrackPan = 0;
 		pendingTrackTilt = 0;
-		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=track&pan_ms=' + dp + '&tilt_ms=' + dt, {
+		pendingTrackFocus = 0;
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=track&pan_ms=' + dp + '&tilt_ms=' + dt + '&focus_ms=' + df, {
 			method: 'POST',
 			credentials: 'same-origin'
 		}).catch(() => {});
@@ -906,6 +908,7 @@
 		const elapsed = Math.max(30, Math.min(Date.now() - activeTrack.startMs, 5000));
 		pendingTrackPan += activeTrack.dp * elapsed * activeTrack.scale;
 		pendingTrackTilt += activeTrack.dt * elapsed * activeTrack.scale;
+		pendingTrackFocus += (activeTrack.df || 0) * elapsed;
 		activeTrack = null;
 	}
 	// `pct`, when given, is this move's speed (the stick's); without it the
@@ -930,11 +933,23 @@
 				pendingTrackTilt += dt * ms * spdScale;
 				scheduleTrackFlush();
 			} else {
-				if (!activeTrack || activeTrack.dp !== dp || activeTrack.dt !== dt) {
+				if (!activeTrack || activeTrack.dp !== dp || activeTrack.dt !== dt || activeTrack.df) {
 					commitActiveTrack();
-					activeTrack = { dp, dt, startMs: Date.now(), scale: spdScale };
+					activeTrack = { dp, dt, df: 0, startMs: Date.now(), scale: spdScale };
 				} else {
 					activeTrack.scale = spdScale;
+				}
+			}
+		} else if (!isStop && (verb === 'near' || verb === 'far')) {
+			const df = verb === 'far' ? 1 : -1;
+			if (ms > 0) {
+				commitActiveTrack();
+				pendingTrackFocus += df * ms;
+				scheduleTrackFlush();
+			} else {
+				if (!activeTrack || activeTrack.df !== df) {
+					commitActiveTrack();
+					activeTrack = { dp: 0, dt: 0, df, startMs: Date.now(), scale: 1 };
 				}
 			}
 		} else if (isStop) {

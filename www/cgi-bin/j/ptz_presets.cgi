@@ -83,7 +83,7 @@ drive_axis_ms() {
 		else
 			drv_chunk="$drv_rem"
 		fi
-		/usr/bin/motors-cli --socket /run/motorsd.sock "$drv_dir" "$drv_chunk" >/dev/null 2>&1 || return 1
+		/usr/bin/motors-cli --socket /run/motorsd.sock --role automation "$drv_dir" "$drv_chunk" >/dev/null 2>&1 || return 1
 		drv_rem=$((drv_rem - drv_chunk))
 		if [ "$drv_rem" -ge 30 ]; then
 			usleep 100000 2>/dev/null || sleep 1
@@ -171,7 +171,7 @@ restore_zoom_and_af() {
 			if [ "$zdir" = "done" ] || [ -z "$zdir" ]; then
 				break
 			fi
-			/usr/bin/motors-cli --socket /run/motorsd.sock "$zdir" "$zms" >/dev/null 2>&1
+			/usr/bin/motors-cli --socket /run/motorsd.sock --role automation "$zdir" "$zms" >/dev/null 2>&1 || return 1
 			usleep 200000 2>/dev/null || sleep 1
 			step=$((step + 1))
 		done
@@ -436,8 +436,10 @@ EOF
 		read_pos
 		case "$IN_PAN" in ''|*[!0-9-]*) IN_PAN=0 ;; esac
 		case "$IN_TILT" in ''|*[!0-9-]*) IN_TILT=0 ;; esac
+		case "$IN_FOCUS" in ''|*[!0-9-]*) IN_FOCUS=0 ;; esac
 		PAN_MS=$((PAN_MS + IN_PAN))
 		TILT_MS=$((TILT_MS + IN_TILT))
+		FOCUS_MS=$((FOCUS_MS + IN_FOCUS))
 		write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS"
 		emit_list ""
 		;;
