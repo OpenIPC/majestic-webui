@@ -587,13 +587,23 @@
 		return (baseSpeedPct / 100) * zScale;
 	}
 	let spdLabelEl = null;
+	let spdMinusBtn = null;
+	let spdPlusBtn = null;
 	function refreshSpeedLabel() {
 		if (!spdLabelEl) return;
 		const eff = Math.max(10, Math.round(effectiveSpeedScale() * 100));
-		spdLabelEl.textContent = zoomScaleOn && eff !== baseSpeedPct ? `${eff}%Z` : `${baseSpeedPct}%`;
+		spdLabelEl.textContent = zoomScaleOn && eff !== baseSpeedPct ? `${eff}/${baseSpeedPct}%` : `${baseSpeedPct}%`;
 		spdLabelEl.title = `PTZ speed ${baseSpeedPct}%` +
 			(zoomScaleOn ? ` · Zoom-scaled ${eff}% (click to toggle auto zoom scale)` : ' · Zoom scaling off (click to enable)');
 		spdLabelEl.style.opacity = zoomScaleOn ? '1' : '0.65';
+		if (spdMinusBtn) {
+			spdMinusBtn.disabled = baseSpeedPct <= 20;
+			spdMinusBtn.style.opacity = spdMinusBtn.disabled ? '0.35' : '1';
+		}
+		if (spdPlusBtn) {
+			spdPlusBtn.disabled = baseSpeedPct >= 100;
+			spdPlusBtn.style.opacity = spdPlusBtn.disabled ? '0.35' : '1';
+		}
 	}
 
 	function updateZoomLabel(mag) {
@@ -1218,9 +1228,11 @@
 			try { localStorage.setItem('openipc.ptz.zoomScale', zoomScaleOn ? '1' : '0'); } catch (err) {}
 			refreshSpeedLabel();
 		});
-		spdRow.appendChild(mkSpdBtn('−', 'Decrease PTZ speed', -20));
+		spdMinusBtn = mkSpdBtn('−', 'Decrease PTZ speed', -20);
+		spdPlusBtn = mkSpdBtn('+', 'Increase PTZ speed', 20);
+		spdRow.appendChild(spdMinusBtn);
 		spdRow.appendChild(spdLabelEl);
-		spdRow.appendChild(mkSpdBtn('+', 'Increase PTZ speed', 20));
+		spdRow.appendChild(spdPlusBtn);
 		pad.appendChild(spdRow);
 		refreshSpeedLabel();
 	}
