@@ -115,13 +115,14 @@ motor_ok=0
 profile=""
 case "$ptz_control" in
 	# Lenses majestic itself drives: the camera holds the wire and the WebUI asks
-	# it for a verb (mj_ptz). Two are Pelco-shaped serial protocols; ms41908 is the
+	# it for a verb (mj_ptz). Two are Pelco-shaped serial protocols and visca is a
+	# Sony VISCA zoom block's lens MCU on a UART (the N51813L); ms41908 is the
 	# Panasonic MS41908M SPI stepper on the Hi3516A V100 boards, driven off the ISP
 	# by the majestic-af plugin -- no tty, but the same mj_ptz relationship, so the
 	# same action path serves it. gpiostep is a pan/tilt head of GPIO steppers
 	# that majestic-af drives through the gpiostep kernel module, likewise. This used to exec /usr/bin/btzoom(-xm), which
 	# opened the tty the camera was already driving for autofocus and raced it.
-	pelco-d|pelco-xm|ms41908|gpiostep)
+	pelco-d|pelco-xm|ms41908|gpiostep|visca)
 		mj_ptz > /dev/null 2>&1
 		case $? in
 			0) pelco_ok=1 ;;

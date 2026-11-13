@@ -1051,9 +1051,10 @@ update_caminfo() {
 				ptz_support="1"; ptz_backend="gpio"
 			fi
 			;;
-		pelco-d|pelco-xm|ms41908|gpiostep)
-			# All four are motors majestic itself drives -- the two XiongMai
-			# near-Pelco variants over a UART, the Panasonic MS41908M SPI
+		pelco-d|pelco-xm|ms41908|gpiostep|visca)
+			# All five are motors majestic itself drives -- the two XiongMai
+			# near-Pelco variants over a UART, a Sony VISCA zoom block's lens
+			# MCU over a UART (the XiongMai N51813L), the Panasonic MS41908M SPI
 			# stepper on the Hi3516A V100 boards, which has no UART MCU and is
 			# stepped straight off the ISP by the majestic-af plugin, and a
 			# pan/tilt head of plain GPIO steppers behind the gpiostep kernel
