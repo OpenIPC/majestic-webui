@@ -109,6 +109,7 @@ echo "$VERTICAL" | grep -qE '^-?[0-9]{1,2}$' || VERTICAL=0
 ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 
 pelco_ok=0
+ptz_line=""
 pelco_why=""
 gpio_ok=0
 motor_ok=0
@@ -123,7 +124,7 @@ case "$ptz_control" in
 	# that majestic-af drives through the gpiostep kernel module, likewise. This used to exec /usr/bin/btzoom(-xm), which
 	# opened the tty the camera was already driving for autofocus and raced it.
 	pelco-d|pelco-xm|ms41908|gpiostep|visca)
-		mj_ptz > /dev/null 2>&1
+		ptz_line=$(mj_ptz 2>/dev/null)
 		case $? in
 			0) pelco_ok=1 ;;
 			3) pelco_why="This camera has no PTZ driver installed: add the majestic-af package to its firmware." ;;
@@ -158,7 +159,10 @@ for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
 		pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
 	esac
 done
-# The same default update_caminfo applies: a gpiostep head is pan and tilt.
+# The same defaults update_caminfo applies: what majestic lists for a lens it
+# drives, else pan and tilt for a gpiostep head.
+[ -z "$ptz_caps" ] && [ -n "$ptz_line" ] && ptz_caps=" $(mj_ptz_axes "$ptz_line")"
+[ -z "${ptz_caps# }" ] && ptz_caps=""
 [ -z "$ptz_caps" ] && [ "$ptz_control" = gpiostep ] && ptz_caps=" pan tilt"
 
 has_cap() {
