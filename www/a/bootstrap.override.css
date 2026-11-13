@@ -5368,11 +5368,18 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 .mj-ptz-pad > .mj-ptz-gear {
 	position: absolute;
 	top: 3px;
+	z-index: 2;
 	width: 2.625rem;
 	height: 2.625rem;
 	background: transparent;
 	border: 0;
+	border-radius: var(--bs-border-radius);
 	backdrop-filter: none;
+}
+
+.mj-ptz-fold:hover {
+	background: rgba(255, 255, 255, 0.1);
+	color: #fff;
 }
 
 .mj-ptz-pad > .mj-ptz-fold {
@@ -5530,7 +5537,10 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 	}
 }
 
-.mj-ptz.mj-ptz-folded > :not(.mj-ptz-fold),
+.mj-ptz.mj-ptz-folded > :not(.mj-ptz-fold) {
+	display: none !important;
+}
+
 .mj-ptz.mj-ptz-folded .mj-ptz-fold-close,
 .mj-ptz:not(.mj-ptz-folded) .mj-ptz-fold-open {
 	display: none;
@@ -5687,7 +5697,8 @@ body.mj-fill main.mj-fullbleed > :not(.mj-player) {
 }
 
 .mj-ptz-stop {
-	color: rgba(255, 255, 255, 0.55);
+	color: #c8ccd6;
+	border-radius: var(--bs-border-radius);
 }
 
 /* The stick (preview-ptz.js): the Pelco pad's centre is its knob, where the

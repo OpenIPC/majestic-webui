@@ -88,7 +88,8 @@
 				.then((c) => {
 					// A missing or malformed image section is a camera not heard
 					// from, not one that is upright.
-					const t = PO ? PO.of(c && c.image) : null;
+					const img = c && c.image;
+					const t = PO ? PO.of(img && img.rotate === undefined ? { mirror: false, flip: false, rotate: '0' } : img) : null;
 					if (!t) return Promise.reject(new Error('no orientation'));
 					turn = t;
 					lay();
@@ -103,6 +104,7 @@
 		return turnP;
 	};
 	// A direction can go to the head only once the picture's turn is known.
+	learnTurn().catch(() => {});
 	const steerable = () => {
 		if (!PO || turn) return true;
 		learnTurn().catch(() => {});
@@ -348,8 +350,11 @@
 		'M5 7.5 2.5 10 5 12.5M15 7.5l2.5 2.5-2.5 2.5"></path>' +
 		'<path class="mj-ptz-fold-close" d="M5 5l10 10M15 5 5 15"></path></svg>';
 	const OPEN_KEY = 'mj-ptz-open';
-	let open = false;
-	try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch (e) { /* ignore */ }
+	let open = !(small && small.matches);
+	try {
+		const saved = localStorage.getItem(OPEN_KEY);
+		if (saved === '1' || saved === '0') open = saved === '1';
+	} catch (e) { /* ignore */ }
 	// Follow is a setting of the pad, not a control on it: on a small
 	// stage it waits behind a gear, in a popover beside the column, so the
 	// open pad is the arrows alone -- four stacked panels covered half a phone
@@ -438,10 +443,8 @@
 	const stopBtn = pad ? pad.querySelector('[data-act="stop"]') : null;
 	const PK = window.MajesticPtzStick;
 	const stick = !!(stopBtn && PK);
-	const knob = document.createElement('span');
-	knob.className = 'mj-ptz-knob';
-	knob.setAttribute('aria-hidden', 'true');
-	if (stopBtn) stopBtn.replaceWith(stick ? knob : grip);
+	const knob = stopBtn || document.createElement('span');
+	if (stopBtn && !stick) stopBtn.replaceWith(grip);
 	if (stick) pad.classList.add('mj-ptz-stick');
 	const gripInPad = !!stopBtn && !stick;
 	let corner = 'br';
@@ -491,18 +494,18 @@
 	});
 
 	const applyFold = () => {
-		const folded = !!(small && small.matches) && !open;
+		const folded = !open;
 		mount.classList.toggle('mj-ptz-folded', folded);
-		mount.classList.toggle('mj-ptz-foldable', !!(small && small.matches));
+		mount.classList.toggle('mj-ptz-foldable', true);
 		// Where the fold and the gear stand: folded, the fold alone in the
 		// mount; open on a small stage, in the pad's corners or the strip.
-		if (!isSmall() || folded) {
+		if (folded) {
 			mount.appendChild(fold);
 			// The handle where the Pelco pad has none of its own: first in the
 			// column on a large stage.
 			if (!gripInPad) mount.insertBefore(grip, mount.firstChild);
 		} else if (corners) {
-			pad.appendChild(gear);
+			if (isSmall()) pad.appendChild(gear);
 			pad.appendChild(fold);
 			// A pad with empty corners but no Stop of its own (an eight-way
 			// pad missing its diagonals): the handle takes the bottom-left
@@ -524,9 +527,14 @@
 		fold.setAttribute('aria-label', say);
 		fold.title = say;
 	};
-	fold.addEventListener('click', () => {
+	fold.addEventListener('pointerdown', (e) => {
+		e.stopPropagation();
+	});
+	fold.addEventListener('click', (e) => {
+		e.stopPropagation();
+		e.preventDefault();
 		open = mount.classList.contains('mj-ptz-folded');
-		try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch (e) { /* ignore */ }
+		try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch (err) { /* ignore */ }
 		applyFold();
 	});
 	mount.appendChild(fold);
@@ -604,12 +612,22 @@
 		const els = [$('#mj-ptz-xy-label'), $('#mj-ptz-xy-label-alt')];
 		els.forEach(el => {
 			if (!el) return;
+			el.style.whiteSpace = 'pre-line';
 			if (state) {
 				el.textContent = state;
 			} else {
-				el.textContent = 'Pan/Tilt (X: ' + panJog + ' Y: ' + tiltJog + ')';
+				el.textContent = 'Pan/Tilt\n(X: ' + panJog.toFixed(1) + ' Y: ' + tiltJog.toFixed(1) + ')';
 			}
 		});
+	}
+	function trackPanTilt(verb, label, step) {
+		if (!verb) return;
+		const delta = typeof step === 'number' && step > 0 ? step : 0.2;
+		if (verb.indexOf('left') >= 0) panJog -= delta;
+		if (verb.indexOf('right') >= 0) panJog += delta;
+		if (verb.indexOf('up') >= 0) tiltJog += delta;
+		if (verb.indexOf('down') >= 0) tiltJog -= delta;
+		updateXyLabel(label || null);
 	}
 
 	function parseLiveMag(str) {
@@ -838,6 +856,9 @@
 		if (ms) url += '&ms=' + ms;
 		if (pct != null && PS) url += PS.query(verb, pct);
 		if (!isStop && outstanding >= 3) return;
+		if (!isStop && /(?:left|right|up|down|wide|tele)/.test(verb)) {
+			try { window.dispatchEvent(new CustomEvent('mj:ptz-moved', { detail: { verb } })); } catch (e) {}
+		}
 		outstanding++;
 		return apiFetch(url, { method: 'POST', credentials: 'same-origin' })
 			// The body decides, not the status. majestic answers /ptz with a
@@ -1045,10 +1066,10 @@
 		else if (act === 'close') updateIrisLabel('Close…');
 		else if (act === 'near') updateFocusLabel(lastFv, false, 'Near…');
 		else if (act === 'far') updateFocusLabel(lastFv, false, 'Far…');
-		else if (act === 'left') { panJog--; updateXyLabel('Pan Left…'); }
-		else if (act === 'right') { panJog++; updateXyLabel('Pan Right…'); }
-		else if (act === 'up') { tiltJog++; updateXyLabel('Tilt Up…'); }
-		else if (act === 'down') { tiltJog--; updateXyLabel('Tilt Down…'); }
+		else if (act === 'left') trackPanTilt('left', 'Pan Left…');
+		else if (act === 'right') trackPanTilt('right', 'Pan Right…');
+		else if (act === 'up') trackPanTilt('up', 'Tilt Up…');
+		else if (act === 'down') trackPanTilt('down', 'Tilt Down…');
 		if (act === 'wide' || act === 'tele') {
 			fire(btn, HOLD_MS);
 			holdTimer = setInterval(() => fire(btn, HOLD_MS), TICK_MS);
@@ -1232,6 +1253,7 @@
 		const send = (ms) => {
 			if (!s || !s.verb) return;
 			if (!ms) s.long = true;
+			trackPanTilt(s.verb, null, ms ? ms / 500 : 0.5);
 			move(s.verb, ms, false, s.pct);
 		};
 		const steer = (e) => {
@@ -1278,10 +1300,11 @@
 			pad.classList.remove('mj-ptz-sticking');
 			if (stage) stage.classList.remove('mj-steering');
 			light(null);
+			updateXyLabel();
 		};
 		// The settings, the fold and the handle are buttons on the pad, not
 		// part of the stick.
-		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip'));
+		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip, .mj-ptz-stop'));
 		pad.addEventListener('touchstart', (e) => { if (!own(e.target) && e.cancelable) e.preventDefault(); }, { passive: false });
 		pad.addEventListener('pointerdown', (e) => {
 			if (own(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;

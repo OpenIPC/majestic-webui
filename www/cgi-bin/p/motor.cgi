@@ -115,7 +115,7 @@ focus_label="Focus"
 		<span>Far</span>
 	</button>
 	<% fi %>
-	<% if [ "$af_support" = 1 ]; then %>
+	<% if has_cap focus; then %>
 	<!-- One-shot contrast autofocus: majestic's engine drives the same
 	     focus motor off the ISP's focus statistic. The icon is the focus
 	     bracket family with a filled subject: the camera choosing the
@@ -181,7 +181,7 @@ focus_label="Focus"
 	<span class="mj-ptz-void"></span>
 	<% fi %>
 	<button type="button" class="mj-ptz-btn mj-ptz-stop" data-act="stop" aria-label="Stop" title="Stop">
-		<svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="1.4" fill="currentColor"></rect></svg>
+		<svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="2.2" fill="currentColor"></rect></svg>
 	</button>
 	<% if has_cap pan; then %>
 	<button type="button" class="mj-ptz-btn" data-act="right" aria-label="Pan right">

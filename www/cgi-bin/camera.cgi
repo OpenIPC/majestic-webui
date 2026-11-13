@@ -94,7 +94,7 @@ fi
 boot_motor_backend=$(echo -n "$ptz_backend" | mj_json_escape)
 boot_motor_axes=$(echo -n "$ptz_caps" | sed 's/^ *//; s/  */ /g' | mj_json_escape)
 [ -n "$ptz_backend" ] && boot_motor_available=true || boot_motor_available=false
-[ -n "$af_support" ] && boot_motor_af=true || boot_motor_af=false
+has_cap focus && boot_motor_af=true || boot_motor_af=false
 %>
 
 <%in p/header.cgi %>

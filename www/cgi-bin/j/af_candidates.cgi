@@ -2,6 +2,25 @@
 
 JSON_FILE="/tmp/af_peaks.json"
 
+# Clear cached candidate peaks: POST ?clear=1
+if echo "$QUERY_STRING" | grep -q 'clear=1'; then
+    if [ "$REQUEST_METHOD" != "POST" ]; then
+        echo "HTTP/1.1 405 Method Not Allowed"
+        echo "Content-Type: text/plain"
+        echo "Allow: POST"
+        echo ""
+        echo "Use POST to clear peaks."
+        exit 0
+    fi
+    rm -f "$JSON_FILE" /tmp/peak_*.jpg
+    echo "HTTP/1.1 200 OK"
+    echo "Content-Type: application/json"
+    echo "Cache-Control: no-store"
+    echo ""
+    echo '{"ok":true,"cleared":true}'
+    exit 0
+fi
+
 # Serve candidate JPEG: GET ?img=N
 IMG=$(echo "$QUERY_STRING" | sed -n 's/.*img=\([0-9][0-9]*\).*/\1/p')
 if [ -n "$IMG" ]; then

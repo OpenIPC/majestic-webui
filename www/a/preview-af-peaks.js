@@ -357,12 +357,28 @@
 			zoomBox.hidden = true;
 		});
 	}
-	fn.querySelectorAll('[data-act="near"],[data-act="far"],[data-act="wide"],[data-act="tele"]').forEach(b => {
+	function clearPeaks() {
+		lastData = null;
+		positionShifted = false;
+		modal.hidden = true;
+		zoomBox.hidden = true;
+		updateBtnLabel(null);
+		apiFetch('/cgi-bin/j/af_candidates.cgi?clear=1', {
+			method: 'POST',
+			credentials: 'same-origin'
+		}).catch(() => {});
+	}
+
+	fn.querySelectorAll('[data-act="near"],[data-act="far"]').forEach(b => {
 		b.addEventListener('pointerdown', () => {
 			positionShifted = true;
 			if (!modal.hidden) renderModal();
 		});
 	});
+	fn.querySelectorAll('[data-act="wide"],[data-act="tele"]').forEach(b => {
+		b.addEventListener('pointerdown', clearPeaks);
+	});
+	window.addEventListener('mj:ptz-moved', clearPeaks);
 
 	let watchTimer = null;
 	function scheduleWatch(ms) {
