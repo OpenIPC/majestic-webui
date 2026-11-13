@@ -226,8 +226,6 @@ run_box_ptz() {
 			ad = (d < 0) ? -d : d;
 			if (tgt <= 1.15) {
 				if (cur <= 1.15) { print "done 0"; exit; }
-			} else if (tgt >= 56.5) {
-				if (cur >= 56.5) { print "done 0"; exit; }
 			} else {
 				tol = (tgt > 15.0) ? 0.8 : 0.4;
 				if (ad <= tol) { print "done 0"; exit; }
