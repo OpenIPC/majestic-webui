@@ -326,10 +326,17 @@
 			// it last gave 1575 beside 791. It reads the same way round as
 			// Night picture above: what the camera DOES first, the numbers
 			// that time it last.
+			//
+			// The white lamp's own four follow the shared ones they override,
+			// in the same order, so the pair reads down the column as "the
+			// lamps" then "the white one, where it differs". Empty is their
+			// normal state: no default, and clearing one removes it.
 			{ id: 'lamp', label: 'Dimmable lamp', keys: [
 				'irLightPwmChannel', 'whiteLightPwmChannel', 'backlightPwmFreq',
 				'backlightPwmMin', 'backlightPwmMax',
-				'backlightPwmGamma', 'backlightHighlightPct'] },
+				'backlightPwmGamma', 'backlightHighlightPct',
+				'whiteLightPwmFreq', 'whiteLightPwmMin', 'whiteLightPwmMax',
+				'whiteLightPwmGamma'] },
 			// The numbers that decide when, kept as a heading of their own rather
 			// than piled under Switching. Not taste: the section is dealt into two
 			// columns and the cut is taken between headings wherever one will

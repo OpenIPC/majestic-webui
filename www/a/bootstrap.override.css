@@ -2700,9 +2700,21 @@ button.mj-osd-chip,
 
 .mj-live-rt-mount .mj-hud-rt {
 	flex: 1 1 auto;
+	/* Four switches are wider than a phone: with the White one beside Night,
+	   IR-cut and Lamp the row ran 41px past a 390px viewport and the page
+	   scrolled sideways (OpenIPC/firmware#2758). Wrapping is the floor; the
+	   grid below makes four into two even rows rather than three and one. */
+	flex-wrap: wrap;
 	background: var(--bs-tertiary-bg);
 	border: 1px solid var(--bs-border-color);
 	border-radius: var(--bs-border-radius);
+}
+
+@media (max-width: 499.98px) {
+	.mj-live-rt-mount .mj-hud-rt:has(label[for="toggle-white"]:not([hidden])) {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+	}
 }
 
 .mj-live-rt-mount .mj-hrt {
