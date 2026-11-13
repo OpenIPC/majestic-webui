@@ -222,5 +222,4 @@ has_cap() {
 <script src="/a/preview-ptz.js"></script>
 <script src="/a/preview-af-peaks.js"></script>
 <script src="/a/preview-ptz-presets.js"></script>
-<script src="/a/preview-scene-modes.js"></script>
 <script src="/a/preview-box-ptz.js"></script>

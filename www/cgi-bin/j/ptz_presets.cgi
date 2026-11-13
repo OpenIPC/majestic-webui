@@ -181,12 +181,6 @@ restore_zoom_and_af() {
 			usleep 120000 2>/dev/null || true
 		fi
 	fi
-
-	# 5. Trigger autofocus if configured for this preset
-	if [ "$run_af" = "1" ]; then
-		usleep 250000 2>/dev/null || sleep 1
-		curl -s -m 2 "http://127.0.0.1/autofocus" >/dev/null 2>&1
-	fi
 }
 
 json_escape() {
@@ -265,6 +259,7 @@ if [ "$ACT" != "list" ] && [ "$REQUEST_METHOD" != "POST" ]; then
 	exit 1
 fi
 
+echo "HTTP/1.1 200 OK"
 echo "Content-Type: application/json"
 echo "Cache-Control: no-store, no-cache, must-revalidate"
 echo ""

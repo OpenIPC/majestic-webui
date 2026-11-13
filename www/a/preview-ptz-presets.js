@@ -165,7 +165,7 @@
 			card.querySelector('.mj-pr-name').textContent = p.name;
 
 			card.querySelector('[data-go]').addEventListener('click', () => {
-				callPreset(p.id);
+				callPreset(p);
 			});
 			card.querySelector('[data-af]').addEventListener('click', () => {
 				togglePresetAf(p.id);
@@ -236,17 +236,22 @@
 			.finally(() => { busy = false; });
 	}
 
-	function callPreset(id) {
+	function callPreset(p) {
 		if (busy) return;
 		busy = true;
 		modal.hidden = true;
 		document.dispatchEvent(new CustomEvent('mj-ptz-move', { detail: { durationMs: 14000 } }));
-		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=goto&id=' + encodeURIComponent(id), {
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=goto&id=' + encodeURIComponent(p.id), {
 			method: 'POST',
 			credentials: 'same-origin'
 		})
 			.then(r => r.ok ? r.json() : null)
-			.then(d => applyData(d, false))
+			.then(d => {
+				applyData(d, false);
+				if (d && d.ok && p.run_af) {
+					apiFetch('/autofocus', { credentials: 'same-origin' }).catch(() => {});
+				}
+			})
 			.catch(() => {})
 			.finally(() => { busy = false; });
 	}

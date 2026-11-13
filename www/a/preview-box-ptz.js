@@ -148,8 +148,7 @@
 			'pan_scale=' + sc.panScale,
 			'tilt_scale=' + sc.tiltScale,
 			'inv_pan=' + sc.invPan,
-			'inv_tilt=' + sc.invTilt,
-			'af=' + (doAf ? '1' : '0')
+			'inv_tilt=' + sc.invTilt
 		];
 		if (typeof targetMag === 'number' && Number.isFinite(targetMag) && targetMag >= 1.0) {
 			params.push('target_mag=' + targetMag.toFixed(1));
@@ -166,6 +165,9 @@
 			.then(d => {
 				if (d && typeof d.target_mag === 'number') {
 					currentMag = d.target_mag;
+				}
+				if (d && d.ok && doAf) {
+					apiFetch('/autofocus', { credentials: 'same-origin' }).catch(() => {});
 				}
 				return d;
 			})

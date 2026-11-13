@@ -932,13 +932,13 @@
 		const modeCtl = makeSelectRow(
 			left,
 			'af-trig-mode',
-			'Refocus after PTZ movement',
-			'Choose which camera movements automatically trigger an autofocus pass once the motor stops.',
+			'AF status overlay after PTZ',
+			'Choose which PTZ movements poll AF status and display the overlay once the motor stops.',
 			[
 				['ptz', 'After Pan, Tilt & Zoom (PTZ)'],
 				['zoom_only', 'After Zoom only (Wide / Tele)'],
 				['pan_tilt_only', 'After Pan / Tilt only'],
-				['manual', 'Manual only (AF button or schedule)'],
+				['manual', 'Manual only (no auto-polling after PTZ)'],
 			]
 		);
 
@@ -1013,7 +1013,7 @@
 		const runBtn = el('button', 'btn btn-outline-secondary');
 		runBtn.type = 'button';
 		runBtn.textContent = 'Run AF now';
-		const statusNote = el('div', 'form-text mt-2');
+		const statusNote = el('div', 'small text-muted mt-2');
 		actionRow.appendChild(saveBtn);
 		actionRow.appendChild(runBtn);
 		right.appendChild(actionRow);
@@ -1213,7 +1213,7 @@
 		const button = el('button', 'btn btn-outline-primary mt-2');
 		button.type = 'button';
 		button.textContent = control.type === 'action' ? (control.label || 'Run') : 'Apply';
-		const result = el('div', 'form-text');
+		const result = el('div', 'small text-muted');
 		button.addEventListener('click', async () => {
 			const warning = control.warning || control.description;
 			if (control.confirm && !window.confirm(warning || 'Run this command?')) return;

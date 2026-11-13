@@ -73,11 +73,16 @@ if [ -n "$DURATION_MS" ] &&
 	DURATION_MS=""
 fi
 
+ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
+
 service_ok=0
-if [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]; then
-	motor_caps=$(/usr/bin/motorsctl --socket /run/motorsd.sock \
-		'{"version":1,"id":"webui-caps","op":"capabilities"}' 2>/dev/null)
-	case "$motor_caps" in *'"available":true'*) service_ok=1 ;; esac
+if [ "$ptz_control" = "motorsd" ] || [ "$ptz_control" = "anjoy" ] ||
+	[ "$DESCRIBE" = 1 ] || [ -n "$COMMAND" ]; then
+	if [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]; then
+		motor_caps=$(/usr/bin/motorsctl --socket /run/motorsd.sock \
+			'{"version":1,"id":"webui-caps","op":"capabilities"}' 2>/dev/null)
+		case "$motor_caps" in *'"available":true'*) service_ok=1 ;; esac
+	fi
 fi
 
 if [ "$DESCRIBE" = 1 ]; then
@@ -114,8 +119,6 @@ fi
 # method outright. Unset means no PTZ, same as "none" or an unknown method —
 # the reporter ruled that a camera without ptz_control serves nobody, so the
 # old auto-detection from gpio_motors/ptz alone is gone.
-ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
-
 pelco_ok=0
 pelco_why=""
 gpio_ok=0

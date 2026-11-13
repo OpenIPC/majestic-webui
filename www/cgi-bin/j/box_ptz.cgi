@@ -65,7 +65,8 @@ drive_axis_ms() {
 if [ "$REQUEST_METHOD" != "POST" ]; then
 	cur_mag=$(get_current_mag)
 	read_pos
-	echo "Content-Type: application/json
+	echo "HTTP/1.1 200 OK
+Content-Type: application/json
 Cache-Control: no-store
 
 {\"ok\":true,\"current_mag\":${cur_mag:-null},\"pos_pan_ms\":$PAN_MS,\"pos_tilt_ms\":$TILT_MS}"
@@ -73,7 +74,8 @@ Cache-Control: no-store
 fi
 
 if ! motor_service_ready; then
-	echo "Content-Type: application/json
+	echo "HTTP/1.1 200 OK
+Content-Type: application/json
 Cache-Control: no-store
 
 {\"ok\":false,\"error\":\"Motor service is unavailable\"}"
@@ -81,7 +83,8 @@ Cache-Control: no-store
 fi
 
 if ! mkdir /tmp/ptz_job.lock 2>/dev/null; then
-	echo "Content-Type: application/json
+	echo "HTTP/1.1 200 OK
+Content-Type: application/json
 Cache-Control: no-store
 
 {\"ok\":false,\"error\":\"Another PTZ move is in progress\"}"
@@ -97,7 +100,6 @@ PAN_SCALE="10600"
 TILT_SCALE="6400"
 INV_PAN="0"
 INV_TILT="0"
-DO_AF="1"
 
 for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 	case "$param" in
@@ -109,7 +111,6 @@ for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 		tilt_scale=*) TILT_SCALE="${param#*=}" ;;
 		inv_pan=*) INV_PAN="${param#*=}" ;;
 		inv_tilt=*) INV_TILT="${param#*=}" ;;
-		af=*) DO_AF="${param#*=}" ;;
 	esac
 done
 
@@ -119,11 +120,11 @@ echo "$ZOOM_FACTOR" | grep -qE '^[0-9]+(\.[0-9]+)?$' || ZOOM_FACTOR="1.0"
 echo "$TARGET_MAG" | grep -qE '^[0-9]+(\.[0-9]+)?$' || TARGET_MAG=""
 echo "$PAN_SCALE" | grep -qE '^[0-9]{2,5}$' || PAN_SCALE="10600"
 echo "$TILT_SCALE" | grep -qE '^[0-9]{2,5}$' || TILT_SCALE="6400"
-[ "$DO_AF" = "0" ] || DO_AF="1"
 
 cur_mag=$(get_current_mag)
 if [ -z "$cur_mag" ]; then
-	echo "Content-Type: application/json
+	echo "HTTP/1.1 200 OK
+Content-Type: application/json
 Cache-Control: no-store
 
 {\"ok\":false,\"error\":\"Current zoom magnification is unavailable\"}"
@@ -247,15 +248,11 @@ run_box_ptz() {
 		usleep 200000 2>/dev/null || sleep 1
 		step=$((step + 1))
 	done
-
-	if [ "$DO_AF" = "1" ]; then
-		usleep 250000 2>/dev/null || sleep 1
-		curl -s -m 2 "http://127.0.0.1/autofocus" >/dev/null 2>&1
-	fi
 }
 
 run_box_ptz >/dev/null 2>&1 || {
-	echo "Content-Type: application/json
+	echo "HTTP/1.1 200 OK
+Content-Type: application/json
 Cache-Control: no-store
 
 {\"ok\":false,\"error\":\"Motor move failed\"}"
@@ -263,7 +260,8 @@ Cache-Control: no-store
 }
 write_pos "$PAN_MS" "$TILT_MS"
 
-echo "Content-Type: application/json
+echo "HTTP/1.1 200 OK
+Content-Type: application/json
 Cache-Control: no-store
 
 {\"ok\":true,\"pan_dir\":\"$pdir\",\"pan_ms\":$pms,\"tilt_dir\":\"$tdir\",\"tilt_ms\":$tms,\"start_mag\":$cur_mag,\"target_mag\":$tmag,\"pos_pan_ms\":$PAN_MS,\"pos_tilt_ms\":$TILT_MS}"
