@@ -55,10 +55,19 @@
 					return;
 				}
 				const v = activeVideo();
-				if (v && v.requestPictureInPicture) v.requestPictureInPicture().catch(() => {});
+				if (!v || !v.requestPictureInPicture) return;
+				v.disablePictureInPicture = false;
+				v.requestPictureInPicture().catch(() => {
+					v.disablePictureInPicture = true;
+				});
 			});
 			const onChange = () => {
 				const on = !!document.pictureInPictureElement;
+				if (!on) {
+					stage.querySelectorAll('video.mj-stage-media').forEach(v => {
+						v.disablePictureInPicture = true;
+					});
+				}
 				btn.setAttribute('aria-label', on ? 'Exit Picture-in-Picture' : 'Picture-in-Picture');
 				btn.title = on ? 'Exit Picture-in-Picture' : 'Picture-in-Picture';
 			};
