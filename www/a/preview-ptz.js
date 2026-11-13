@@ -582,7 +582,7 @@
 	} catch (e) {}
 	function effectiveSpeedScale() {
 		const zScale = (zoomScaleOn && currentZoomMag > 1.0)
-			? Math.max(0.2, Math.min(1.0, 1.0 / Math.sqrt(currentZoomMag)))
+			? Math.max(0.04, Math.min(1.0, 1.0 / Math.pow(currentZoomMag, 0.72)))
 			: 1.0;
 		return (baseSpeedPct / 100) * zScale;
 	}
@@ -591,7 +591,7 @@
 	let spdPlusBtn = null;
 	function refreshSpeedLabel() {
 		if (!spdLabelEl) return;
-		const eff = Math.max(10, Math.round(effectiveSpeedScale() * 100));
+		const eff = Math.max(4, Math.round(effectiveSpeedScale() * 100));
 		spdLabelEl.textContent = zoomScaleOn && eff !== baseSpeedPct ? `${eff}/${baseSpeedPct}%` : `${baseSpeedPct}%`;
 		spdLabelEl.title = `PTZ speed ${baseSpeedPct}%` +
 			(zoomScaleOn ? ` · Zoom-scaled ${eff}% (click to toggle auto zoom scale)` : ' · Zoom scaling off (click to enable)');
@@ -894,8 +894,8 @@
 		}
 		if (!isStop && /^(?:up|down|left|right|upleft|upright|downleft|downright)$/.test(verb)) {
 			const sc = effectiveSpeedScale();
-			pct = Math.max(10, Math.round((pct != null ? pct : 100) * sc));
-			if (ms && sc < 1.0) ms = Math.max(30, Math.round(ms * Math.max(0.25, sc)));
+			pct = Math.max(4, Math.round((pct != null ? pct : 100) * sc));
+			if (ms && sc < 1.0) ms = Math.max(25, Math.round(ms * Math.max(0.08, sc)));
 		}
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
