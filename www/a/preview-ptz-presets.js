@@ -34,7 +34,9 @@
 		'.mj-pr-card-top{display:flex;justify-content:space-between;align-items:center;gap:6px}',
 		'.mj-pr-name{font-weight:600;font-size:.88rem;color:#fff}',
 		'.mj-pr-meta{font-size:.73rem;color:#adb5bd;line-height:1.35}',
-		'.mj-pr-card-actions{display:flex;gap:6px}',
+		'.mj-pr-card-actions{display:flex;flex-wrap:wrap;gap:5px}',
+		'.mj-pr-card-actions .mj-pr-btn{padding:5px 8px;font-size:.74rem}',
+		'.mj-pr-card-actions .mj-pr-btn[data-go]{flex:1 1 100%}',
 		'.mj-pr-empty{font-size:.82rem;color:#adb5bd;text-align:center;padding:18px 8px;grid-column:1/-1}'
 	].join('');
 	document.head.appendChild(style);
@@ -182,7 +184,7 @@
 				'</div>' +
 				'<div class="mj-pr-meta">' + ptText + '<br>' + (badges.join(' · ') || 'Pan/Tilt only') + '</div>' +
 				'<div class="mj-pr-card-actions">' +
-				'  <button type="button" class="mj-pr-btn primary" style="flex:1" data-go="' + p.id + '">Go to View</button>' +
+				'  <button type="button" class="mj-pr-btn primary" data-go="' + p.id + '">Go to View</button>' +
 				'  <button type="button" class="mj-pr-btn' + (isBoot ? ' active' : '') + '" data-boot="' + p.id + '" title="Recall this preset automatically when motorsd boots">' + (isBoot ? 'Home ★' : 'Boot') + '</button>' +
 				'  <button type="button" class="mj-pr-btn" data-af="' + p.id + '" title="Toggle Autofocus on arrival">' + (p.run_af ? 'AF: On' : 'AF: Off') + '</button>' +
 				'  <button type="button" class="mj-pr-btn" data-upd="' + p.id + '" title="Update this preset with current camera Pan/Tilt/Focus/Zoom">Set Here</button>' +
