@@ -109,20 +109,22 @@ echo "$VERTICAL" | grep -qE '^-?[0-9]{1,2}$' || VERTICAL=0
 ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 
 pelco_ok=0
+ptz_line=""
 pelco_why=""
 gpio_ok=0
 motor_ok=0
 profile=""
 case "$ptz_control" in
 	# Lenses majestic itself drives: the camera holds the wire and the WebUI asks
-	# it for a verb (mj_ptz). Two are Pelco-shaped serial protocols; ms41908 is the
+	# it for a verb (mj_ptz). Two are Pelco-shaped serial protocols and visca is a
+	# Sony VISCA zoom block's lens MCU on a UART (the N51813L); ms41908 is the
 	# Panasonic MS41908M SPI stepper on the Hi3516A V100 boards, driven off the ISP
 	# by the majestic-af plugin -- no tty, but the same mj_ptz relationship, so the
 	# same action path serves it. gpiostep is a pan/tilt head of GPIO steppers
 	# that majestic-af drives through the gpiostep kernel module, likewise. This used to exec /usr/bin/btzoom(-xm), which
 	# opened the tty the camera was already driving for autofocus and raced it.
-	pelco-d|pelco-xm|ms41908|gpiostep)
-		mj_ptz > /dev/null 2>&1
+	pelco-d|pelco-xm|ms41908|gpiostep|visca)
+		ptz_line=$(mj_ptz 2>/dev/null)
 		case $? in
 			0) pelco_ok=1 ;;
 			3) pelco_why="This camera has no PTZ driver installed: add the majestic-af package to its firmware." ;;
@@ -157,7 +159,10 @@ for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
 		pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
 	esac
 done
-# The same default update_caminfo applies: a gpiostep head is pan and tilt.
+# The same defaults update_caminfo applies: what majestic lists for a lens it
+# drives, else pan and tilt for a gpiostep head.
+[ -z "$ptz_caps" ] && [ -n "$ptz_line" ] && ptz_caps=" $(mj_ptz_axes "$ptz_line")"
+[ -z "${ptz_caps# }" ] && ptz_caps=""
 [ -z "$ptz_caps" ] && [ "$ptz_control" = gpiostep ] && ptz_caps=" pan tilt"
 
 has_cap() {
