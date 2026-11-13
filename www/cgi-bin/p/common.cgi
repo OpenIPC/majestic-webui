@@ -1091,6 +1091,14 @@ update_caminfo() {
 				ptz_support="1"; ptz_backend="motor"
 			fi
 			;;
+		anjoy)
+			if [ -x /usr/bin/anjoy-motor ]; then
+				ptz_support="1"; ptz_backend="pelco"
+			else
+				ptz_support="1"; ptz_backend="pelco"
+				ptz_reason="The anjoy-motor binary was not found at /usr/bin/anjoy-motor."
+			fi
+        	;;
 		# "none", unset and anything unrecognised all land here: no pad.
 	esac
 	# The controls themselves ship only on an image with a motor driver; one

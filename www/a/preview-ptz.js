@@ -625,6 +625,8 @@
 	// `pct`, when given, is this move's speed (the stick's); without it the
 	// motor runs at its own rate.
 	function move(verb, ms, isStop, pct) {
+		let endpoint = (window.ptzControl === 'anjoy') ? '/cgi-bin/j/ptz.cgi' : '/ptz';
+		let url = endpoint + '?move=' + encodeURIComponent(verb);
 		// The picture's direction to the head's, before the speed is picked:
 		// on its side, the picture's across is the head's tilt.
 		if (PO && PO.direction(verb)) {
@@ -767,7 +769,7 @@
 	// proxy, a camera mid-restart — changes nothing: could not ask is not an
 	// answer about the hardware, and this is exactly the camera where the
 	// operator has just turned the setting on and is waiting to see it.
-	if (afState && afSay) {
+	if (afState && afSay && window.ptzControl !== 'anjoy') {
 		apiFetch(AF_STATUS_URL, { credentials: 'same-origin' }).then((r) => {
 			if (r.status === 404) {
 				const cap = $('#mj-af-cap');
