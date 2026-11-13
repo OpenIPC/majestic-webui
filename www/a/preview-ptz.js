@@ -698,7 +698,8 @@
 			.then(body => {
 				const status = body.trim();
 				const currentMag = parseLiveMag(status);
-				if (currentMag != null) updateZoomLabel(currentMag);
+				const liveMagMatch = /(?:^| )live_mag=([0-9.]+)/.exec(status);
+				if (liveMagMatch) updateZoomLabel(+liveMagMatch[1]);
 				else fetchZoom();
 
 				const fvMatch = status.match(/(?:^| )metric_fv=(\d+)/) || status.match(/(?:^| )fv=(\d+)/);
