@@ -939,11 +939,14 @@
 			}
 		} else if (isStop) {
 			commitActiveTrack();
-			scheduleTrackFlush();
+			flushTrackPos();
 		}
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
 		if (pct != null && PS) url += PS.query(verb, pct);
+		if (!isStop && /^(?:up|down|left|right)$/.test(verb) && pct != null && pct < 100) {
+			url = '/cgi-bin/j/ptz.cgi?act=' + encodeURIComponent(verb) + '&ms=' + (ms || 250) + '&speed=' + pct;
+		}
 		if (!isStop && outstanding >= 3) return;
 		if (!isStop && /(?:left|right|up|down|wide|tele)/.test(verb)) {
 			try { window.dispatchEvent(new CustomEvent('mj:ptz-moved', { detail: { verb } })); } catch (e) {}
@@ -1191,7 +1194,7 @@
 			const axis = axisFor(act);
 			const trackedMs = Math.round(Math.min(PULSE_MS.maximum, Math.max(axis === 'focus' ? PULSE_MS.focus : PULSE_MS.motor, heldMs)));
 			if (axis === 'pan' || axis === 'tilt' || axis === 'focus') {
-				apiFetch('/cgi-bin/j/ptz.cgi?act=stop&axis=' + axis + '&moved_dir=' + encodeURIComponent(act) + '&moved_ms=' + trackedMs, {
+				apiFetch('/cgi-bin/j/ptz.cgi?act=stop&axis=' + axis, {
 					method: 'POST',
 					credentials: 'same-origin'
 				}).catch(() => {});

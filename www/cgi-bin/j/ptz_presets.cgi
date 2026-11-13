@@ -275,6 +275,30 @@ echo "Content-Type: application/json"
 echo "Cache-Control: no-store, no-cache, must-revalidate"
 echo ""
 
+acquire_ptz_lock() {
+	if mkdir /tmp/ptz_job.lock 2>/dev/null; then
+		echo "$$" > /tmp/ptz_job.lock/pid
+		return 0
+	fi
+	if [ -f /tmp/ptz_job.lock/pid ]; then
+		old_pid=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
+		if [ -z "$old_pid" ] || ! kill -0 "$old_pid" 2>/dev/null; then
+			rm -rf /tmp/ptz_job.lock
+			if mkdir /tmp/ptz_job.lock 2>/dev/null; then
+				echo "$$" > /tmp/ptz_job.lock/pid
+				return 0
+			fi
+		fi
+	else
+		rm -rf /tmp/ptz_job.lock
+		if mkdir /tmp/ptz_job.lock 2>/dev/null; then
+			echo "$$" > /tmp/ptz_job.lock/pid
+			return 0
+		fi
+	fi
+	return 1
+}
+
 case "$ACT" in
 	save)
 		if [ -z "$ID" ] || [ "$ID" -lt 1 ] || [ "$ID" -gt 32 ]; then
@@ -348,11 +372,11 @@ EOF
 			echo '{"ok":false,"error":"Motor service is unavailable"}'
 			exit 0
 		fi
-		if ! mkdir /tmp/ptz_job.lock 2>/dev/null; then
+		if ! acquire_ptz_lock; then
 			echo '{"ok":false,"error":"Another PTZ move is in progress"}'
 			exit 0
 		fi
-		trap 'rmdir /tmp/ptz_job.lock 2>/dev/null || true' EXIT
+		trap 'rm -rf /tmp/ptz_job.lock 2>/dev/null || true' EXIT
 		ROW=$(grep "^${ID}|" "$PRESETS_FILE" | head -n 1)
 		if [ -n "$ROW" ]; then
 			IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF

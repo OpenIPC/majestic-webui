@@ -82,7 +82,31 @@ Cache-Control: no-store
 	exit 0
 fi
 
-if ! mkdir /tmp/ptz_job.lock 2>/dev/null; then
+acquire_ptz_lock() {
+	if mkdir /tmp/ptz_job.lock 2>/dev/null; then
+		echo "$$" > /tmp/ptz_job.lock/pid
+		return 0
+	fi
+	if [ -f /tmp/ptz_job.lock/pid ]; then
+		old_pid=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
+		if [ -z "$old_pid" ] || ! kill -0 "$old_pid" 2>/dev/null; then
+			rm -rf /tmp/ptz_job.lock
+			if mkdir /tmp/ptz_job.lock 2>/dev/null; then
+				echo "$$" > /tmp/ptz_job.lock/pid
+				return 0
+			fi
+		fi
+	else
+		rm -rf /tmp/ptz_job.lock
+		if mkdir /tmp/ptz_job.lock 2>/dev/null; then
+			echo "$$" > /tmp/ptz_job.lock/pid
+			return 0
+		fi
+	fi
+	return 1
+}
+
+if ! acquire_ptz_lock; then
 	echo "HTTP/1.1 200 OK
 Content-Type: application/json
 Cache-Control: no-store
@@ -90,7 +114,7 @@ Cache-Control: no-store
 {\"ok\":false,\"error\":\"Another PTZ move is in progress\"}"
 	exit 0
 fi
-trap 'rmdir /tmp/ptz_job.lock 2>/dev/null || true' EXIT
+trap 'rm -rf /tmp/ptz_job.lock 2>/dev/null || true' EXIT
 
 DX="0"
 DY="0"

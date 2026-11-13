@@ -89,6 +89,7 @@ HORIZONTAL=0
 VERTICAL=0
 ACTION=""
 DURATION_MS=""
+SPEED_PCT=""
 DESCRIBE=""
 COMMAND=""
 VALUE=""
@@ -99,7 +100,8 @@ for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 		h=*) HORIZONTAL="${param#*=}" ;;
 		v=*) VERTICAL="${param#*=}" ;;
 		act=*) ACTION="${param#*=}" ;;
-		duration_ms=*) DURATION_MS="${param#*=}" ;;
+		duration_ms=*|ms=*) DURATION_MS="${param#*=}" ;;
+		speed=*) SPEED_PCT="${param#*=}" ;;
 		describe=*) DESCRIBE="${param#*=}" ;;
 		command=*) COMMAND="${param#*=}" ;;
 		value=*) VALUE="${param#*=}" ;;
@@ -118,6 +120,11 @@ echo "$DURATION_MS" | grep -qE '^[0-9]{1,5}$' || DURATION_MS=""
 if [ -n "$DURATION_MS" ] &&
 	{ [ "$DURATION_MS" -lt 1 ] || [ "$DURATION_MS" -gt 10000 ]; }; then
 	DURATION_MS=""
+fi
+echo "$SPEED_PCT" | grep -qE '^[0-9]{1,3}$' || SPEED_PCT=""
+if [ -n "$SPEED_PCT" ] &&
+	{ [ "$SPEED_PCT" -lt 1 ] || [ "$SPEED_PCT" -gt 100 ]; }; then
+	SPEED_PCT=""
 fi
 
 ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
@@ -335,6 +342,14 @@ if [ -n "$ACTION" ]; then
 				# now -- it knows when the operator stopped driving, which
 				# is what the old ?settle call was trying to guess from a
 				# lock file.
+				if [ -n "$SPEED_PCT" ] && [ "$service_ok" = 1 ] && [ -x /usr/bin/motors-cli ] &&
+					{ [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ] || [ "$ACTION" = "left" ] || [ "$ACTION" = "right" ]; }; then
+					pelco_spd=$(( (SPEED_PCT * 20 + 50) / 100 ))
+					[ "$pelco_spd" -lt 1 ] && pelco_spd=1
+					[ "$pelco_spd" -gt 63 ] && pelco_spd=63
+					/usr/bin/motors-cli --socket /run/motorsd.sock --speed "$pelco_spd" "$ACTION" "${DURATION_MS:-250}"
+					exit $?
+				fi
 				if [ -n "$DURATION_MS" ] && [ "$ACTION" != "stop" ]; then
 					out=$(mj_ptz "$ACTION:$DURATION_MS")
 					rc=$?

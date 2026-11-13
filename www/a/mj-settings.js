@@ -1397,24 +1397,6 @@
 			]
 		);
 
-		const peaksAutoCtl = makeSelectRow(
-			left,
-			'af-peaks-auto',
-			'AF Peaks modal auto-open',
-			'Controls when the candidate peak gallery pops up after autofocus finishes in Standard mode.',
-			[
-				['manual', 'Only after clicking Autofocus'],
-				['always', 'Always after any AF completes'],
-				['never', 'Never auto-open (use AF Peaks button)'],
-			]
-		);
-		try {
-			peaksAutoCtl.sel.value = localStorage.getItem('openipc.af.peaksAutoOpen') || 'manual';
-		} catch (e) {}
-		peaksAutoCtl.sel.addEventListener('change', () => {
-			try { localStorage.setItem('openipc.af.peaksAutoOpen', peaksAutoCtl.sel.value); } catch (e) {}
-		});
-
 		const schedCtl = makeSelectRow(
 			right,
 			'af-trig-sched',
