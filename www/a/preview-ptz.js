@@ -883,6 +883,31 @@
 	// bounded and never dropped — a stop that vanished leaves a motor running
 	// to its deadline, which is the one failure with a physical cost.
 	let outstanding = 0;
+	let pendingTrackPan = 0, pendingTrackTilt = 0, trackFlushTimer = 0, activeTrack = null;
+	function flushTrackPos() {
+		clearTimeout(trackFlushTimer);
+		trackFlushTimer = 0;
+		const dp = Math.round(pendingTrackPan);
+		const dt = Math.round(pendingTrackTilt);
+		if (!dp && !dt) return;
+		pendingTrackPan = 0;
+		pendingTrackTilt = 0;
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=track&pan_ms=' + dp + '&tilt_ms=' + dt, {
+			method: 'POST',
+			credentials: 'same-origin'
+		}).catch(() => {});
+	}
+	function scheduleTrackFlush() {
+		if (trackFlushTimer) clearTimeout(trackFlushTimer);
+		trackFlushTimer = setTimeout(flushTrackPos, 200);
+	}
+	function commitActiveTrack() {
+		if (!activeTrack) return;
+		const elapsed = Math.max(30, Math.min(Date.now() - activeTrack.startMs, 5000));
+		pendingTrackPan += activeTrack.dp * elapsed * activeTrack.scale;
+		pendingTrackTilt += activeTrack.dt * elapsed * activeTrack.scale;
+		activeTrack = null;
+	}
 	// `pct`, when given, is this move's speed (the stick's); without it the
 	// motor runs at its own rate.
 	function move(verb, ms, isStop, pct) {
@@ -896,6 +921,25 @@
 			const sc = effectiveSpeedScale();
 			pct = Math.max(4, Math.round((pct != null ? pct : 100) * sc));
 			if (ms && sc < 1.0) ms = Math.max(25, Math.round(ms * Math.max(0.08, sc)));
+			const dp = verb.indexOf('right') >= 0 ? 1 : (verb.indexOf('left') >= 0 ? -1 : 0);
+			const dt = verb.indexOf('up') >= 0 ? 1 : (verb.indexOf('down') >= 0 ? -1 : 0);
+			const spdScale = pct / 100;
+			if (ms > 0) {
+				commitActiveTrack();
+				pendingTrackPan += dp * ms * spdScale;
+				pendingTrackTilt += dt * ms * spdScale;
+				scheduleTrackFlush();
+			} else {
+				if (!activeTrack || activeTrack.dp !== dp || activeTrack.dt !== dt) {
+					commitActiveTrack();
+					activeTrack = { dp, dt, startMs: Date.now(), scale: spdScale };
+				} else {
+					activeTrack.scale = spdScale;
+				}
+			}
+		} else if (isStop) {
+			commitActiveTrack();
+			scheduleTrackFlush();
 		}
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;

@@ -408,6 +408,16 @@ EOF
 		fi
 		;;
 
+	track)
+		read_pos
+		case "$IN_PAN" in ''|*[!0-9-]*) IN_PAN=0 ;; esac
+		case "$IN_TILT" in ''|*[!0-9-]*) IN_TILT=0 ;; esac
+		PAN_MS=$((PAN_MS + IN_PAN))
+		TILT_MS=$((TILT_MS + IN_TILT))
+		write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS"
+		emit_list ""
+		;;
+
 	*)
 		emit_list ""
 		;;
