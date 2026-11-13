@@ -7,10 +7,22 @@
 
 PRESETS_FILE="/etc/ptz_presets.tsv"
 POS_FILE="/tmp/ptz_pos.conf"
+BOOT_HOME_FILE="/etc/ptz_boot_home"
 
 if [ ! -f "$PRESETS_FILE" ]; then
 	touch "$PRESETS_FILE" 2>/dev/null
 fi
+
+read_boot_home() {
+	if [ -f "$BOOT_HOME_FILE" ]; then
+		bh=$(tr -cd '0-9' < "$BOOT_HOME_FILE" 2>/dev/null)
+		if [ -n "$bh" ] && grep -q "^${bh}|" "$PRESETS_FILE" 2>/dev/null; then
+			echo "$bh"
+			return
+		fi
+	fi
+	echo "null"
+}
 
 read_pos() {
 	PAN_MS=0
@@ -191,7 +203,8 @@ emit_list() {
 	extra_msg="$1"
 	cur_mag=$(get_current_mag)
 	read_pos
-	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS" "$FOCUS_MS"
+	boot_home=$(read_boot_home)
+	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s,"boot_home":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$boot_home"
 	if [ -n "$extra_msg" ]; then
 		esc_msg=$(json_escape "$extra_msg")
 		printf ',"message":"%s"' "$esc_msg"
@@ -377,8 +390,24 @@ EOF
 			fi
 			grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
 			mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
+			if [ "$(read_boot_home)" = "$ID" ] || { [ -f "$BOOT_HOME_FILE" ] && [ "$(tr -cd '0-9' < "$BOOT_HOME_FILE" 2>/dev/null)" = "$ID" ]; }; then
+				rm -f "$BOOT_HOME_FILE"
+			fi
 		fi
 		emit_list "Preset deleted"
+		;;
+
+	set_boot_home)
+		cur_bh=$(read_boot_home)
+		if [ -z "$ID" ] || [ "$ID" = "$cur_bh" ]; then
+			rm -f "$BOOT_HOME_FILE"
+			emit_list "Boot home preset cleared"
+		elif grep -q "^${ID}|" "$PRESETS_FILE" 2>/dev/null; then
+			printf '%s\n' "$ID" > "$BOOT_HOME_FILE"
+			emit_list "Preset #${ID} set as Boot Home"
+		else
+			emit_list "Preset #${ID} not found"
+		fi
 		;;
 
 	*)

@@ -568,14 +568,44 @@
 		clearTimeout(afHideTimer);
 		afHideTimer = setTimeout(() => { if (afOverlay) afOverlay.hidden = true; }, 2000);
 	}
+	let currentZoomMag = 1.0;
+	try {
+		const savedMag = parseFloat(localStorage.getItem('openipc.zoom.lastMag'));
+		if (isFinite(savedMag) && savedMag >= 1.0) currentZoomMag = savedMag;
+	} catch (e) {}
+	let baseSpeedPct = 100;
+	let zoomScaleOn = true;
+	try {
+		const savedSpd = parseInt(localStorage.getItem('openipc.ptz.speedPct'), 10);
+		if (isFinite(savedSpd) && savedSpd >= 20 && savedSpd <= 100) baseSpeedPct = savedSpd;
+		if (localStorage.getItem('openipc.ptz.zoomScale') === '0') zoomScaleOn = false;
+	} catch (e) {}
+	function effectiveSpeedScale() {
+		const zScale = (zoomScaleOn && currentZoomMag > 1.0)
+			? Math.max(0.2, Math.min(1.0, 1.0 / Math.sqrt(currentZoomMag)))
+			: 1.0;
+		return (baseSpeedPct / 100) * zScale;
+	}
+	let spdLabelEl = null;
+	function refreshSpeedLabel() {
+		if (!spdLabelEl) return;
+		const eff = Math.max(10, Math.round(effectiveSpeedScale() * 100));
+		spdLabelEl.textContent = zoomScaleOn && eff !== baseSpeedPct ? `${eff}%Z` : `${baseSpeedPct}%`;
+		spdLabelEl.title = `PTZ speed ${baseSpeedPct}%` +
+			(zoomScaleOn ? ` · Zoom-scaled ${eff}% (click to toggle auto zoom scale)` : ' · Zoom scaling off (click to enable)');
+		spdLabelEl.style.opacity = zoomScaleOn ? '1' : '0.65';
+	}
+
 	function updateZoomLabel(mag) {
 		const el = $('#mj-ptz-zoom-label');
 		if (!el) return;
 		if (Number.isFinite(mag) && mag >= 1.0) {
 			const clamped = Math.min(Math.max(mag, 1.0), 100.0);
+			currentZoomMag = clamped;
 			const formatted = clamped >= 10.0 ? clamped.toFixed(0) : clamped.toFixed(1);
 			el.textContent = 'Zoom ' + formatted + '×';
 			try { localStorage.setItem('openipc.zoom.lastMag', formatted); } catch (e) {}
+			refreshSpeedLabel();
 		} else {
 			el.textContent = 'Zoom';
 		}
@@ -851,6 +881,11 @@
 		if (PO && PO.direction(verb)) {
 			if (!steerable()) return;
 			verb = PO.verb(verb, turn);
+		}
+		if (!isStop && /^(?:up|down|left|right|upleft|upright|downleft|downright)$/.test(verb)) {
+			const sc = effectiveSpeedScale();
+			pct = Math.max(10, Math.round((pct != null ? pct : 100) * sc));
+			if (ms && sc < 1.0) ms = Math.max(30, Math.round(ms * Math.max(0.25, sc)));
 		}
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
@@ -1151,7 +1186,46 @@
 	mount.addEventListener('contextmenu', e => { e.stopPropagation(); e.preventDefault(); });
 
 	// The fold and the gear are the mount's own, not moves.
-	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip):not([data-preset])').forEach(btn => {
+	if (pad) {
+		const spdRow = document.createElement('div');
+		spdRow.className = 'mj-ptz-spd';
+		spdRow.style.cssText = 'grid-column:span 3;display:flex;align-items:center;justify-content:space-between;gap:2px;padding:2px 2px 0;border-top:1px solid rgba(255,255,255,.08);margin-top:2px;';
+		const mkSpdBtn = (txt, title, delta) => {
+			const b = document.createElement('button');
+			b.type = 'button';
+			b.className = 'mj-ptz-btn mj-ptz-spd';
+			b.style.cssText = 'width:1.75rem;height:1.45rem;font-size:.8rem;font-weight:700;line-height:1;';
+			b.textContent = txt;
+			b.title = title;
+			b.setAttribute('aria-label', title);
+			b.addEventListener('pointerdown', e => e.stopPropagation());
+			b.addEventListener('click', e => {
+				e.stopPropagation();
+				baseSpeedPct = Math.max(20, Math.min(100, baseSpeedPct + delta));
+				try { localStorage.setItem('openipc.ptz.speedPct', String(baseSpeedPct)); } catch (err) {}
+				refreshSpeedLabel();
+			});
+			return b;
+		};
+		spdLabelEl = document.createElement('button');
+		spdLabelEl.type = 'button';
+		spdLabelEl.className = 'mj-ptz-btn mj-ptz-spd';
+		spdLabelEl.style.cssText = 'flex:1;height:1.45rem;font-size:.66rem;font-weight:600;padding:0 2px;';
+		spdLabelEl.addEventListener('pointerdown', e => e.stopPropagation());
+		spdLabelEl.addEventListener('click', e => {
+			e.stopPropagation();
+			zoomScaleOn = !zoomScaleOn;
+			try { localStorage.setItem('openipc.ptz.zoomScale', zoomScaleOn ? '1' : '0'); } catch (err) {}
+			refreshSpeedLabel();
+		});
+		spdRow.appendChild(mkSpdBtn('−', 'Decrease PTZ speed', -20));
+		spdRow.appendChild(spdLabelEl);
+		spdRow.appendChild(mkSpdBtn('+', 'Increase PTZ speed', 20));
+		pad.appendChild(spdRow);
+		refreshSpeedLabel();
+	}
+
+	mount.querySelectorAll('button:not(.mj-ptz-fold):not(.mj-ptz-gear):not(.mj-ptz-grip):not(.mj-ptz-spd):not([data-preset])').forEach(btn => {
 		if (isSingle(btn)) {
 			// Stop first kills any hold still ticking (a keyboard hold can be
 			// live while the mouse presses Stop), then fires — and for Pelco
@@ -1304,7 +1378,7 @@
 		};
 		// The settings, the fold and the handle are buttons on the pad, not
 		// part of the stick.
-		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip, .mj-ptz-stop'));
+		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip, .mj-ptz-stop, .mj-ptz-spd'));
 		pad.addEventListener('touchstart', (e) => { if (!own(e.target) && e.cancelable) e.preventDefault(); }, { passive: false });
 		pad.addEventListener('pointerdown', (e) => {
 			if (own(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;

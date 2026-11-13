@@ -414,6 +414,26 @@
 			.catch(() => scheduleWatch(2000));
 	}
 
-	fetchCandidates(false);
-	scheduleWatch(2000);
+	let fastAfMode = false;
+	function syncFastMode() {
+		return apiFetch('/cgi-bin/j/af_triggers.cgi', { credentials: 'same-origin', cache: 'no-store' })
+			.then(r => r.ok ? r.json() : null)
+			.then(d => {
+				fastAfMode = !!(d && (d.fast_af === 1 || d.fast_af === true || d.fast_af === '1'));
+				peaksBtn.hidden = fastAfMode;
+				if (fastAfMode) {
+					modal.hidden = true;
+					zoomBox.hidden = true;
+					if (watchTimer) { clearTimeout(watchTimer); watchTimer = null; }
+				}
+			})
+			.catch(() => {});
+	}
+
+	syncFastMode().then(() => {
+		if (!fastAfMode) {
+			fetchCandidates(false);
+			scheduleWatch(2000);
+		}
+	});
 })();
