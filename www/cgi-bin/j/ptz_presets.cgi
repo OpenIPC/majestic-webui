@@ -241,6 +241,7 @@ fi
 ACT="list"
 ID=""
 NAME=""
+DIR=""
 RUN_AF="1"
 ZOOM_RESTORE="1"
 IN_PAN=""
@@ -252,6 +253,7 @@ for param in $(echo "$RAW_QS" | tr '&' ' '); do
 		act=*) ACT="${param#*=}" ;;
 		id=*) ID=$(echo "${param#*=}" | tr -cd '0-9') ;;
 		name=*) NAME=$(urldecode "${param#*=}") ;;
+		dir=*) DIR=$(echo "${param#*=}" | tr -cd 'a-z') ;;
 		run_af=*) RUN_AF=$(echo "${param#*=}" | tr -cd '0-1') ;;
 		zoom_restore=*) ZOOM_RESTORE=$(echo "${param#*=}" | tr -cd '0-1') ;;
 		pan_ms=*) IN_PAN=$(echo "${param#*=}" | tr -cd '0-9-') ;;
@@ -299,6 +301,24 @@ acquire_ptz_lock() {
 	return 1
 }
 
+upsert_preset_row() {
+	target_id="$1"
+	new_row="$2"
+	awk -v id="$target_id" -v row="$new_row" '
+		BEGIN { done = 0 }
+		/^[[:space:]]*$/ { next }
+		{
+			split($0, f, "|")
+			if (f[1] == id) {
+				if (!done) { print row; done = 1 }
+			} else {
+				print $0
+			}
+		}
+		END { if (!done) print row }
+	' "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" && mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
+}
+
 case "$ACT" in
 	save)
 		if [ -z "$ID" ] || [ "$ID" -lt 1 ] || [ "$ID" -gt 32 ]; then
@@ -329,12 +349,59 @@ case "$ACT" in
 			send_pelco_preset_cmd 3 "$ID"
 		fi
 
-		grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
-		echo "${ID}|${CLEAN_NAME}|${CUR_MAG}|${RUN_AF}|${ZOOM_RESTORE}|${SAVE_PAN}|${SAVE_TILT}|${SAVE_FOCUS}" >> "${PRESETS_FILE}.tmp"
-		sort -t'|' -k1,1n "${PRESETS_FILE}.tmp" > "$PRESETS_FILE"
-		rm -f "${PRESETS_FILE}.tmp"
+		upsert_preset_row "$ID" "${ID}|${CLEAN_NAME}|${CUR_MAG}|${RUN_AF}|${ZOOM_RESTORE}|${SAVE_PAN}|${SAVE_TILT}|${SAVE_FOCUS}"
 
 		emit_list "Saved '${CLEAN_NAME}' (Pan ${SAVE_PAN}ms, Tilt ${SAVE_TILT}ms, Focus ${SAVE_FOCUS}ms, Zoom ${CUR_MAG:-unknown}x)"
+		;;
+
+	rename)
+		if [ -z "$ID" ] || [ "$ID" -lt 1 ] || [ "$ID" -gt 32 ]; then
+			echo '{"ok":false,"error":"Invalid preset ID"}'
+			exit 0
+		fi
+		ROW=$(grep "^${ID}|" "$PRESETS_FILE" | head -n 1)
+		if [ -z "$ROW" ]; then
+			echo '{"ok":false,"error":"Preset not found"}'
+			exit 0
+		fi
+		CLEAN_NAME=$(printf '%s' "$NAME" | tr '\t\r\n|' '    ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -c1-32)
+		if [ -z "$CLEAN_NAME" ]; then
+			echo '{"ok":false,"error":"Preset name cannot be empty"}'
+			exit 0
+		fi
+		IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
+$ROW
+EOF
+		upsert_preset_row "$ID" "${pid}|${CLEAN_NAME}|${pmag}|${paf}|${pzoom:-1}|${ppan}|${ptilt}|${pfocus}"
+		emit_list "Renamed preset #${ID} to '${CLEAN_NAME}'"
+		;;
+
+	move)
+		if [ -z "$ID" ] || [ "$ID" -lt 1 ] || [ "$ID" -gt 32 ]; then
+			echo '{"ok":false,"error":"Invalid preset ID"}'
+			exit 0
+		fi
+		if [ "$DIR" != "up" ] && [ "$DIR" != "down" ]; then
+			echo '{"ok":false,"error":"Invalid move direction"}'
+			exit 0
+		fi
+		awk -v id="$ID" -v dir="$DIR" '
+			/^[[:space:]]*$/ { next }
+			{ lines[++n] = $0; split($0, f, "|"); ids[n] = f[1] }
+			END {
+				for (i = 1; i <= n; i++) {
+					if (ids[i] == id) {
+						j = (dir == "up") ? i - 1 : i + 1
+						if (j >= 1 && j <= n) {
+							tmp = lines[i]; lines[i] = lines[j]; lines[j] = tmp
+						}
+						break
+					}
+				}
+				for (i = 1; i <= n; i++) print lines[i]
+			}
+		' "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" && mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
+		emit_list ""
 		;;
 
 	zero)
@@ -356,10 +423,7 @@ case "$ACT" in
 $ROW
 EOF
 		[ "$paf" = "1" ] && new_af="0" || new_af="1"
-		grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
-		echo "${pid}|${pname}|${pmag}|${new_af}|${pzoom:-1}|${ppan}|${ptilt}|${pfocus}" >> "${PRESETS_FILE}.tmp"
-		sort -t'|' -k1,1n "${PRESETS_FILE}.tmp" > "$PRESETS_FILE"
-		rm -f "${PRESETS_FILE}.tmp"
+		upsert_preset_row "$ID" "${pid}|${pname}|${pmag}|${new_af}|${pzoom:-1}|${ppan}|${ptilt}|${pfocus}"
 		emit_list ""
 		;;
 

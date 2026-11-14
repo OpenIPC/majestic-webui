@@ -166,7 +166,7 @@
 			return;
 		}
 
-		presets.forEach(p => {
+		presets.forEach((p, idx) => {
 			const card = document.createElement('div');
 			card.className = 'mj-pr-card';
 			const isBoot = bootHomeId !== null && Number(p.id) === Number(bootHomeId);
@@ -180,7 +180,12 @@
 			card.innerHTML =
 				'<div class="mj-pr-card-top">' +
 				'  <span class="mj-pr-name"></span>' +
-				'  <span class="mj-pr-meta">#' + p.id + '</span>' +
+				'  <span style="display:inline-flex;align-items:center;gap:4px">' +
+				'    <button type="button" class="mj-pr-btn" data-ren="' + p.id + '" title="Rename preset" style="padding:1px 6px">✎</button>' +
+				'    <button type="button" class="mj-pr-btn" data-mvup="' + p.id + '" title="Move up" style="padding:1px 5px"' + (idx === 0 ? ' disabled' : '') + '>▲</button>' +
+				'    <button type="button" class="mj-pr-btn" data-mvdn="' + p.id + '" title="Move down" style="padding:1px 5px"' + (idx === presets.length - 1 ? ' disabled' : '') + '>▼</button>' +
+				'    <span class="mj-pr-meta">#' + p.id + '</span>' +
+				'  </span>' +
 				'</div>' +
 				'<div class="mj-pr-meta">' + ptText + '<br>' + (badges.join(' · ') || 'Pan/Tilt only') + '</div>' +
 				'<div class="mj-pr-card-actions">' +
@@ -190,7 +195,40 @@
 				'  <button type="button" class="mj-pr-btn" data-upd="' + p.id + '" title="Update this preset with current camera Pan/Tilt/Focus/Zoom">Set Here</button>' +
 				'  <button type="button" class="mj-pr-btn danger" data-del="' + p.id + '" title="Delete preset">✕</button>' +
 				'</div>';
-			card.querySelector('.mj-pr-name').textContent = p.name;
+			const nameEl = card.querySelector('.mj-pr-name');
+			nameEl.textContent = p.name;
+
+			const startRename = () => {
+				if (busy || nameEl.querySelector('input')) return;
+				const inp = document.createElement('input');
+				inp.type = 'text';
+				inp.maxLength = 32;
+				inp.value = p.name;
+				inp.style.cssText = 'width:100%;max-width:160px;background:#111;color:#fff;border:1px solid #4ea1ff;border-radius:4px;padding:1px 6px;font-size:13px;';
+				nameEl.textContent = '';
+				nameEl.appendChild(inp);
+				inp.focus();
+				inp.select();
+				let done = false;
+				const finish = (commit) => {
+					if (done) return;
+					done = true;
+					const next = inp.value.trim();
+					if (commit && next && next !== p.name) {
+						renamePreset(p.id, next);
+					} else {
+						nameEl.textContent = p.name;
+					}
+				};
+				inp.addEventListener('keydown', (ev) => {
+					if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+					else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+				});
+				inp.addEventListener('blur', () => finish(true));
+			};
+			card.querySelector('[data-ren]').addEventListener('click', startRename);
+			card.querySelector('[data-mvup]').addEventListener('click', () => movePreset(p.id, 'up'));
+			card.querySelector('[data-mvdn]').addEventListener('click', () => movePreset(p.id, 'down'));
 
 			card.querySelector('[data-go]').addEventListener('click', () => {
 				stopTour();
@@ -314,6 +352,32 @@
 		if (busy) return;
 		busy = true;
 		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=toggle_af&id=' + encodeURIComponent(id), {
+			method: 'POST',
+			credentials: 'same-origin'
+		})
+			.then(r => r.ok ? r.json() : null)
+			.then(d => applyData(d, false))
+			.catch(() => {})
+			.finally(() => { busy = false; });
+	}
+
+	function renamePreset(id, name) {
+		if (busy) return;
+		busy = true;
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=rename&id=' + encodeURIComponent(id) + '&name=' + encodeURIComponent(name), {
+			method: 'POST',
+			credentials: 'same-origin'
+		})
+			.then(r => r.ok ? r.json() : null)
+			.then(d => applyData(d, false))
+			.catch(() => {})
+			.finally(() => { busy = false; });
+	}
+
+	function movePreset(id, dir) {
+		if (busy) return;
+		busy = true;
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=move&id=' + encodeURIComponent(id) + '&dir=' + encodeURIComponent(dir), {
 			method: 'POST',
 			credentials: 'same-origin'
 		})
