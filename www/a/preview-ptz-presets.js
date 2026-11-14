@@ -31,8 +31,10 @@
 		'.mj-pr-tourbar-ctrl{display:flex;align-items:center;gap:6px}',
 		'.mj-pr-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:10px}',
 		'.mj-pr-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}',
-		'.mj-pr-card-top{display:flex;justify-content:space-between;align-items:center;gap:6px}',
-		'.mj-pr-name{font-weight:600;font-size:.88rem;color:#fff}',
+		'.mj-pr-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}',
+		'.mj-pr-icon-btn{width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:5px;flex-shrink:0}',
+		'.mj-pr-icon-btn:disabled{opacity:.3;cursor:default;pointer-events:none}',
+		'.mj-pr-name{font-weight:600;font-size:.88rem;color:#fff;line-height:22px}',
 		'.mj-pr-meta{font-size:.73rem;color:#adb5bd;line-height:1.35}',
 		'.mj-pr-card-actions{display:flex;flex-wrap:wrap;gap:5px}',
 		'.mj-pr-card-actions .mj-pr-btn{padding:5px 8px;font-size:.74rem}',
@@ -180,11 +182,11 @@
 			card.innerHTML =
 				'<div class="mj-pr-card-top">' +
 				'  <span class="mj-pr-name"></span>' +
-				'  <span style="display:inline-flex;align-items:center;gap:4px">' +
-				'    <button type="button" class="mj-pr-btn" data-ren="' + p.id + '" title="Rename preset" style="font-size:11px;line-height:1;padding:2px 5px">✎</button>' +
-				'    <button type="button" class="mj-pr-btn" data-mvup="' + p.id + '" title="Move up" style="font-size:9px;line-height:1;padding:3px 5px"' + (idx === 0 ? ' disabled' : '') + '>▲</button>' +
-				'    <button type="button" class="mj-pr-btn" data-mvdn="' + p.id + '" title="Move down" style="font-size:9px;line-height:1;padding:3px 5px"' + (idx === presets.length - 1 ? ' disabled' : '') + '>▼</button>' +
-				'    <span class="mj-pr-meta">#' + p.id + '</span>' +
+				'  <span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0">' +
+				'    <button type="button" class="mj-pr-btn mj-pr-icon-btn" data-ren="' + p.id + '" title="Rename preset"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5a1.4 1.4 0 0 1 2 2L5 13l-3 1 1-3 8.5-8.5z"/></svg></button>' +
+				'    <button type="button" class="mj-pr-btn mj-pr-icon-btn" data-mvup="' + p.id + '" title="Move up"' + (idx === 0 ? ' disabled' : '') + '><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5L6 4l3.5 3.5"/></svg></button>' +
+				'    <button type="button" class="mj-pr-btn mj-pr-icon-btn" data-mvdn="' + p.id + '" title="Move down"' + (idx === presets.length - 1 ? ' disabled' : '') + '><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5L6 8l3.5-3.5"/></svg></button>' +
+				'    <span class="mj-pr-meta" style="line-height:22px;margin-left:2px">#' + p.id + '</span>' +
 				'  </span>' +
 				'</div>' +
 				'<div class="mj-pr-meta">' + ptText + '<br>' + (badges.join(' · ') || 'Pan/Tilt only') + '</div>' +
