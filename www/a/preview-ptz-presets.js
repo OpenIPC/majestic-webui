@@ -145,7 +145,7 @@
 
 	const popMap = document.createElement('div');
 	popMap.hidden = true;
-	popMap.style.cssText = 'position:fixed;bottom:16px;left:16px;z-index:1055;width:min(460px,95vw);background:rgba(16,19,26,.94);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.22);border-radius:10px;box-shadow:0 16px 40px rgba(0,0,0,.65);color:#e9ecef;font-family:inherit;overflow:hidden';
+	popMap.style.cssText = 'position:fixed;bottom:72px;left:16px;z-index:1055;width:min(460px,95vw);background:rgba(16,19,26,.94);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.22);border-radius:10px;box-shadow:0 16px 40px rgba(0,0,0,.65);color:#e9ecef;font-family:inherit;overflow:hidden';
 	popMap.innerHTML =
 		'<div data-pm="hdr" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 11px;background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.1);cursor:move;user-select:none">' +
 		'  <span style="font-size:.8rem;font-weight:600;color:#fff">Preset Map <span data-pm="status" style="font-weight:400;font-size:.72rem;color:#adb5bd;margin-left:4px"></span></span>' +
@@ -206,6 +206,7 @@
 			const ny = Math.max(4, Math.min(window.innerHeight - 80, oy + (e.clientY - sy)));
 			popMap.style.left = nx + 'px';
 			popMap.style.top = ny + 'px';
+			popMap.dataset.moved = '1';
 		});
 		hdr.addEventListener('pointerup', () => { dragging = false; });
 	})();
@@ -902,7 +903,20 @@
 
 	prBtn.addEventListener('click', e => {
 		e.preventDefault();
-		modal.hidden = true;
+		if (!popMap.hidden || !modal.hidden) {
+			popMap.hidden = true;
+			modal.hidden = true;
+			return;
+		}
+		if (!popMap.dataset.moved) {
+			const bar = document.getElementById('mj-bar');
+			if (bar) {
+				const r = bar.getBoundingClientRect();
+				if (r.height > 0 && r.top > 200) {
+					popMap.style.bottom = Math.max(72, Math.round(window.innerHeight - r.top + 12)) + 'px';
+				}
+			}
+		}
 		popMap.hidden = false;
 		renderList();
 		loadPresets(true);
