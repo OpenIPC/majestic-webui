@@ -8,6 +8,8 @@
 PRESETS_FILE="/etc/ptz_presets.tsv"
 POS_FILE="/tmp/ptz_pos.conf"
 BOOT_HOME_FILE="/etc/ptz_boot_home"
+MAP_BG_FILE="/tmp/ptz_map_bg.jpg"
+MAP_BG_META="/tmp/ptz_map_bg.meta"
 
 if [ ! -f "$PRESETS_FILE" ]; then
 	touch "$PRESETS_FILE" 2>/dev/null
@@ -74,6 +76,26 @@ send_pelco_preset_cmd() {
 		"{\"version\":1,\"id\":\"webui-preset\",\"op\":\"raw\",\"payload\":{\"bytes\":\"$hex\"}}" >/dev/null 2>&1
 }
 
+now_ms() {
+	awk '{printf "%d", $1 * 1000}' /proc/uptime 2>/dev/null || echo 0
+}
+
+apply_axis_delta() {
+	ax_dir="$1"
+	ax_ms="$2"
+	[ -z "$ax_ms" ] || [ "$ax_ms" -le 0 ] 2>/dev/null && return
+	read_pos
+	case "$ax_dir" in
+		right) PAN_MS=$((PAN_MS + ax_ms)) ;;
+		left)  PAN_MS=$((PAN_MS - ax_ms)) ;;
+		up)    TILT_MS=$((TILT_MS + ax_ms)) ;;
+		down)  TILT_MS=$((TILT_MS - ax_ms)) ;;
+		far)   FOCUS_MS=$((FOCUS_MS + ax_ms)) ;;
+		near)  FOCUS_MS=$((FOCUS_MS - ax_ms)) ;;
+	esac
+	write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS"
+}
+
 drive_axis_ms() {
 	drv_dir="$1"
 	drv_rem="$2"
@@ -83,7 +105,18 @@ drive_axis_ms() {
 		else
 			drv_chunk="$drv_rem"
 		fi
-		/usr/bin/motors-cli --socket /run/motorsd.sock --role automation "$drv_dir" "$drv_chunk" >/dev/null 2>&1 || return 1
+		t0=$(now_ms)
+		: > /tmp/majestic-af.cancel 2>/dev/null || true
+		if /usr/bin/motors-cli --socket /run/motorsd.sock --role automation "$drv_dir" "$drv_chunk" >/dev/null 2>&1; then
+			apply_axis_delta "$drv_dir" "$drv_chunk"
+		else
+			t1=$(now_ms)
+			el=$((t1 - t0))
+			[ "$el" -lt 0 ] && el=0
+			[ "$el" -gt "$drv_chunk" ] && el="$drv_chunk"
+			[ "$el" -ge 20 ] && apply_axis_delta "$drv_dir" "$el"
+			return 1
+		fi
 		drv_rem=$((drv_rem - drv_chunk))
 		if [ "$drv_rem" -ge 30 ]; then
 			usleep 100000 2>/dev/null || sleep 1
@@ -100,6 +133,9 @@ restore_zoom_and_af() {
 	dtilt="$5"
 	dfocus="$6"
 
+	: > /tmp/majestic-af.cancel 2>/dev/null || true
+	/usr/bin/motorsctl --socket /run/motorsd.sock \
+		'{"version":1,"id":"preempt-af","op":"acquire","axis":"focus","role":"manual","lease_ms":50}' >/dev/null 2>&1 || true
 	/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1
 	usleep 120000 2>/dev/null || true
 
@@ -171,6 +207,7 @@ restore_zoom_and_af() {
 			if [ "$zdir" = "done" ] || [ -z "$zdir" ]; then
 				break
 			fi
+			: > /tmp/majestic-af.cancel 2>/dev/null || true
 			/usr/bin/motors-cli --socket /run/motorsd.sock --role automation "$zdir" "$zms" >/dev/null 2>&1 || return 1
 			usleep 200000 2>/dev/null || sleep 1
 			step=$((step + 1))
@@ -191,6 +228,8 @@ restore_zoom_and_af() {
 			usleep 120000 2>/dev/null || true
 		fi
 	fi
+	rm -f /tmp/majestic-af.cancel 2>/dev/null || true
+	return 0
 }
 
 json_escape() {
@@ -202,7 +241,16 @@ emit_list() {
 	cur_mag=$(get_current_mag)
 	read_pos
 	boot_home=$(read_boot_home)
-	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s,"boot_home":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$boot_home"
+	has_bg="false"
+	BG_PAN="null"
+	BG_TILT="null"
+	if [ -s "$MAP_BG_FILE" ]; then
+		has_bg="true"
+		[ -f "$MAP_BG_META" ] && . "$MAP_BG_META" 2>/dev/null
+		case "$BG_PAN" in ''|*[!0-9-]*) BG_PAN="null" ;; esac
+		case "$BG_TILT" in ''|*[!0-9-]*) BG_TILT="null" ;; esac
+	fi
+	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s,"boot_home":%s,"has_map_bg":%s,"bg_pan":%s,"bg_tilt":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$boot_home" "$has_bg" "$BG_PAN" "$BG_TILT"
 	if [ -n "$extra_msg" ]; then
 		esc_msg=$(json_escape "$extra_msg")
 		printf ',"message":"%s"' "$esc_msg"
@@ -231,8 +279,8 @@ emit_list() {
 }
 
 RAW_QS="$QUERY_STRING"
-if [ "$REQUEST_METHOD" = "POST" ]; then
-	BODY=$(cat)
+if [ "$REQUEST_METHOD" = "POST" ] && [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null; then
+	BODY=$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)
 	if [ -n "$BODY" ]; then
 		RAW_QS="${RAW_QS}&${BODY}"
 	fi
@@ -261,6 +309,22 @@ for param in $(echo "$RAW_QS" | tr '&' ' '); do
 		focus_ms=*) IN_FOCUS=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 	esac
 done
+
+if [ "$ACT" = "map_bg" ]; then
+	if [ -s "$MAP_BG_FILE" ]; then
+		echo "HTTP/1.1 200 OK"
+		echo "Content-Type: image/jpeg"
+		echo "Cache-Control: no-store"
+		echo ""
+		cat "$MAP_BG_FILE"
+	else
+		echo "HTTP/1.1 404 Not Found"
+		echo "Content-Type: text/plain"
+		echo ""
+		echo "No map background image"
+	fi
+	exit 0
+fi
 
 if [ "$ACT" != "list" ] && [ "$REQUEST_METHOD" != "POST" ]; then
 	echo "HTTP/1.1 405 Method Not Allowed"
@@ -405,8 +469,102 @@ EOF
 		;;
 
 	zero)
+		read_pos
+		if [ -f "$PRESETS_FILE" ] && { [ "$PAN_MS" -ne 0 ] || [ "$TILT_MS" -ne 0 ] || [ "$FOCUS_MS" -ne 0 ]; }; then
+			awk -F'|' -v OFS='|' -v dp="$PAN_MS" -v dt="$TILT_MS" -v df="$FOCUS_MS" '
+				/^[[:space:]]*$/ { next }
+				{
+					$6 = ($6 + 0) - dp
+					$7 = ($7 + 0) - dt
+					if ($8 != "" && $8 != "null") $8 = ($8 + 0) - df
+					print $0
+				}
+			' "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" && mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
+		fi
+		if [ -f "$MAP_BG_META" ] && { [ "$PAN_MS" -ne 0 ] || [ "$TILT_MS" -ne 0 ]; }; then
+			BG_PAN=""
+			BG_TILT=""
+			. "$MAP_BG_META" 2>/dev/null || true
+			case "$BG_PAN" in ''|*[!0-9-]*) ;; *) BG_PAN=$((BG_PAN - PAN_MS)) ;; esac
+			case "$BG_TILT" in ''|*[!0-9-]*) ;; *) BG_TILT=$((BG_TILT - TILT_MS)) ;; esac
+			printf "BG_PAN=%s\nBG_TILT=%s\n" "${BG_PAN:-0}" "${BG_TILT:-0}" > "$MAP_BG_META"
+		fi
 		write_pos 0 0 0
-		emit_list "Current camera direction set as Pan/Tilt/Focus origin (0, 0, 0)"
+		emit_list "Current camera direction set as new Origin (0, 0, 0); saved presets shifted to match"
+		;;
+
+	shift_all)
+		case "$IN_PAN" in ''|*[!0-9-]*) IN_PAN=0 ;; esac
+		case "$IN_TILT" in ''|*[!0-9-]*) IN_TILT=0 ;; esac
+		if [ -f "$PRESETS_FILE" ] && { [ "$IN_PAN" -ne 0 ] || [ "$IN_TILT" -ne 0 ]; }; then
+			awk -F'|' -v OFS='|' -v dp="$IN_PAN" -v dt="$IN_TILT" '
+				/^[[:space:]]*$/ { next }
+				{
+					$6 = ($6 + 0) + dp
+					$7 = ($7 + 0) + dt
+					print $0
+				}
+			' "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" && mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
+		fi
+		emit_list "Shifted all presets by Pan ${IN_PAN}ms, Tilt ${IN_TILT}ms"
+		;;
+
+	sync_pos)
+		if [ -z "$ID" ] || [ "$ID" -lt 1 ] || [ "$ID" -gt 32 ]; then
+			echo '{"ok":false,"error":"Invalid preset ID"}'
+			exit 0
+		fi
+		ROW=$(grep "^${ID}|" "$PRESETS_FILE" 2>/dev/null | head -n 1)
+		if [ -z "$ROW" ]; then
+			echo '{"ok":false,"error":"Preset not found"}'
+			exit 0
+		fi
+		read_pos
+		IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
+$ROW
+EOF
+		case "$ppan" in ''|*[!0-9-]*) ppan=0 ;; esac
+		case "$ptilt" in ''|*[!0-9-]*) ptilt=0 ;; esac
+		case "$pfocus" in ''|*[!0-9-]*) pfocus="$FOCUS_MS" ;; esac
+		write_pos "$ppan" "$ptilt" "$pfocus"
+		emit_list "Re-homed camera coordinates to '${pname}' (#${ID}: Pan ${ppan}ms, Tilt ${ptilt}ms)"
+		;;
+
+	set_home_here)
+		read_pos
+		CUR_MAG=$(get_current_mag)
+		bh=$(read_boot_home)
+		if [ "$bh" = "null" ] || [ -z "$bh" ]; then
+			bh=$(awk -F'|' 'tolower($2) ~ /^home/ { print $1; exit }' "$PRESETS_FILE" 2>/dev/null)
+		fi
+		if [ -z "$bh" ]; then
+			bh=1
+			while [ "$bh" -le 32 ]; do
+				grep -q "^${bh}|" "$PRESETS_FILE" 2>/dev/null || break
+				bh=$((bh + 1))
+			done
+			[ "$bh" -gt 32 ] && bh=1
+		fi
+		EXISTING_NAME=""
+		EXISTING_AF="0"
+		EXISTING_ZOOM="1"
+		ROW=$(grep "^${bh}|" "$PRESETS_FILE" 2>/dev/null | head -n 1)
+		if [ -n "$ROW" ]; then
+			IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
+$ROW
+EOF
+			EXISTING_NAME="$pname"
+			[ -n "$paf" ] && EXISTING_AF="$paf"
+			[ -n "$pzoom" ] && EXISTING_ZOOM="$pzoom"
+		fi
+		CLEAN_NAME=$(printf '%s' "$NAME" | tr '\t\r\n|' '    ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -c1-32)
+		[ -z "$CLEAN_NAME" ] && CLEAN_NAME="${EXISTING_NAME:-Home}"
+		if motor_service_ready; then
+			send_pelco_preset_cmd 3 "$bh"
+		fi
+		upsert_preset_row "$bh" "${bh}|${CLEAN_NAME}|${CUR_MAG}|${EXISTING_AF}|${EXISTING_ZOOM}|${PAN_MS}|${TILT_MS}|${FOCUS_MS}"
+		printf '%s\n' "$bh" > "$BOOT_HOME_FILE"
+		emit_list "Home set to '${CLEAN_NAME}' (#${bh} at Pan ${PAN_MS}ms, Tilt ${TILT_MS}ms, Zoom ${CUR_MAG:-unknown}x)"
 		;;
 
 	toggle_af)
@@ -440,7 +598,7 @@ EOF
 			echo '{"ok":false,"error":"Another PTZ move is in progress"}'
 			exit 0
 		fi
-		trap 'rm -rf /tmp/ptz_job.lock 2>/dev/null || true' EXIT
+		trap 'rm -rf /tmp/ptz_job.lock /tmp/majestic-af.cancel 2>/dev/null || true' EXIT
 		ROW=$(grep "^${ID}|" "$PRESETS_FILE" | head -n 1)
 		if [ -n "$ROW" ]; then
 			IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
@@ -462,10 +620,23 @@ EOF
 				write_pos "$ppan" "$ptilt" "$NEW_FOCUS"
 				emit_list "Moved to '${pname}' (dPan=${DPAN}ms, dTilt=${DTILT}ms)"
 			else
-				echo '{"ok":false,"error":"Motor move failed"}'
+				emit_list "Preset move interrupted by manual control (position tracked)"
 			fi
 		else
 			echo '{"ok":false,"error":"Preset not found"}'
+		fi
+		;;
+
+	capture_map_bg)
+		read_pos
+		CUR_MAG=$(get_current_mag)
+		if wget -qO "${MAP_BG_FILE}.tmp" "http://127.0.0.1/image.jpg" 2>/dev/null && [ -s "${MAP_BG_FILE}.tmp" ]; then
+			mv "${MAP_BG_FILE}.tmp" "$MAP_BG_FILE"
+			printf "BG_PAN=%s\nBG_TILT=%s\n" "$PAN_MS" "$TILT_MS" > "$MAP_BG_META"
+			emit_list "Captured map background at current view (Pan ${PAN_MS}ms, Tilt ${TILT_MS}ms, Zoom ${CUR_MAG:-1.0}x)"
+		else
+			rm -f "${MAP_BG_FILE}.tmp"
+			echo '{"ok":false,"error":"Snapshot capture failed"}'
 		fi
 		;;
 
