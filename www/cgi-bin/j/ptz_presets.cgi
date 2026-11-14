@@ -2,11 +2,12 @@
 # CGI endpoint for Named PTZ & Focus Presets
 # Stores presets in /etc/ptz_presets.tsv:
 #   id|name|mag|run_af|zoom_restore|pan_ms|tilt_ms
-# Tracks dead-reckoned open-loop pan/tilt position in /etc/ptz_pos.conf
-# (stored on persistent /etc flash so it survives reboots).
+# Tracks dead-reckoned open-loop pan/tilt position in /tmp/ptz_pos.conf
+# and persists to /etc/ptz_pos.conf on completed moves/releases.
+
+. "$(dirname "$0")/../p/ptz_common.sh"
 
 PRESETS_FILE="/etc/ptz_presets.tsv"
-POS_FILE="/tmp/ptz_pos.conf"
 BOOT_HOME_FILE="/etc/ptz_boot_home"
 MAP_BG_FILE="/tmp/ptz_map_bg.jpg"
 MAP_BG_META="/tmp/ptz_map_bg.meta"
@@ -24,24 +25,6 @@ read_boot_home() {
 		fi
 	fi
 	echo "null"
-}
-
-read_pos() {
-	PAN_MS=0
-	TILT_MS=0
-	FOCUS_MS=0
-	if [ -f "$POS_FILE" ]; then
-		. "$POS_FILE" 2>/dev/null
-	elif [ -f /etc/ptz_pos.conf ]; then
-		. /etc/ptz_pos.conf 2>/dev/null
-	fi
-	case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
-	case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
-	case "$FOCUS_MS" in ''|*[!0-9-]*) FOCUS_MS=0 ;; esac
-}
-
-write_pos() {
-	printf "PAN_MS=%s\nTILT_MS=%s\nFOCUS_MS=%s\n" "$1" "$2" "${3:-0}" > "${POS_FILE}.tmp" && mv "${POS_FILE}.tmp" "$POS_FILE"
 }
 
 urldecode() {
@@ -64,65 +47,6 @@ get_current_mag() {
 
 motor_service_ready() {
 	[ -x /usr/bin/motors-cli ] && [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]
-}
-
-send_pelco_preset_cmd() {
-	# $1 = cmd2 byte decimal (3=Set, 5=Clear, 7=Call), $2 = preset id (1..32)
-	c2="$1"
-	pid="$2"
-	ck=$(( (1 + c2 + pid) % 256 ))
-	hex=$(printf "ff0100%02x00%02x%02x" "$c2" "$pid" "$ck")
-	/usr/bin/motorsctl --socket /run/motorsd.sock \
-		"{\"version\":1,\"id\":\"webui-preset\",\"op\":\"raw\",\"payload\":{\"bytes\":\"$hex\"}}" >/dev/null 2>&1
-}
-
-now_ms() {
-	awk '{printf "%d", $1 * 1000}' /proc/uptime 2>/dev/null || echo 0
-}
-
-apply_axis_delta() {
-	ax_dir="$1"
-	ax_ms="$2"
-	[ -z "$ax_ms" ] || [ "$ax_ms" -le 0 ] 2>/dev/null && return
-	read_pos
-	case "$ax_dir" in
-		right) PAN_MS=$((PAN_MS + ax_ms)) ;;
-		left)  PAN_MS=$((PAN_MS - ax_ms)) ;;
-		up)    TILT_MS=$((TILT_MS + ax_ms)) ;;
-		down)  TILT_MS=$((TILT_MS - ax_ms)) ;;
-		far)   FOCUS_MS=$((FOCUS_MS + ax_ms)) ;;
-		near)  FOCUS_MS=$((FOCUS_MS - ax_ms)) ;;
-	esac
-	write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS"
-}
-
-drive_axis_ms() {
-	drv_dir="$1"
-	drv_rem="$2"
-	while [ "$drv_rem" -ge 30 ]; do
-		if [ "$drv_rem" -gt 3500 ]; then
-			drv_chunk=3500
-		else
-			drv_chunk="$drv_rem"
-		fi
-		t0=$(now_ms)
-		: > /tmp/majestic-af.cancel 2>/dev/null || true
-		if /usr/bin/motors-cli --socket /run/motorsd.sock --role automation "$drv_dir" "$drv_chunk" >/dev/null 2>&1; then
-			apply_axis_delta "$drv_dir" "$drv_chunk"
-		else
-			t1=$(now_ms)
-			el=$((t1 - t0))
-			[ "$el" -lt 0 ] && el=0
-			[ "$el" -gt "$drv_chunk" ] && el="$drv_chunk"
-			[ "$el" -ge 20 ] && apply_axis_delta "$drv_dir" "$el"
-			return 1
-		fi
-		drv_rem=$((drv_rem - drv_chunk))
-		if [ "$drv_rem" -ge 30 ]; then
-			usleep 100000 2>/dev/null || sleep 1
-		fi
-	done
-	return 0
 }
 
 restore_zoom_and_af() {
@@ -149,7 +73,7 @@ restore_zoom_and_af() {
 			pabs=$((0 - dpan))
 		fi
 		if [ "$pabs" -ge 30 ]; then
-			drive_axis_ms "$pdir" "$pabs" || return 1
+			ptz_drive_axis_ms "$pdir" "$pabs" automation || return 1
 			usleep 120000 2>/dev/null || true
 		fi
 	fi
@@ -164,7 +88,7 @@ restore_zoom_and_af() {
 			tabs=$((0 - dtilt))
 		fi
 		if [ "$tabs" -ge 30 ]; then
-			drive_axis_ms "$tdir" "$tabs" || return 1
+			ptz_drive_axis_ms "$tdir" "$tabs" automation || return 1
 			usleep 120000 2>/dev/null || true
 		fi
 	fi
@@ -224,7 +148,7 @@ restore_zoom_and_af() {
 			fabs=$((0 - dfocus))
 		fi
 		if [ "$fabs" -ge 30 ]; then
-			drive_axis_ms "$fdir" "$fabs" || return 1
+			ptz_drive_axis_ms "$fdir" "$fabs" automation || return 1
 			usleep 120000 2>/dev/null || true
 		fi
 	fi
@@ -239,7 +163,7 @@ json_escape() {
 emit_list() {
 	extra_msg="$1"
 	cur_mag=$(get_current_mag)
-	read_pos
+	ptz_read_pos
 	boot_home=$(read_boot_home)
 	has_bg="false"
 	BG_PAN="null"
@@ -336,6 +260,8 @@ if [ "$ACT" != "list" ] && [ "$REQUEST_METHOD" != "POST" ]; then
 	exit 1
 fi
 
+[ "$REQUEST_METHOD" = "POST" ] && ptz_reject_cross_site
+
 echo "HTTP/1.1 200 OK"
 echo "Content-Type: application/json"
 echo "Cache-Control: no-store, no-cache, must-revalidate"
@@ -395,7 +321,7 @@ case "$ACT" in
 		[ -z "$ZOOM_RESTORE" ] && ZOOM_RESTORE="1"
 
 		CUR_MAG=$(get_current_mag)
-		read_pos
+		ptz_read_pos
 		SAVE_PAN="$PAN_MS"
 		SAVE_TILT="$TILT_MS"
 		SAVE_FOCUS="$FOCUS_MS"
@@ -407,10 +333,6 @@ case "$ACT" in
 		fi
 		if [ -n "$IN_FOCUS" ]; then
 			case "$IN_FOCUS" in ''|*[!0-9-]*) ;; *) SAVE_FOCUS="$IN_FOCUS" ;; esac
-		fi
-
-		if motor_service_ready; then
-			send_pelco_preset_cmd 3 "$ID"
 		fi
 
 		upsert_preset_row "$ID" "${ID}|${CLEAN_NAME}|${CUR_MAG}|${RUN_AF}|${ZOOM_RESTORE}|${SAVE_PAN}|${SAVE_TILT}|${SAVE_FOCUS}"
@@ -469,7 +391,7 @@ EOF
 		;;
 
 	zero)
-		read_pos
+		ptz_read_pos
 		if [ -f "$PRESETS_FILE" ] && { [ "$PAN_MS" -ne 0 ] || [ "$TILT_MS" -ne 0 ] || [ "$FOCUS_MS" -ne 0 ]; }; then
 			awk -F'|' -v OFS='|' -v dp="$PAN_MS" -v dt="$TILT_MS" -v df="$FOCUS_MS" '
 				/^[[:space:]]*$/ { next }
@@ -489,7 +411,7 @@ EOF
 			case "$BG_TILT" in ''|*[!0-9-]*) ;; *) BG_TILT=$((BG_TILT - TILT_MS)) ;; esac
 			printf "BG_PAN=%s\nBG_TILT=%s\n" "${BG_PAN:-0}" "${BG_TILT:-0}" > "$MAP_BG_META"
 		fi
-		write_pos 0 0 0
+		ptz_write_pos 0 0 0 1
 		emit_list "Current camera direction set as new Origin (0, 0, 0); saved presets shifted to match"
 		;;
 
@@ -519,19 +441,19 @@ EOF
 			echo '{"ok":false,"error":"Preset not found"}'
 			exit 0
 		fi
-		read_pos
+		ptz_read_pos
 		IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
 $ROW
 EOF
 		case "$ppan" in ''|*[!0-9-]*) ppan=0 ;; esac
 		case "$ptilt" in ''|*[!0-9-]*) ptilt=0 ;; esac
 		case "$pfocus" in ''|*[!0-9-]*) pfocus="$FOCUS_MS" ;; esac
-		write_pos "$ppan" "$ptilt" "$pfocus"
+		ptz_write_pos "$ppan" "$ptilt" "$pfocus" 1
 		emit_list "Re-homed camera coordinates to '${pname}' (#${ID}: Pan ${ppan}ms, Tilt ${ptilt}ms)"
 		;;
 
 	set_home_here)
-		read_pos
+		ptz_read_pos
 		CUR_MAG=$(get_current_mag)
 		bh=$(read_boot_home)
 		if [ "$bh" = "null" ] || [ -z "$bh" ]; then
@@ -559,9 +481,6 @@ EOF
 		fi
 		CLEAN_NAME=$(printf '%s' "$NAME" | tr '\t\r\n|' '    ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -c1-32)
 		[ -z "$CLEAN_NAME" ] && CLEAN_NAME="${EXISTING_NAME:-Home}"
-		if motor_service_ready; then
-			send_pelco_preset_cmd 3 "$bh"
-		fi
 		upsert_preset_row "$bh" "${bh}|${CLEAN_NAME}|${CUR_MAG}|${EXISTING_AF}|${EXISTING_ZOOM}|${PAN_MS}|${TILT_MS}|${FOCUS_MS}"
 		printf '%s\n' "$bh" > "$BOOT_HOME_FILE"
 		emit_list "Home set to '${CLEAN_NAME}' (#${bh} at Pan ${PAN_MS}ms, Tilt ${TILT_MS}ms, Zoom ${CUR_MAG:-unknown}x)"
@@ -607,7 +526,7 @@ EOF
 			case "$ppan" in ''|*[!0-9-]*) ppan=0 ;; esac
 			case "$ptilt" in ''|*[!0-9-]*) ptilt=0 ;; esac
 			case "$pfocus" in ''|*[!0-9-]*) pfocus="" ;; esac
-			read_pos
+			ptz_read_pos
 			DPAN=$((ppan - PAN_MS))
 			DTILT=$((ptilt - TILT_MS))
 			DFOCUS=""
@@ -617,7 +536,7 @@ EOF
 				NEW_FOCUS="$pfocus"
 			fi
 			if restore_zoom_and_af "$pmag" "$paf" "$pzoom" "$DPAN" "$DTILT" "$DFOCUS"; then
-				write_pos "$ppan" "$ptilt" "$NEW_FOCUS"
+				ptz_write_pos "$ppan" "$ptilt" "$NEW_FOCUS" 1
 				emit_list "Moved to '${pname}' (dPan=${DPAN}ms, dTilt=${DTILT}ms)"
 			else
 				emit_list "Preset move interrupted by manual control (position tracked)"
@@ -628,7 +547,7 @@ EOF
 		;;
 
 	capture_map_bg)
-		read_pos
+		ptz_read_pos
 		CUR_MAG=$(get_current_mag)
 		if wget -qO "${MAP_BG_FILE}.tmp" "http://127.0.0.1/image.jpg" 2>/dev/null && [ -s "${MAP_BG_FILE}.tmp" ]; then
 			mv "${MAP_BG_FILE}.tmp" "$MAP_BG_FILE"
@@ -642,9 +561,6 @@ EOF
 
 	delete)
 		if [ -n "$ID" ] && [ -f "$PRESETS_FILE" ]; then
-			if motor_service_ready; then
-				send_pelco_preset_cmd 5 "$ID"
-			fi
 			grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
 			mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
 			if [ "$(read_boot_home)" = "$ID" ] || { [ -f "$BOOT_HOME_FILE" ] && [ "$(tr -cd '0-9' < "$BOOT_HOME_FILE" 2>/dev/null)" = "$ID" ]; }; then
@@ -668,14 +584,14 @@ EOF
 		;;
 
 	track)
-		read_pos
+		ptz_read_pos
 		case "$IN_PAN" in ''|*[!0-9-]*) IN_PAN=0 ;; esac
 		case "$IN_TILT" in ''|*[!0-9-]*) IN_TILT=0 ;; esac
 		case "$IN_FOCUS" in ''|*[!0-9-]*) IN_FOCUS=0 ;; esac
 		PAN_MS=$((PAN_MS + IN_PAN))
 		TILT_MS=$((TILT_MS + IN_TILT))
 		FOCUS_MS=$((FOCUS_MS + IN_FOCUS))
-		write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS"
+		ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" 1
 		emit_list ""
 		;;
 

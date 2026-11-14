@@ -2,6 +2,8 @@
 
 JSON_FILE="/tmp/af_peaks.json"
 
+. "$(dirname "$0")/../p/ptz_common.sh"
+
 # Clear cached candidate peaks: POST ?clear=1
 if echo "$QUERY_STRING" | grep -q 'clear=1'; then
     if [ "$REQUEST_METHOD" != "POST" ]; then
@@ -12,6 +14,7 @@ if echo "$QUERY_STRING" | grep -q 'clear=1'; then
         echo "Use POST to clear peaks."
         exit 0
     fi
+    ptz_reject_cross_site
     rm -f "$JSON_FILE" /tmp/peak_*.jpg
     echo "HTTP/1.1 200 OK"
     echo "Content-Type: application/json"
@@ -51,6 +54,7 @@ if [ -n "$SELECT_ID" ]; then
         echo "Use POST to select a peak."
         exit 0
     fi
+    ptz_reject_cross_site
     if [ ! -f "$JSON_FILE" ]; then
         echo "HTTP/1.1 404 Not Found"
         echo "Content-Type: application/json"
@@ -105,7 +109,22 @@ if [ -n "$SELECT_ID" ]; then
         fi
         DRIVE_MS=$((MS + BACKLASH))
         if [ "$DRIVE_MS" -gt 0 ]; then
-            motors-cli "$CMD" "$DRIVE_MS" >/dev/null 2>&1
+            if ! mkdir /tmp/ptz_job.lock 2>/dev/null; then
+                old_pid=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
+                if [ -z "$old_pid" ] || ! kill -0 "$old_pid" 2>/dev/null; then
+                    rm -rf /tmp/ptz_job.lock
+                    mkdir /tmp/ptz_job.lock 2>/dev/null
+                else
+                    echo "HTTP/1.1 409 Conflict"
+                    echo "Content-Type: application/json"
+                    echo ""
+                    echo '{"ok":false,"error":"Another PTZ move is in progress"}'
+                    exit 0
+                fi
+            fi
+            echo "$$" > /tmp/ptz_job.lock/pid
+            trap 'rm -rf /tmp/ptz_job.lock' EXIT
+            /usr/bin/motors-cli --socket /run/motorsd.sock "$CMD" "$DRIVE_MS" >/dev/null 2>&1
             RC=$?
             if [ "$RC" -ne 0 ]; then
                 echo "HTTP/1.1 500 Internal Server Error"
@@ -114,6 +133,8 @@ if [ -n "$SELECT_ID" ]; then
                 echo '{"ok":false,"error":"motors-cli failed"}'
                 exit 0
             fi
+            ptz_read_pos
+            ptz_write_pos "$PAN_MS" "$TILT_MS" "$((FOCUS_MS + DELTA))" 1
         fi
     fi
 

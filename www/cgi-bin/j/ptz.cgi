@@ -13,6 +13,7 @@
 # camera better than this script does.
 
 . "$(dirname "$0")/../p/majestic.sh"
+. "$(dirname "$0")/../p/ptz_common.sh"
 
 # Moving hardware is not a safe method. A GET is what a browser issues on its
 # own -- a prefetch, a restored tab, an <img> or a form on somebody else's page
@@ -58,25 +59,7 @@ fi
 # What still gets through is what should: this page's own fetch, which sends its
 # arguments in the query string and so carries no body and no Content-Type at
 # all, and a command-line POST, which carries none either.
-cross_site=""
-if [ -n "$HTTP_REFERER" ]; then
-	ref_origin="${HTTP_REFERER#*://}"
-	ref_origin="${ref_origin%%/*}"
-	[ "$ref_origin" = "$HTTP_HOST" ] || cross_site=1
-fi
-case "$CONTENT_TYPE" in
-	application/x-www-form-urlencoded*|multipart/form-data*|text/plain*)
-		cross_site=1
-		;;
-esac
-if [ -n "$cross_site" ]; then
-	echo "HTTP/1.1 400 Bad Request
-Content-type: text/plain; charset=UTF-8
-Cache-Control: no-store
-
-Cross-site PTZ refused."
-	exit 1
-fi
+ptz_reject_cross_site
 
 echo "HTTP/1.1 200 OK
 Content-type: text/plain; charset=UTF-8
@@ -93,8 +76,6 @@ SPEED_PCT=""
 DESCRIBE=""
 COMMAND=""
 VALUE=""
-MOVED_DIR=""
-MOVED_MS=""
 for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 	case "$param" in
 		h=*) HORIZONTAL="${param#*=}" ;;
@@ -105,8 +86,6 @@ for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 		describe=*) DESCRIBE="${param#*=}" ;;
 		command=*) COMMAND="${param#*=}" ;;
 		value=*) VALUE="${param#*=}" ;;
-		moved_dir=*) MOVED_DIR="${param#*=}" ;;
-		moved_ms=*) MOVED_MS="${param#*=}" ;;
 	esac
 done
 
@@ -344,9 +323,10 @@ if [ -n "$ACTION" ]; then
 				# lock file.
 				if [ -n "$SPEED_PCT" ] && [ "$service_ok" = 1 ] && [ -x /usr/bin/motors-cli ] &&
 					{ [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ] || [ "$ACTION" = "left" ] || [ "$ACTION" = "right" ]; }; then
-					pelco_spd=$(( (SPEED_PCT * 20 + 50) / 100 ))
+					PELCO_MAX_SPEED=63
+					pelco_spd=$(( (SPEED_PCT * PELCO_MAX_SPEED + 50) / 100 ))
 					[ "$pelco_spd" -lt 1 ] && pelco_spd=1
-					[ "$pelco_spd" -gt 63 ] && pelco_spd=63
+					[ "$pelco_spd" -gt "$PELCO_MAX_SPEED" ] && pelco_spd="$PELCO_MAX_SPEED"
 					/usr/bin/motors-cli --socket /run/motorsd.sock --speed "$pelco_spd" "$ACTION" "${DURATION_MS:-250}"
 					exit $?
 				fi
@@ -360,36 +340,6 @@ if [ -n "$ACTION" ]; then
 				else
 					out=$(mj_ptz "$ACTION")
 					rc=$?
-					if [ "$rc" -eq 0 ] && [ "$out" != "unavailable" ] &&
-						[ "$ACTION" = "stop" ] && [ -n "$MOVED_DIR" ] && [ -n "$MOVED_MS" ]; then
-						case "$MOVED_MS" in
-							''|*[!0-9]*) ;;
-							*)
-								if [ "$MOVED_MS" -ge 1 ] && [ "$MOVED_MS" -le 15000 ]; then
-									PAN_MS=0
-									TILT_MS=0
-									FOCUS_MS=0
-									if [ -f /tmp/ptz_pos.conf ]; then
-										. /tmp/ptz_pos.conf 2>/dev/null
-									elif [ -f /etc/ptz_pos.conf ]; then
-										. /etc/ptz_pos.conf 2>/dev/null
-									fi
-									case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
-									case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
-									case "$FOCUS_MS" in ''|*[!0-9-]*) FOCUS_MS=0 ;; esac
-									case "$MOVED_DIR" in
-										right) PAN_MS=$((PAN_MS + MOVED_MS)) ;;
-										left)  PAN_MS=$((PAN_MS - MOVED_MS)) ;;
-										up)    TILT_MS=$((TILT_MS + MOVED_MS)) ;;
-										down)  TILT_MS=$((TILT_MS - MOVED_MS)) ;;
-										far)   FOCUS_MS=$((FOCUS_MS + MOVED_MS)) ;;
-										near)  FOCUS_MS=$((FOCUS_MS - MOVED_MS)) ;;
-									esac
-									printf "PAN_MS=%s\nTILT_MS=%s\nFOCUS_MS=%s\n" "$PAN_MS" "$TILT_MS" "$FOCUS_MS" > /tmp/ptz_pos.conf.tmp && mv /tmp/ptz_pos.conf.tmp /tmp/ptz_pos.conf
-								fi
-								;;
-						esac
-					fi
 				fi
 				if { [ "$rc" -ne 0 ] || [ "$out" = "unavailable" ]; } &&
 					[ "$service_ok" = 1 ] && [ -x /usr/bin/motors-cli ]; then

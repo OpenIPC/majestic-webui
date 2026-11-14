@@ -30,7 +30,7 @@ const BROWSER = new Set(`
 	AbortController AudioContext AudioWorkletNode Blob BroadcastChannel
 	CSS CompressionStream CustomEvent DOMParser DataView DecompressionStream
 	Element Event EventSource File FileReader FormData HTMLCanvasElement
-	HTMLElement Headers Image ImageData Intl MediaSource MediaStream
+	HTMLElement HTMLVideoElement Headers Image ImageData Intl MediaSource MediaStream
 	MediaStreamTrackProcessor MutationObserver Node Notification
 	OffscreenCanvas Option RTCPeerConnection ReadableStream Request
 	ResizeObserver Response TextDecoder TextEncoder URL URLSearchParams

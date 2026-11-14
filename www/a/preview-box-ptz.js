@@ -12,6 +12,10 @@
 	const fn = typeof $ === 'function' ? $('#mj-ptz-fn') : document.getElementById('mj-ptz-fn');
 	const stage = typeof $ === 'function' ? $('#mj-stage') : document.getElementById('mj-stage');
 	if (!fn || !stage || typeof apiFetch !== 'function') return;
+	const ptzControl = fn.dataset.ptzControl || '';
+	const ptzCaps = (fn.dataset.ptzCaps || '').trim();
+	const hasCap = (c) => !ptzCaps || (' ' + ptzCaps + ' ').indexOf(' ' + c + ' ') >= 0;
+	if ((ptzControl !== 'motorsd' && ptzControl !== 'anjoy') || !hasCap('pan') || !hasCap('tilt')) return;
 
 	function stored(k, fallback) {
 		try {
@@ -110,7 +114,7 @@
 		const boxSpan = Math.max(spanW, spanH, 0.03);
 		if (boxSpan >= 0.90) return 1.0;
 		const ratio = 1.0 / boxSpan;
-		return Math.min(57.0, Math.max(1.0, ratio * Math.sqrt(ratio)));
+		return Math.min(57.0, Math.max(1.0, ratio));
 	}
 
 	function setBtnState(btn, bg, label) {

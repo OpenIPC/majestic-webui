@@ -33,12 +33,8 @@
      (stop/home) stays whenever the pad renders. j/ptz.cgi holds the same
      line server-side. -->
 <%
-has_cap() {
-	[ -z "$ptz_caps" ] && return 0
-	case " $ptz_caps " in *" $1 "*) return 0 ;; esac
-	return 1
-}
-
+[ -n "$ptz_control" ] || ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
+ptz_orient=$(fw_printenv -n ptz_orient 2>/dev/null)
 # Near and Far are only "manual" focus in contrast to something automatic, so
 # the caption starts plain and preview-ptz.js promotes it once the camera has
 # answered that an engine is there. Server-side this cannot be known without
@@ -82,7 +78,7 @@ focus_label="Focus"
 <p id="mj-af-say" class="mj-adapt-toast mj-ptz-why small" role="status" aria-live="polite" hidden></p>
 <% fi %>
 <% if has_cap zoom || has_cap focus || has_cap iris; then %>
-<div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom, focus and iris" hidden>
+<div id="mj-ptz-fn" class="mj-ptz-fn" role="group" aria-label="Zoom, focus and iris" data-ptz-control="<%= $ptz_control %>" data-ptz-caps="<%= $ptz_caps %>" hidden>
 	<% if has_cap zoom; then %>
 	<span id="mj-ptz-zoom-label" class="mj-ptz-group">Zoom</span>
 	<button type="button" class="mj-ptz-fnbtn" data-act="wide" aria-label="Zoom out" title="Zoom out (wide)">
@@ -162,8 +158,8 @@ focus_label="Focus"
 </div>
 <% fi %>
 <% if has_cap pan || has_cap tilt; then %>
-<div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
-	<span id="mj-ptz-xy-label" class="mj-ptz-group" style="grid-column: span 3;">Pan / Tilt</span>
+<span id="mj-ptz-xy-label" class="mj-ptz-group" style="display:block;width:100%;" hidden>Pan / Tilt</span>
+<div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" data-ptz-control="<%= $ptz_control %>" data-ptz-caps="<%= $ptz_caps %>" data-ptz-orient="<%= $ptz_orient %>" hidden>
 	<span class="mj-ptz-void"></span>
 	<% if has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-act="up" aria-label="Tilt up">
@@ -228,7 +224,7 @@ focus_label="Focus"
 <% fi %>
 <% else %>
 <% if has_cap pan || has_cap tilt; then %>
-<div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" hidden>
+<div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" data-ptz-control="<%= $ptz_control %>" data-ptz-caps="<%= $ptz_caps %>" data-ptz-orient="<%= $ptz_orient %>" hidden>
 	<span id="mj-ptz-xy-label-alt" class="mj-ptz-group" style="grid-column: span 3;">Pan / Tilt</span>
 	<% if has_cap pan && has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="ul" aria-label="Pan up-left">

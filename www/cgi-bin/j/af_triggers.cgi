@@ -6,6 +6,8 @@ CONF="/etc/af_triggers.conf"
 CRON_FILE="/etc/crontabs/root"
 CHECK_BIN="/usr/bin/af-trigger-check"
 
+. "$(dirname "$0")/../p/ptz_common.sh"
+
 load_conf() {
 	TRIGGER_MODE="ptz"
 	ON_IRCUT="1"
@@ -116,6 +118,7 @@ sync_cron() {
 load_conf
 
 if [ "$REQUEST_METHOD" = "POST" ]; then
+	ptz_reject_cross_site
 	for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 		case "$param" in
 			trigger_mode=*)

@@ -4,27 +4,9 @@
 # scaled by the current Field of View (1.0x wide .. 57.0x tele),
 # and drives closed-loop optical zoom to target_mag (or mag * zoom_factor),
 # followed by an automatic focus pass.
-# Also updates /etc/ptz_pos.conf so Presets stay synchronized.
+# Also updates /tmp/ptz_pos.conf and persists to /etc/ptz_pos.conf so Presets stay synchronized.
 
-POS_FILE="/tmp/ptz_pos.conf"
-
-read_pos() {
-	PAN_MS=0
-	TILT_MS=0
-	FOCUS_MS=0
-	if [ -f "$POS_FILE" ]; then
-		. "$POS_FILE" 2>/dev/null
-	elif [ -f /etc/ptz_pos.conf ]; then
-		. /etc/ptz_pos.conf 2>/dev/null
-	fi
-	case "$PAN_MS" in ''|*[!0-9-]*) PAN_MS=0 ;; esac
-	case "$TILT_MS" in ''|*[!0-9-]*) TILT_MS=0 ;; esac
-	case "$FOCUS_MS" in ''|*[!0-9-]*) FOCUS_MS=0 ;; esac
-}
-
-write_pos() {
-	printf "PAN_MS=%s\nTILT_MS=%s\nFOCUS_MS=%s\n" "$1" "$2" "${3:-$FOCUS_MS}" > "${POS_FILE}.tmp" && mv "${POS_FILE}.tmp" "$POS_FILE"
-}
+. "$(dirname "$0")/../p/ptz_common.sh"
 
 get_current_mag() {
 	z=""
@@ -44,27 +26,9 @@ motor_service_ready() {
 	[ -x /usr/bin/motors-cli ] && [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]
 }
 
-drive_axis_ms() {
-	drv_dir="$1"
-	drv_rem="$2"
-	while [ "$drv_rem" -ge 30 ]; do
-		if [ "$drv_rem" -gt 3500 ]; then
-			drv_chunk=3500
-		else
-			drv_chunk="$drv_rem"
-		fi
-		/usr/bin/motors-cli --socket /run/motorsd.sock "$drv_dir" "$drv_chunk" >/dev/null 2>&1 || return 1
-		drv_rem=$((drv_rem - drv_chunk))
-		if [ "$drv_rem" -ge 30 ]; then
-			usleep 80000 2>/dev/null || sleep 1
-		fi
-	done
-	return 0
-}
-
 if [ "$REQUEST_METHOD" != "POST" ]; then
 	cur_mag=$(get_current_mag)
-	read_pos
+	ptz_read_pos
 	echo "HTTP/1.1 200 OK
 Content-Type: application/json
 Cache-Control: no-store
@@ -72,6 +36,8 @@ Cache-Control: no-store
 {\"ok\":true,\"current_mag\":${cur_mag:-null},\"pos_pan_ms\":$PAN_MS,\"pos_tilt_ms\":$TILT_MS}"
 	exit 0
 fi
+
+ptz_reject_cross_site
 
 if ! motor_service_ready; then
 	echo "HTTP/1.1 200 OK
@@ -205,28 +171,16 @@ tdir=$(echo "$plan" | cut -d'|' -f3)
 tms=$(echo "$plan" | cut -d'|' -f4)
 tmag=$(echo "$plan" | cut -d'|' -f5)
 
-read_pos
-if [ "$pdir" = "right" ] && [ "$pms" -gt 0 ]; then
-	PAN_MS=$((PAN_MS + pms))
-elif [ "$pdir" = "left" ] && [ "$pms" -gt 0 ]; then
-	PAN_MS=$((PAN_MS - pms))
-fi
-if [ "$tdir" = "up" ] && [ "$tms" -gt 0 ]; then
-	TILT_MS=$((TILT_MS + tms))
-elif [ "$tdir" = "down" ] && [ "$tms" -gt 0 ]; then
-	TILT_MS=$((TILT_MS - tms))
-fi
-
 run_box_ptz() {
 	/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1
 	usleep 100000 2>/dev/null || true
 
 	if [ "$pms" -gt 0 ] && [ "$pdir" != "none" ]; then
-		drive_axis_ms "$pdir" "$pms" || return 1
+		ptz_drive_axis_ms "$pdir" "$pms" || return 1
 		usleep 120000 2>/dev/null || sleep 1
 	fi
 	if [ "$tms" -gt 0 ] && [ "$tdir" != "none" ]; then
-		drive_axis_ms "$tdir" "$tms" || return 1
+		ptz_drive_axis_ms "$tdir" "$tms" || return 1
 		usleep 120000 2>/dev/null || sleep 1
 	fi
 
@@ -280,7 +234,8 @@ Cache-Control: no-store
 {\"ok\":false,\"error\":\"Motor move failed\"}"
 	exit 0
 }
-write_pos "$PAN_MS" "$TILT_MS"
+ptz_read_pos
+ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" 1
 
 echo "HTTP/1.1 200 OK
 Content-Type: application/json

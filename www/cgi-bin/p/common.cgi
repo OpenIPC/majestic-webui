@@ -1182,7 +1182,7 @@ update_caminfo() {
 
 	local variables="counting_asked counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
+		ptz_backend ptz_caps ptz_control ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file} "$counting_file"
 
 	# Through shq, because this file is SOURCED on every request and several of
@@ -1322,6 +1322,12 @@ fi
 include $sysinfo_file
 include "$counting_file"
 recheck_counting
+
+has_cap() {
+	[ -z "$ptz_caps" ] && return 0
+	case " $ptz_caps " in *" $1 "*) return 0 ;; esac
+	return 1
+}
 
 pagename=$(basename "$SCRIPT_NAME")
 pagename="${pagename%%.*}"

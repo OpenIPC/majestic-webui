@@ -38,7 +38,9 @@
 	// the pad must not be the thing the whole mount hinges on.
 	if (!mount || (!pad && !fn)) return;
 	if (stored('openipc.motor.controls', 'auto') === 'hidden') return;
+	const xyLabel = $('#mj-ptz-xy-label');
 	if (fn) { mount.appendChild(fn); fn.hidden = false; }
+	if (xyLabel) { mount.appendChild(xyLabel); xyLabel.hidden = false; }
 	if (pad) { mount.appendChild(pad); pad.hidden = false; }
 	// The pad's nine cells in the grid's order, as drawn, before anything here
 	// replaces the middle one or adds controls of its own. The axes the head
@@ -46,6 +48,7 @@
 	// where up and down would be. Read once, here, because lay() below moves
 	// a lone pair of arrows onto the other axis.
 	const slots = pad ? Array.from(pad.children) : [];
+	const ptzControl = (pad && pad.dataset.ptzControl) || (fn && fn.dataset.ptzControl) || '';
 	const AXIS_SEL = { pan: '[data-act="left"],[data-act="right"],[data-dir="lc"],[data-dir="rc"]',
 		tilt: '[data-act="up"],[data-act="down"],[data-dir="uc"],[data-dir="dc"]' };
 	const headPan = !!(pad && pad.querySelector(AXIS_SEL.pan));
@@ -89,7 +92,11 @@
 					// A missing or malformed image section is a camera not heard
 					// from, not one that is upright.
 					const img = c && c.image;
-					const t = PO ? PO.of(img && img.rotate === undefined ? { mirror: false, flip: false, rotate: '0' } : img) : null;
+					const uprightHead = !!(pad && pad.dataset.ptzOrient === 'upright');
+					const orientImg = uprightHead && img
+						? { mirror: false, flip: false, rotate: img.rotate === undefined ? '0' : img.rotate }
+						: (img && img.rotate === undefined ? Object.assign({ mirror: false, flip: false }, img, { rotate: '0' }) : img);
+					const t = PO ? PO.of(orientImg) : null;
 					if (!t) return Promise.reject(new Error('no orientation'));
 					turn = t;
 					lay();
@@ -381,12 +388,12 @@
 	// The Pelco pad's top corners are empty cells: the gear and the fold go
 	// there and the open pad is no taller than its arrows. The eight-way pad
 	// has diagonals in them, so there the two sit in a strip at its foot.
-	const corners = !!(pad && pad.children.length > 2 &&
-		pad.children[0].classList.contains('mj-ptz-void') &&
-		pad.children[2].classList.contains('mj-ptz-void'));
+	const corners = !!(slots.length > 2 &&
+		slots[0].classList.contains('mj-ptz-void') &&
+		slots[2].classList.contains('mj-ptz-void'));
 	const isSmall = () => !!(small && small.matches);
 	// Its bottom-left cell, for a handle that has no centre to take.
-	const gripCorner = !!(pad && pad.children.length > 6 && pad.children[6].classList.contains('mj-ptz-void'));
+	const gripCorner = !!(slots.length > 6 && slots[6].classList.contains('mj-ptz-void'));
 	const hasExtras = () => [followBox, $('#mj-ptz-presets')].some(b => !!(b && !b.hidden && b.isConnected));
 	const popOpen = (on) => {
 		more.hidden = !on;
@@ -921,6 +928,7 @@
 			if (!steerable()) return;
 			verb = PO.verb(verb, turn);
 		}
+		if (!isStop && outstanding >= 3) return;
 		if (!isStop && /^(?:up|down|left|right|upleft|upright|downleft|downright)$/.test(verb)) {
 			const sc = effectiveSpeedScale();
 			pct = Math.max(4, Math.round((pct != null ? pct : 100) * sc));
@@ -960,10 +968,10 @@
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
 		if (pct != null && PS) url += PS.query(verb, pct);
-		if (!isStop && /^(?:up|down|left|right)$/.test(verb) && pct != null && pct < 100) {
+		if (!isStop && (ptzControl === 'motorsd' || ptzControl === 'anjoy') &&
+			/^(?:up|down|left|right)$/.test(verb) && pct != null && pct < 100) {
 			url = '/cgi-bin/j/ptz.cgi?act=' + encodeURIComponent(verb) + '&ms=' + (ms || 250) + '&speed=' + pct;
 		}
-		if (!isStop && outstanding >= 3) return;
 		if (!isStop && /(?:left|right|up|down|wide|tele)/.test(verb)) {
 			try { window.dispatchEvent(new CustomEvent('mj:ptz-moved', { detail: { verb } })); } catch (e) {}
 		}
@@ -1208,13 +1216,6 @@
 		if (btn && btn.dataset.act) {
 			const act = btn.dataset.act;
 			const axis = axisFor(act);
-			const trackedMs = Math.round(Math.min(PULSE_MS.maximum, Math.max(axis === 'focus' ? PULSE_MS.focus : PULSE_MS.motor, heldMs)));
-			if (axis === 'pan' || axis === 'tilt' || axis === 'focus') {
-				apiFetch('/cgi-bin/j/ptz.cgi?act=stop&axis=' + axis, {
-					method: 'POST',
-					credentials: 'same-origin'
-				}).catch(() => {});
-			}
 			if (axis === 'zoom' || axis === 'pan' || axis === 'tilt') {
 				if (shouldWatchAfAfter(axis)) watchAf();
 				if (axis === 'zoom') {
@@ -1262,7 +1263,7 @@
 	if (pad) {
 		const spdRow = document.createElement('div');
 		spdRow.className = 'mj-ptz-spd';
-		spdRow.style.cssText = 'grid-column:span 3;display:flex;align-items:center;justify-content:space-between;gap:2px;padding:2px 2px 0;border-top:1px solid rgba(255,255,255,.08);margin-top:2px;';
+		spdRow.style.cssText = 'width:100%;align-self:stretch;display:flex;align-items:center;justify-content:space-between;gap:2px;padding:2px 2px 3px;margin-bottom:2px;border-bottom:1px solid rgba(255,255,255,.08);';
 		const mkSpdBtn = (txt, title, delta) => {
 			const b = document.createElement('button');
 			b.type = 'button';
@@ -1296,7 +1297,7 @@
 		spdRow.appendChild(spdMinusBtn);
 		spdRow.appendChild(spdLabelEl);
 		spdRow.appendChild(spdPlusBtn);
-		pad.appendChild(spdRow);
+		mount.insertBefore(spdRow, pad);
 		refreshSpeedLabel();
 	}
 
@@ -1453,7 +1454,7 @@
 		};
 		// The settings, the fold and the handle are buttons on the pad, not
 		// part of the stick.
-		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip, .mj-ptz-stop, .mj-ptz-spd'));
+		const own = (t) => !!(t && t.closest && t.closest('.mj-ptz-gear, .mj-ptz-fold, .mj-ptz-grip, .mj-ptz-spd'));
 		pad.addEventListener('touchstart', (e) => { if (!own(e.target) && e.cancelable) e.preventDefault(); }, { passive: false });
 		pad.addEventListener('pointerdown', (e) => {
 			if (own(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;

@@ -8,6 +8,8 @@
 	const fn = typeof $ === 'function' ? $('#mj-ptz-fn') : document.getElementById('mj-ptz-fn');
 	const stage = typeof $ === 'function' ? $('#mj-stage') : document.getElementById('mj-stage');
 	if (!fn || !stage || typeof apiFetch !== 'function') return;
+	const ptzControl = fn.dataset.ptzControl || '';
+	if (ptzControl !== 'motorsd' && ptzControl !== 'anjoy') return;
 
 	const style = document.createElement('style');
 	style.textContent = [
@@ -900,7 +902,8 @@
 
 	prBtn.addEventListener('click', e => {
 		e.preventDefault();
-		modal.hidden = false;
+		modal.hidden = true;
+		popMap.hidden = false;
 		renderList();
 		loadPresets(true);
 	});

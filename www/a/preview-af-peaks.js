@@ -27,6 +27,10 @@
 	const fn = typeof $ === 'function' ? $('#mj-ptz-fn') : document.getElementById('mj-ptz-fn');
 	const stage = typeof $ === 'function' ? $('#mj-stage') : document.getElementById('mj-stage');
 	if (!fn || !stage || typeof apiFetch !== 'function') return;
+	const ptzControl = fn.dataset.ptzControl || '';
+	const ptzCaps = (fn.dataset.ptzCaps || '').trim();
+	const hasCap = (c) => !ptzCaps || (' ' + ptzCaps + ' ').indexOf(' ' + c + ' ') >= 0;
+	if ((ptzControl !== 'motorsd' && ptzControl !== 'anjoy') || !hasCap('focus')) return;
 
 	const style = document.createElement('style');
 	style.textContent = [
