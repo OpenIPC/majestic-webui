@@ -181,9 +181,9 @@
 				'<div class="mj-pr-card-top">' +
 				'  <span class="mj-pr-name"></span>' +
 				'  <span style="display:inline-flex;align-items:center;gap:4px">' +
-				'    <button type="button" class="mj-pr-btn" data-ren="' + p.id + '" title="Rename preset" style="padding:1px 6px">✎</button>' +
-				'    <button type="button" class="mj-pr-btn" data-mvup="' + p.id + '" title="Move up" style="padding:1px 5px"' + (idx === 0 ? ' disabled' : '') + '>▲</button>' +
-				'    <button type="button" class="mj-pr-btn" data-mvdn="' + p.id + '" title="Move down" style="padding:1px 5px"' + (idx === presets.length - 1 ? ' disabled' : '') + '>▼</button>' +
+				'    <button type="button" class="mj-pr-btn" data-ren="' + p.id + '" title="Rename preset" style="font-size:11px;line-height:1;padding:2px 5px">✎</button>' +
+				'    <button type="button" class="mj-pr-btn" data-mvup="' + p.id + '" title="Move up" style="font-size:9px;line-height:1;padding:3px 5px"' + (idx === 0 ? ' disabled' : '') + '>▲</button>' +
+				'    <button type="button" class="mj-pr-btn" data-mvdn="' + p.id + '" title="Move down" style="font-size:9px;line-height:1;padding:3px 5px"' + (idx === presets.length - 1 ? ' disabled' : '') + '>▼</button>' +
 				'    <span class="mj-pr-meta">#' + p.id + '</span>' +
 				'  </span>' +
 				'</div>' +

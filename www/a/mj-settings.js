@@ -1566,6 +1566,9 @@
 		preferenceSelect(cols.lastElementChild, 'Show motor controls',
 			'This choice applies to this browser and does not disable the motor service.',
 			PREF.controls, [['auto', 'Automatic'], ['hidden', 'Hidden']], 'auto');
+		preferenceSelect(cols.lastElementChild, 'Zoom-scaled PTZ speed',
+			'Automatically slow down pan/tilt speed as optical zoom increases.',
+			'openipc.ptz.zoomScale', [['1', 'On'], ['0', 'Off']], '1');
 		preferenceNumber(cols.lastElementChild, 'Focus click time',
 			'Movement from one short focus click, in milliseconds.',
 			PREF.focusMs, 70, 20, 1000);
