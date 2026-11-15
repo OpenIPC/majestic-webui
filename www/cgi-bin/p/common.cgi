@@ -17,6 +17,7 @@ IFS_ORIG=$IFS
 # "Missing" that same tag, several hundred lines later.)
 . ./p/majestic.sh
 . ./p/flash.sh
+. ./p/sdcard-dev.sh
 
 # card_head "title" "note"
 #
@@ -103,6 +104,10 @@ uses_default_password() {
 
 	[ "$(mkpasswd -m "$method" -S "$salt" 12345 2>/dev/null)" = "$hash" ]
 }
+
+# A card the camera could record to (p/sdcard-dev.sh, which j/sdcard.cgi asks
+# too, so the menu offers the SD pages exactly when there is a card for them).
+has_mmc_card() { sd_card_name >/dev/null; }
 
 check_password() {
 	local p="/cgi-bin/access.cgi"
