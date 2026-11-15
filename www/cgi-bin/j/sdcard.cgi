@@ -24,28 +24,12 @@
 #                that was free when it happened.
 #   ok           mounted read-write
 
-# The card's block device. mmcblk0 on most cameras, but not on one whose card
-# hangs off the SoC's second SD controller: the HI3516D_N81820 speed dome's
-# built-in card is mmcblk1, and with the name fixed at
-# mmcblk0 this page called that card absent while majestic recorded to it. The
-# first whole MMC disk the camera is not running from (some boot from an SD,
-# the same test /lib/mdev/automount.sh makes) and that is not an eMMC's boot or
-# RPMB area; mmcblk0 when there is none, so an empty slot still reads "absent".
-# SDC_SYS_BLOCK, SDC_MOUNTS and SDC_CMDLINE stand in for /sys/block, /proc/mounts
-# and /proc/cmdline in tests/sdcard-device.test.js; nothing else sets them.
-card_name() {
-	for cn_d in "${SDC_SYS_BLOCK:-/sys/block}"/mmcblk[0-9]*; do
-		[ -e "$cn_d" ] || continue
-		cn_n=${cn_d##*/}
-		case "$cn_n" in *boot*|*rpmb*) continue ;; esac
-		grep -qsE "^/dev/${cn_n}(p[0-9]+)? /(rom)? " "${SDC_MOUNTS:-/proc/mounts}" && continue
-		grep -qs "root=/dev/${cn_n}" "${SDC_CMDLINE:-/proc/cmdline}" && continue
-		echo "$cn_n"
-		return
-	done
-	echo mmcblk0
-}
-CARD=$(card_name)
+# The card this page manages (p/sdcard-dev.sh), which is not always mmcblk0.
+# With none, a name that is no device at all, so the slot reads "absent" and no
+# operation can land on a disk that is not the card -- mmcblk0 was the fallback,
+# and on a camera running from an SD that is the disk it boots from.
+. "$(dirname "$0")/../p/sdcard-dev.sh"
+CARD=$(sd_card_name) || CARD=no-sd-card
 DEV=/dev/$CARD
 SYS=/sys/block/$CARD
 MNT=/mnt/${CARD}p1   # where /lib/mdev/automount.sh mounts its first partition
@@ -1356,7 +1340,10 @@ do_reprobe() {
 	[ -z "$(rp_mounted)" ] ||
 		{ err="a card is already mounted; nothing needs re-detecting"; return; }
 
-	rp_dev=$(readlink -f /sys/class/mmc_host/mmc0/device 2>/dev/null)
+	# The slot's own controller, which is not always mmc0 (p/sdcard-dev.sh).
+	rp_host=$(sd_slot_host) ||
+		{ err="this camera has no SD host controller to re-detect with"; return; }
+	rp_dev=$(readlink -f "/sys/class/mmc_host/$rp_host/device" 2>/dev/null)
 	[ -n "$rp_dev" ] || { err="this camera has no SD host controller to re-detect with"; return; }
 	while [ -n "$rp_dev" ] && [ "$rp_dev" != / ] && [ ! -e "$rp_dev/driver" ]; do
 		rp_dev=$(dirname "$rp_dev")
