@@ -24,8 +24,31 @@
 #                that was free when it happened.
 #   ok           mounted read-write
 
-DEV=/dev/mmcblk0
-SYS=/sys/block/mmcblk0
+# The card's block device. mmcblk0 on most cameras, but not on one whose card
+# hangs off the SoC's second SD controller: the HI3516D_N81820 speed dome's
+# built-in card is mmcblk1, and with the name fixed at
+# mmcblk0 this page called that card absent while majestic recorded to it. The
+# first whole MMC disk the camera is not running from (some boot from an SD,
+# the same test /lib/mdev/automount.sh makes) and that is not an eMMC's boot or
+# RPMB area; mmcblk0 when there is none, so an empty slot still reads "absent".
+# SDC_SYS_BLOCK, SDC_MOUNTS and SDC_CMDLINE stand in for /sys/block, /proc/mounts
+# and /proc/cmdline in tests/sdcard-device.test.js; nothing else sets them.
+card_name() {
+	for cn_d in "${SDC_SYS_BLOCK:-/sys/block}"/mmcblk[0-9]*; do
+		[ -e "$cn_d" ] || continue
+		cn_n=${cn_d##*/}
+		case "$cn_n" in *boot*|*rpmb*) continue ;; esac
+		grep -qsE "^/dev/${cn_n}(p[0-9]+)? /(rom)? " "${SDC_MOUNTS:-/proc/mounts}" && continue
+		grep -qs "root=/dev/${cn_n}" "${SDC_CMDLINE:-/proc/cmdline}" && continue
+		echo "$cn_n"
+		return
+	done
+	echo mmcblk0
+}
+CARD=$(card_name)
+DEV=/dev/$CARD
+SYS=/sys/block/$CARD
+MNT=/mnt/${CARD}p1   # where /lib/mdev/automount.sh mounts its first partition
 
 json_hdr() { printf 'HTTP/1.1 200 OK\nContent-Type: application/json\nCache-Control: no-store\n\n'; }
 json_str() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
@@ -627,20 +650,20 @@ get_info() {
 # mount are each about to rely on.
 node_ready() {
 	[ -b "${DEV}p1" ] || return 1
-	sz=$(cat "$SYS/mmcblk0p1/size" 2>/dev/null)
+	sz=$(cat "$SYS/${CARD}p1/size" 2>/dev/null)
 	case "$sz" in ''|*[!0-9]*) return 1;; esac
 	[ "$sz" -gt 0 ] || return 1
 	[ "$(dd if="${DEV}p1" bs=512 skip=$((sz - 1)) count=1 2>/dev/null | wc -c)" = 512 ]
 }
 
-# Ensure /dev/mmcblk0p1 is there and usable: the kernel knows the partition
+# Ensure the card's first partition node (${DEV}p1) is there and usable: the kernel knows the partition
 # (it is in /proc/partitions and /sys) before the node exists in /dev.
 #
 # Make the node here, from the major:minor the kernel already publishes, rather
 # than asking mdev for it. `mdev -s` was what stood here, and it is a rescan of
 # every device in /sys that re-runs the hotplug rules for each — which for this
 # partition means /lib/mdev/automount.sh, the script whose umount pass unmounts
-# the card and rmdir's /mnt/mmcblk0p1. So the call made to recover from node
+# the card and rmdir's its mount point ($MNT). So the call made to recover from node
 # churn was itself a generator of it, and every retry made the next step more
 # likely to fail. mknod asks the kernel for nothing and disturbs nothing.
 # Every loop here carries its own counter. `i` was shared, and ensure_node —
@@ -652,7 +675,7 @@ ensure_node() {
 	node_ready && return 0
 	en_i=0
 	while [ "$en_i" -lt 10 ]; do
-		mm=$(cat "$SYS/mmcblk0p1/dev" 2>/dev/null)   # e.g. "179:1"
+		mm=$(cat "$SYS/${CARD}p1/dev" 2>/dev/null)   # e.g. "179:1"
 		case "$mm" in
 			[0-9]*:[0-9]*)
 				[ -b "${DEV}p1" ] ||
@@ -665,7 +688,7 @@ ensure_node() {
 				# automount is exactly such a holder, so partprobe here can have
 				# failed with EBUSY and left the kernel on its old idea of the
 				# layout. Let go of the card and ask again.
-				umount /mnt/mmcblk0p1 2>/dev/null
+				umount "$MNT" 2>/dev/null
 				umount "$DEV" 2>/dev/null
 				partprobe "$DEV" 2>/dev/null
 				;;
@@ -682,7 +705,7 @@ do_format() {
 	fs="${POST_fs:-vfat}"
 	case "$fs" in vfat|ext4|exfat) ;; *) err="unsupported filesystem"; return;; esac
 	command -v "mkfs.$fs" >/dev/null 2>&1 || { err="mkfs.$fs not installed"; return; }
-	umount /mnt/mmcblk0p1 2>/dev/null; umount "${DEV}p1" 2>/dev/null; umount "$DEV" 2>/dev/null
+	umount "$MNT" 2>/dev/null; umount "${DEV}p1" 2>/dev/null; umount "$DEV" 2>/dev/null
 	# Always write the table. Format means erase, so there is no state of the
 	# card that makes writing one wrong — and deciding *not* to write it was a
 	# way to get this wrong. The test that guarded it read sector 0, and that
@@ -748,7 +771,7 @@ do_format() {
 	# this then announced as "mkfs reported success but no filesystem was
 	# written", about a card carrying a perfectly good one. Between that and the
 	# mount below, a blank card failed to format on roughly one attempt in four.
-	logln "# mount ${DEV}p1 /mnt/mmcblk0p1"
+	logln "# mount ${DEV}p1 $MNT"
 	if mount_after_format; then
 		[ -n "$o" ] && logln "$o"
 		return
@@ -808,7 +831,7 @@ mkfs_settled() {
 # Mount the card we have just formatted, against a hotplug helper that is
 # actively fighting us. Every partition re-read fires mdev, and the remove half
 # of the pair runs /lib/mdev/automount.sh, whose my_umount both unmounts the
-# card AND rmdir's /mnt/mmcblk0p1 — so a mount can fail with ENOENT on the
+# card AND rmdir's $MNT — so a mount can fail with ENOENT on the
 # directory created two statements earlier, or on a node mdev has dropped and
 # not yet remade. Neither is a fault of the card, and reporting either to
 # somebody who asked for a format is reporting the wrong thing: this was ~1 run
@@ -822,11 +845,11 @@ mkfs_settled() {
 mount_after_format() {
 	mt_i=0
 	while [ "$mt_i" -lt 8 ]; do
-		mountpoint -q /mnt/mmcblk0p1 && return 0
+		mountpoint -q "$MNT" && return 0
 		if ensure_node; then
-			mkdir -p /mnt/mmcblk0p1 2>/dev/null
-			o=$(mount "${DEV}p1" /mnt/mmcblk0p1 2>&1)
-			mountpoint -q /mnt/mmcblk0p1 && return 0
+			mkdir -p "$MNT" 2>/dev/null
+			o=$(mount "${DEV}p1" "$MNT" 2>&1)
+			mountpoint -q "$MNT" && return 0
 		fi
 		sleep 1
 		mt_i=$((mt_i + 1))

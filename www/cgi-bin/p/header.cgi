@@ -95,8 +95,9 @@ Pragma: no-cache
 					     a viewing job like Live, and the File Manager route it
 					     replaces was the thing nobody found. Same card guard as
 					     the SD Card entry below — a camera with no card cannot
-					     record, so the page would only ever show its empty state. -->
-					<% if [ -e /dev/mmcblk0 ]; then %>
+					     record, so the page would only ever show its empty state.
+					     Any MMC disk, not just mmcblk0 (has_mmc_card). -->
+					<% if has_mmc_card; then %>
 						<li class="nav-item"><a class="nav-link" href="recordings.cgi"><% page_label recordings %></a></li>
 					<% fi %>
 					<li class="nav-item dropdown">
@@ -173,7 +174,7 @@ Pragma: no-cache
 							<li><a class="dropdown-item" href="logs.cgi"><% page_label logs %></a></li>
 							<li><a class="dropdown-item" href="console.cgi"><% page_label console %></a></li>
 							<li><a class="dropdown-item" href="files.cgi"><% page_label files %></a></li>
-							<% if [ -e /dev/mmcblk0 ]; then %>
+							<% if has_mmc_card; then %>
 								<li><a class="dropdown-item" href="sdcard.cgi"><% page_label sdcard %></a></li>
 							<% fi %>
 						</ul>

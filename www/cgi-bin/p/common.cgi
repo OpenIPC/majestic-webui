@@ -104,6 +104,19 @@ uses_default_password() {
 	[ "$(mkpasswd -m "$method" -S "$salt" 12345 2>/dev/null)" = "$hash" ]
 }
 
+# A card the camera could record to: any whole MMC disk, which is mmcblk1 and not
+# mmcblk0 where the card is on the SoC's second SD controller (the HI3516D_N81820
+# speed dome). An eMMC's boot and RPMB areas are not disks to
+# record to. j/sdcard.cgi's card_name() picks which one the pages manage.
+has_mmc_card() {
+	for hm_d in /sys/block/mmcblk[0-9]*; do
+		[ -e "$hm_d" ] || continue
+		case "${hm_d##*/}" in *boot*|*rpmb*) continue ;; esac
+		return 0
+	done
+	return 1
+}
+
 check_password() {
 	local p="/cgi-bin/access.cgi"
 	[ -z "$SCRIPT_NAME" ] || [ "$SCRIPT_NAME" = "${p}" ] && return
