@@ -929,6 +929,8 @@
 			verb = PO.verb(verb, turn);
 		}
 		if (!isStop && outstanding >= 3) return;
+		const useCgi = !isStop && (ptzControl === 'motorsd' || ptzControl === 'anjoy') &&
+			/^(?:up|down|left|right)$/.test(verb) && pct != null && pct < 100;
 		if (!isStop && /^(?:up|down|left|right|upleft|upright|downleft|downright)$/.test(verb)) {
 			const sc = effectiveSpeedScale();
 			pct = Math.max(4, Math.round((pct != null ? pct : 100) * sc));
@@ -936,40 +938,34 @@
 			const dp = verb.indexOf('right') >= 0 ? 1 : (verb.indexOf('left') >= 0 ? -1 : 0);
 			const dt = verb.indexOf('up') >= 0 ? 1 : (verb.indexOf('down') >= 0 ? -1 : 0);
 			const spdScale = pct / 100;
-			if (ms > 0) {
-				commitActiveTrack();
-				pendingTrackPan += dp * ms * spdScale;
-				pendingTrackTilt += dt * ms * spdScale;
-				scheduleTrackFlush();
-			} else {
-				if (!activeTrack || activeTrack.dp !== dp || activeTrack.dt !== dt || activeTrack.df) {
+			if (useCgi) {
+				if (ms > 0) {
 					commitActiveTrack();
-					activeTrack = { dp, dt, df: 0, startMs: Date.now(), scale: spdScale };
+					pendingTrackPan += dp * ms * spdScale;
+					pendingTrackTilt += dt * ms * spdScale;
+					scheduleTrackFlush();
 				} else {
-					activeTrack.scale = spdScale;
+					if (!activeTrack || activeTrack.dp !== dp || activeTrack.dt !== dt || activeTrack.df) {
+						commitActiveTrack();
+						activeTrack = { dp, dt, df: 0, startMs: Date.now(), scale: spdScale };
+					} else {
+						activeTrack.scale = spdScale;
+					}
 				}
 			}
+			try { window.dispatchEvent(new CustomEvent('mj:ptz-moving', { detail: { dp, dt, df: 0, scale: useCgi ? spdScale : 1, durationMs: ms || 0, stop: false } })); } catch (e) {}
 		} else if (!isStop && (verb === 'near' || verb === 'far')) {
 			const df = verb === 'far' ? 1 : -1;
-			if (ms > 0) {
-				commitActiveTrack();
-				pendingTrackFocus += df * ms;
-				scheduleTrackFlush();
-			} else {
-				if (!activeTrack || activeTrack.df !== df) {
-					commitActiveTrack();
-					activeTrack = { dp: 0, dt: 0, df, startMs: Date.now(), scale: 1 };
-				}
-			}
+			try { window.dispatchEvent(new CustomEvent('mj:ptz-moving', { detail: { dp: 0, dt: 0, df, scale: 1, durationMs: ms || 0, stop: false } })); } catch (e) {}
 		} else if (isStop) {
 			commitActiveTrack();
 			flushTrackPos();
+			try { window.dispatchEvent(new CustomEvent('mj:ptz-moving', { detail: { dp: 0, dt: 0, df: 0, scale: 1, durationMs: 0, stop: true } })); } catch (e) {}
 		}
 		let url = '/ptz?move=' + encodeURIComponent(verb);
 		if (ms) url += '&ms=' + ms;
 		if (pct != null && PS) url += PS.query(verb, pct);
-		if (!isStop && (ptzControl === 'motorsd' || ptzControl === 'anjoy') &&
-			/^(?:up|down|left|right)$/.test(verb) && pct != null && pct < 100) {
+		if (useCgi) {
 			url = '/cgi-bin/j/ptz.cgi?act=' + encodeURIComponent(verb) + '&ms=' + (ms || 250) + '&speed=' + pct;
 		}
 		if (!isStop && /(?:left|right|up|down|wide|tele)/.test(verb)) {

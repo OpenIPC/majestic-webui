@@ -384,25 +384,22 @@
 
 		const nowXPct = toX(currentPan), nowYPct = toY(currentTilt);
 		const nowDx = (nowXPct / 100) * W, nowDy = (nowYPct / 100) * H;
-		const coincident = markers.find(m => Math.hypot(m.dx - nowDx, m.dy - nowDy) < 4);
-		if (coincident) {
-			coincident.ring = 'rgba(13,202,240,.85)';
-			coincident.label = coincident.label + (isLarge ? ' · ◉' : '');
-			coincident.title += ' (Current Camera Position · Zoom ' + magStr + ')';
-		} else {
-			markers.push({
-				xPct: nowXPct, yPct: nowYPct,
-				dx: nowDx, dy: nowDy,
-				color: '#0dcaf0',
-				size: isLarge ? 11 : 9,
-				label: '◉ Now',
-				title: 'Current Camera Position: ' + fmtAxis('Pan', currentPan) + ' · ' + fmtAxis('Tilt', currentTilt) + ' · Zoom ' + magStr,
-				onClick: null,
-				zIdx: 16,
-				ring: 'rgba(13,202,240,.45)',
-				prio: 5
-			});
-		}
+		targetEl._mapToX = toX;
+		targetEl._mapToY = toY;
+		targetEl._liveDot = null;
+		markers.push({
+			xPct: nowXPct, yPct: nowYPct,
+			dx: nowDx, dy: nowDy,
+			color: '#0dcaf0',
+			size: isLarge ? 11 : 9,
+			label: '◉ Now',
+			title: 'Current Camera Position: ' + fmtAxis('Pan', currentPan) + ' · ' + fmtAxis('Tilt', currentTilt) + ' · Zoom ' + magStr,
+			onClick: null,
+			isLive: true,
+			zIdx: 16,
+			ring: 'rgba(13,202,240,.45)',
+			prio: 5
+		});
 
 		const placedBoxes = [];
 		const order = markers.slice().sort((a, b) => (b.prio - a.prio) || (a.dy - b.dy) || (a.dx - b.dx));
@@ -465,9 +462,10 @@
 
 		markers.forEach(m => {
 			const dot = document.createElement('div');
-			dot.style.cssText = 'position:absolute;left:' + m.xPct.toFixed(1) + '%;top:' + m.yPct.toFixed(1) + '%;transform:translate(-50%,-50%);width:' + m.size + 'px;height:' + m.size + 'px;border-radius:50%;background:' + m.color + ';border:1.5px solid #0b0e14;box-shadow:0 0 0 2.5px ' + m.ring + ';z-index:' + m.zIdx + (m.onClick ? ';cursor:pointer' : '');
+			dot.style.cssText = 'position:absolute;left:' + m.xPct.toFixed(1) + '%;top:' + m.yPct.toFixed(1) + '%;transform:translate(-50%,-50%);width:' + m.size + 'px;height:' + m.size + 'px;border-radius:50%;background:' + m.color + ';border:1.5px solid #0b0e14;box-shadow:0 0 0 2.5px ' + m.ring + ';z-index:' + m.zIdx + (m.onClick ? ';cursor:pointer' : ';pointer-events:none');
 			if (m.title) dot.title = m.title;
 			if (m.onClick) dot.addEventListener('click', m.onClick);
+			if (m.isLive) targetEl._liveDot = dot;
 			targetEl.appendChild(dot);
 
 			if (m.box && m.shortLabel) {
@@ -726,13 +724,14 @@
 			.finally(() => { busy = false; });
 	}
 
+	let gotoGen = 0;
 	function callPreset(p, onDone, keepOpen) {
-		if (busy) {
-			if (onDone) onDone();
-			return;
+		const gen = ++gotoGen;
+		stopLiveAnim();
+		if (!keepOpen) {
+			modal.hidden = true;
+			syncPosWatch();
 		}
-		busy = true;
-		if (!keepOpen) modal.hidden = true;
 		if (p.run_af) {
 			document.dispatchEvent(new CustomEvent('mj-ptz-move', { detail: { durationMs: 14000 } }));
 		}
@@ -742,6 +741,7 @@
 		})
 			.then(r => r.ok ? r.json() : null)
 			.then(d => {
+				if (gen !== gotoGen) return;
 				applyData(d, false);
 				if (d && d.ok && p.run_af) {
 					apiFetch('/autofocus', { credentials: 'same-origin' }).catch(() => {});
@@ -749,7 +749,6 @@
 			})
 			.catch(() => {})
 			.finally(() => {
-				busy = false;
 				if (onDone) onDone();
 			});
 	}
@@ -893,6 +892,157 @@
 		});
 	}
 	let pmRefreshTimer = 0;
+	let posWatchAbort = null;
+	let posWatchRunning = false;
+	let liveMove = null;
+	let liveAnimTimer = 0;
+
+	function stopLiveAnim() {
+		if (liveAnimTimer) {
+			clearInterval(liveAnimTimer);
+			liveAnimTimer = 0;
+		}
+		liveMove = null;
+	}
+
+	function updateLiveMarker() {
+		const magStr = currentMag !== null && Number.isFinite(currentMag) ? currentMag.toFixed(1) + '×' : 'unknown';
+		const posLabel = modal.querySelector('[data-pr="curpos"]');
+		if (posLabel) {
+			posLabel.innerHTML = 'Current Camera View: <strong>' + fmtAxis('Pan', currentPan) +
+				' · ' + fmtAxis('Tilt', currentTilt) + ' · Zoom ' + magStr + '</strong>';
+		}
+		[modal.querySelector('[data-pr="map"]'), popMap.querySelector('[data-pm="canvas"]')].forEach(el => {
+			if (el && el._liveDot && el._mapToX && el._mapToY) {
+				el._liveDot.style.left = el._mapToX(currentPan).toFixed(1) + '%';
+				el._liveDot.style.top = el._mapToY(currentTilt).toFixed(1) + '%';
+			}
+		});
+	}
+
+	function tickLiveAnim() {
+		if (!liveMove || (popMap.hidden && modal.hidden)) {
+			stopLiveAnim();
+			return;
+		}
+		const now = Date.now();
+		const dtMs = Math.max(0, now - liveMove.lastTick);
+		liveMove.lastTick = now;
+		if (liveMove.endMs && now >= liveMove.endMs) {
+			const rem = Math.max(0, liveMove.endMs - (now - dtMs));
+			currentPan = Math.round(currentPan + liveMove.dp * rem * liveMove.scale);
+			currentTilt = Math.round(currentTilt + liveMove.dt * rem * liveMove.scale);
+			currentFocus = Math.round(currentFocus + liveMove.df * rem);
+			stopLiveAnim();
+		} else {
+			currentPan = Math.round(currentPan + liveMove.dp * dtMs * liveMove.scale);
+			currentTilt = Math.round(currentTilt + liveMove.dt * dtMs * liveMove.scale);
+			currentFocus = Math.round(currentFocus + liveMove.df * dtMs);
+		}
+		updateLiveMarker();
+	}
+
+	function startLiveAnim(dp, dt, df, scale, durationMs) {
+		const now = Date.now();
+		if (liveMove && liveMove.dp === dp && liveMove.dt === dt && liveMove.df === df && !durationMs) {
+			liveMove.scale = scale;
+			return;
+		}
+		stopLiveAnim();
+		if (!dp && !dt && !df) return;
+		liveMove = {
+			dp: dp || 0,
+			dt: dt || 0,
+			df: df || 0,
+			scale: scale || 1,
+			lastTick: now,
+			endMs: durationMs > 0 ? now + durationMs : 0
+		};
+		if (!popMap.hidden || !modal.hidden) {
+			liveAnimTimer = setInterval(tickLiveAnim, 50);
+		}
+	}
+
+	function stopPosWatch() {
+		posWatchRunning = false;
+		if (posWatchAbort) {
+			try { posWatchAbort.abort(); } catch (e) {}
+			posWatchAbort = null;
+		}
+	}
+
+	function runPosWatch() {
+		if (!posWatchRunning || (popMap.hidden && modal.hidden)) {
+			stopPosWatch();
+			return;
+		}
+		const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+		posWatchAbort = ac;
+		const since = [
+			Math.round(currentPan || 0),
+			Math.round(currentTilt || 0),
+			Math.round(currentFocus || 0),
+			liveMove ? 1 : 0
+		].join(',');
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=pos_wait&timeout=15&since=' + encodeURIComponent(since), {
+			credentials: 'same-origin',
+			cache: 'no-store',
+			signal: ac ? ac.signal : undefined
+		})
+			.then(r => (r.ok ? r.json() : null))
+			.then(d => {
+				if (!posWatchRunning || (popMap.hidden && modal.hidden)) return;
+				if (d && d.ok) {
+					const changed = d.pan_ms !== currentPan || d.tilt_ms !== currentTilt ||
+						d.focus_ms !== currentFocus ||
+						(typeof d.current_mag === 'number' && d.current_mag !== currentMag);
+					if (typeof d.pan_ms === 'number') currentPan = d.pan_ms;
+					if (typeof d.tilt_ms === 'number') currentTilt = d.tilt_ms;
+					if (typeof d.focus_ms === 'number') currentFocus = d.focus_ms;
+					if (typeof d.current_mag === 'number') currentMag = d.current_mag;
+					if (d.moving) {
+						startLiveAnim(d.dp || 0, d.dt || 0, 0, 1, 0);
+					} else if (liveMove && !liveMove.endMs) {
+						stopLiveAnim();
+					}
+					if (changed) {
+						if (d.moving) updateLiveMarker();
+						else renderList();
+					}
+				}
+				setTimeout(runPosWatch, d && d.moving ? 80 : 50);
+			})
+			.catch(() => {
+				if (posWatchRunning && (!popMap.hidden || !modal.hidden)) {
+					setTimeout(runPosWatch, 2000);
+				}
+			});
+	}
+
+	function syncPosWatch() {
+		const open = !popMap.hidden || !modal.hidden;
+		if (open && !posWatchRunning) {
+			posWatchRunning = true;
+			runPosWatch();
+		} else if (!open) {
+			stopLiveAnim();
+			stopPosWatch();
+		}
+	}
+
+	window.addEventListener('mj:ptz-moving', e => {
+		const det = (e && e.detail) || {};
+		if (det.stop) {
+			stopLiveAnim();
+			if (!popMap.hidden || !modal.hidden) {
+				clearTimeout(pmRefreshTimer);
+				pmRefreshTimer = setTimeout(() => loadPresets(false), 180);
+			}
+			return;
+		}
+		startLiveAnim(det.dp, det.dt, det.df, det.scale, det.durationMs);
+	});
+
 	window.addEventListener('mj:ptz-moved', () => {
 		if (tourActive) stopTour('Tour stopped (manual PTZ move)');
 		if (!popMap.hidden || !modal.hidden) {
@@ -906,6 +1056,7 @@
 		if (!popMap.hidden || !modal.hidden) {
 			popMap.hidden = true;
 			modal.hidden = true;
+			syncPosWatch();
 			return;
 		}
 		if (!popMap.dataset.moved) {
@@ -919,7 +1070,7 @@
 		}
 		popMap.hidden = false;
 		renderList();
-		loadPresets(true);
+		loadPresets(true).then(syncPosWatch);
 	});
 	function setHomeHere() {
 		if (busy) return;
@@ -1044,14 +1195,17 @@
 		modal.hidden = true;
 		popMap.hidden = false;
 		renderList();
+		syncPosWatch();
 	});
 	popMap.querySelector('[data-pm="modal"]').addEventListener('click', () => {
 		popMap.hidden = true;
 		modal.hidden = false;
 		renderList();
+		syncPosWatch();
 	});
 	popMap.querySelector('[data-pm="close"]').addEventListener('click', () => {
 		popMap.hidden = true;
+		syncPosWatch();
 	});
 	popMap.querySelector('[data-pm="ref"]').addEventListener('change', e => {
 		selectedMapPresetId = Number(e.target.value) || null;
@@ -1071,7 +1225,7 @@
 	popMap.querySelector('[data-pm="sync"]').addEventListener('click', () => {
 		if (selectedMapPresetId !== null) syncPosToPreset(selectedMapPresetId);
 	});
-	modal.querySelector('[data-pr="close"]').addEventListener('click', () => { modal.hidden = true; });
+	modal.querySelector('[data-pr="close"]').addEventListener('click', () => { modal.hidden = true; syncPosWatch(); });
 	modal.querySelector('[data-pr="save"]').addEventListener('click', savePreset);
 	modal.querySelector('[data-pr="sethome"]').addEventListener('click', setHomeHere);
 	modal.querySelector('[data-pr="homename"]').addEventListener('keydown', e => {
@@ -1104,7 +1258,7 @@
 	modal.querySelector('[data-pr="name"]').addEventListener('keydown', e => {
 		if (e.key === 'Enter') { e.preventDefault(); savePreset(); }
 	});
-	modal.addEventListener('click', e => { if (e.target === modal) modal.hidden = true; });
+	modal.addEventListener('click', e => { if (e.target === modal) { modal.hidden = true; syncPosWatch(); } });
 
 	loadPresets(true);
 })();

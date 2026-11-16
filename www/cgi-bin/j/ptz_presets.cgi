@@ -99,6 +99,7 @@ restore_zoom_and_af() {
 		prev_mag=""
 		stall=0
 		while [ "$step" -lt 30 ]; do
+			[ -f /tmp/ptz_job.cancel ] && return 1
 			cur_mag=$(get_current_mag)
 			[ -n "$cur_mag" ] || break
 			if [ "$cur_mag" = "$prev_mag" ]; then
@@ -160,10 +161,43 @@ json_escape() {
 	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/ /g' | tr -d '\r\n'
 }
 
+ptz_read_live_pos() {
+	ptz_read_pos
+	LIVE_MOVING=0
+	LIVE_DP=0
+	LIVE_DT=0
+	if [ -f /tmp/ptz_live.conf ]; then
+		BASE_PAN="$PAN_MS"
+		BASE_TILT="$TILT_MS"
+		BASE_FOCUS="$FOCUS_MS"
+		DP=0; DT=0; DF=0; START_MS=0; END_MS=0; MOVING=0
+		. /tmp/ptz_live.conf 2>/dev/null
+		NOW_MS=$(ptz_now_ms)
+		case "$NOW_MS" in ''|*[!0-9]*) NOW_MS=0 ;; esac
+		case "$START_MS" in ''|*[!0-9]*) START_MS=0 ;; esac
+		case "$END_MS" in ''|*[!0-9]*) END_MS=0 ;; esac
+		case "$DP" in ''|*[!0-9-]*) DP=0 ;; esac
+		case "$DT" in ''|*[!0-9-]*) DT=0 ;; esac
+		case "$DF" in ''|*[!0-9-]*) DF=0 ;; esac
+		CLAMPED="$NOW_MS"
+		[ "$END_MS" -gt 0 ] && [ "$NOW_MS" -gt "$END_MS" ] && CLAMPED="$END_MS"
+		ELAPSED=0
+		[ "$CLAMPED" -gt "$START_MS" ] && ELAPSED=$((CLAMPED - START_MS))
+		PAN_MS=$((BASE_PAN + DP * ELAPSED))
+		TILT_MS=$((BASE_TILT + DT * ELAPSED))
+		FOCUS_MS=$((BASE_FOCUS + DF * ELAPSED))
+		if [ "$MOVING" = "1" ] && [ "$NOW_MS" -lt "$END_MS" ]; then
+			LIVE_MOVING=1
+			LIVE_DP="$DP"
+			LIVE_DT="$DT"
+		fi
+	fi
+}
+
 emit_list() {
 	extra_msg="$1"
 	cur_mag=$(get_current_mag)
-	ptz_read_pos
+	ptz_read_live_pos
 	boot_home=$(read_boot_home)
 	has_bg="false"
 	BG_PAN="null"
@@ -219,6 +253,8 @@ ZOOM_RESTORE="1"
 IN_PAN=""
 IN_TILT=""
 IN_FOCUS=""
+SINCE=""
+WAIT_TIMEOUT="15"
 
 for param in $(echo "$RAW_QS" | tr '&' ' '); do
 	case "$param" in
@@ -231,6 +267,8 @@ for param in $(echo "$RAW_QS" | tr '&' ' '); do
 		pan_ms=*) IN_PAN=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		tilt_ms=*) IN_TILT=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		focus_ms=*) IN_FOCUS=$(echo "${param#*=}" | tr -cd '0-9-') ;;
+		since=*) SINCE=$(urldecode "${param#*=}" | tr -cd '0-9,-') ;;
+		timeout=*) WAIT_TIMEOUT=$(echo "${param#*=}" | tr -cd '0-9') ;;
 	esac
 done
 
@@ -250,7 +288,7 @@ if [ "$ACT" = "map_bg" ]; then
 	exit 0
 fi
 
-if [ "$ACT" != "list" ] && [ "$REQUEST_METHOD" != "POST" ]; then
+if [ "$ACT" != "list" ] && [ "$ACT" != "pos_wait" ] && [ "$REQUEST_METHOD" != "POST" ]; then
 	echo "HTTP/1.1 405 Method Not Allowed"
 	echo "Allow: POST"
 	echo "Content-Type: application/json"
@@ -514,10 +552,30 @@ EOF
 			exit 0
 		fi
 		if ! acquire_ptz_lock; then
-			echo '{"ok":false,"error":"Another PTZ move is in progress"}'
-			exit 0
+			old_pid=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
+			: > /tmp/ptz_job.cancel 2>/dev/null || true
+			/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1 || true
+			w=0
+			while [ $w -lt 15 ] && [ -d /tmp/ptz_job.lock ]; do
+				usleep 80000 2>/dev/null || sleep 1
+				w=$((w + 1))
+			done
+			if [ -d /tmp/ptz_job.lock ]; then
+				[ -n "$old_pid" ] && kill -9 "$old_pid" 2>/dev/null || true
+				if [ -f /tmp/ptz_live.conf ]; then
+					ptz_read_live_pos
+					ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" 1
+					rm -f /tmp/ptz_live.conf 2>/dev/null || true
+				fi
+				rm -rf /tmp/ptz_job.lock 2>/dev/null || true
+			fi
+			if ! acquire_ptz_lock; then
+				echo '{"ok":false,"error":"Another PTZ move is in progress"}'
+				exit 0
+			fi
 		fi
-		trap 'rm -rf /tmp/ptz_job.lock /tmp/majestic-af.cancel 2>/dev/null || true' EXIT
+		rm -f /tmp/ptz_job.cancel 2>/dev/null || true
+		trap 'if [ "$(cat /tmp/ptz_job.lock/pid 2>/dev/null)" = "$$" ]; then rm -rf /tmp/ptz_job.lock /tmp/ptz_job.cancel /tmp/majestic-af.cancel /tmp/ptz_live.conf 2>/dev/null || true; fi' EXIT
 		ROW=$(grep "^${ID}|" "$PRESETS_FILE" | head -n 1)
 		if [ -n "$ROW" ]; then
 			IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
@@ -581,6 +639,27 @@ EOF
 		else
 			emit_list "Preset #${ID} not found"
 		fi
+		;;
+
+	pos_wait)
+		case "$WAIT_TIMEOUT" in ''|*[!0-9]*) WAIT_TIMEOUT=15 ;; esac
+		[ "$WAIT_TIMEOUT" -lt 1 ] && WAIT_TIMEOUT=1
+		[ "$WAIT_TIMEOUT" -gt 30 ] && WAIT_TIMEOUT=30
+		max_ticks=$((WAIT_TIMEOUT * 12))
+		tick=0
+		while [ "$tick" -lt "$max_ticks" ]; do
+			ptz_read_live_pos
+			cur_key="${PAN_MS},${TILT_MS},${FOCUS_MS},${LIVE_MOVING}"
+			if [ -z "$SINCE" ] || [ "$cur_key" != "$SINCE" ]; then
+				break
+			fi
+			tick=$((tick + 1))
+			usleep 80000 2>/dev/null || sleep 1
+		done
+		ptz_read_live_pos
+		cur_mag=$(get_current_mag)
+		printf '{"ok":true,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s,"moving":%s,"dp":%s,"dt":%s,"current_mag":%s}\n' \
+			"$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$LIVE_MOVING" "$LIVE_DP" "$LIVE_DT" "${cur_mag:-null}"
 		;;
 
 	track)

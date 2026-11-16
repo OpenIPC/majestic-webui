@@ -90,28 +90,48 @@ ptz_drive_axis_ms() {
 	drv_rem="$2"
 	drv_role="${3:-}"
 	while [ "$drv_rem" -ge 30 ]; do
+		[ -f /tmp/ptz_job.cancel ] && return 1
 		if [ "$drv_rem" -gt 3500 ]; then
 			drv_chunk=3500
 		else
 			drv_chunk="$drv_rem"
 		fi
 		t0=$(ptz_now_ms)
+		ptz_read_pos
+		_ldp=0; _ldt=0; _ldf=0
+		case "$drv_dir" in
+			right) _ldp=1 ;;
+			left)  _ldp=-1 ;;
+			up)    _ldt=1 ;;
+			down)  _ldt=-1 ;;
+			far)   _ldf=1 ;;
+			near)  _ldf=-1 ;;
+		esac
+		if [ "$_ldp" -ne 0 ] || [ "$_ldt" -ne 0 ] || [ "$_ldf" -ne 0 ]; then
+			printf "BASE_PAN=%s\nBASE_TILT=%s\nBASE_FOCUS=%s\nDP=%s\nDT=%s\nDF=%s\nSTART_MS=%s\nEND_MS=%s\nMOVING=1\n" \
+				"$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$_ldp" "$_ldt" "$_ldf" "$t0" "$((t0 + drv_chunk))" > /tmp/ptz_live.conf.tmp && \
+				mv /tmp/ptz_live.conf.tmp /tmp/ptz_live.conf
+		fi
 		: > /tmp/majestic-af.cancel 2>/dev/null || true
 		if [ -n "$drv_role" ]; then
 			_cli_cmd="/usr/bin/motors-cli --socket /run/motorsd.sock --role $drv_role $drv_dir $drv_chunk"
 		else
 			_cli_cmd="/usr/bin/motors-cli --socket /run/motorsd.sock $drv_dir $drv_chunk"
 		fi
-		if $_cli_cmd >/dev/null 2>&1; then
-			ptz_apply_axis_delta "$drv_dir" "$drv_chunk" 0
-		else
-			t1=$(ptz_now_ms)
-			el=$((t1 - t0))
-			[ "$el" -lt 0 ] && el=0
-			[ "$el" -gt "$drv_chunk" ] && el="$drv_chunk"
+		_rc=0
+		$_cli_cmd >/dev/null 2>&1 || _rc=$?
+		rm -f /tmp/ptz_live.conf
+		t1=$(ptz_now_ms)
+		el=$((t1 - t0))
+		[ "$el" -lt 0 ] && el=0
+		[ "$el" -gt "$drv_chunk" ] && el="$drv_chunk"
+		_short=0
+		[ "$drv_chunk" -ge 300 ] && [ "$el" -lt $((drv_chunk - 180)) ] && _short=1
+		if [ "$_rc" -ne 0 ] || [ -f /tmp/ptz_job.cancel ] || [ "$_short" -eq 1 ]; then
 			[ "$el" -ge 20 ] && ptz_apply_axis_delta "$drv_dir" "$el" 1
 			return 1
 		fi
+		ptz_apply_axis_delta "$drv_dir" "$drv_chunk" 0
 		drv_rem=$((drv_rem - drv_chunk))
 		if [ "$drv_rem" -ge 30 ]; then
 			usleep 100000 2>/dev/null || sleep 1
