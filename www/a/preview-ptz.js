@@ -906,6 +906,23 @@
 			method: 'POST',
 			credentials: 'same-origin'
 		}).catch(() => {});
+		schedulePersist();
+	}
+	// `track` keeps the position in RAM. Once the pad has rested for a few
+	// seconds, one `persist` copies it to flash, so a spell of steering costs
+	// one write instead of one per move, and a reboot still finds the head
+	// where it was left.
+	let persistTimer = 0;
+	function schedulePersist() {
+		if (persistTimer) clearTimeout(persistTimer);
+		persistTimer = setTimeout(() => {
+			persistTimer = 0;
+			if (activeTrack || trackFlushTimer) { schedulePersist(); return; }
+			apiFetch('/cgi-bin/j/ptz_presets.cgi?act=persist', {
+				method: 'POST',
+				credentials: 'same-origin'
+			}).catch(() => {});
+		}, 3000);
 	}
 	function scheduleTrackFlush() {
 		if (trackFlushTimer) clearTimeout(trackFlushTimer);

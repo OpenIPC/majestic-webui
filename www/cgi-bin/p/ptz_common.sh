@@ -112,7 +112,6 @@ ptz_drive_axis_ms() {
 				"$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$_ldp" "$_ldt" "$_ldf" "$t0" "$((t0 + drv_chunk))" > /tmp/ptz_live.conf.tmp && \
 				mv /tmp/ptz_live.conf.tmp /tmp/ptz_live.conf
 		fi
-		: > /tmp/majestic-af.cancel 2>/dev/null || true
 		if [ -n "$drv_role" ]; then
 			_cli_cmd="/usr/bin/motors-cli --socket /run/motorsd.sock --role $drv_role $drv_dir $drv_chunk"
 		else

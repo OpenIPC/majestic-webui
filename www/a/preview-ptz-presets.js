@@ -85,7 +85,7 @@
 		'  <div class="mj-pr-body">' +
 		'    <div class="mj-pr-posbar" style="align-items:stretch;gap:12px">' +
 		'      <div style="display:flex;flex-direction:column;gap:4px;width:196px;flex-shrink:0">' +
-		'        <div data-pr="map" style="position:relative;width:100%;height:108px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.18);border-radius:6px;overflow:hidden;cursor:grab" title="Drag empty space to move preset dots over background. Click any preset dot to move there & select it."></div>' +
+		'        <div data-pr="map" style="position:relative;width:100%;height:108px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.18);border-radius:6px;overflow:hidden;cursor:grab" title="Drag empty space to move the preset dots over the background. Click a dot to select its preset, then Go to"></div>' +
 		'        <div style="display:flex;align-items:center;justify-content:space-between;gap:3px">' +
 		'          <button type="button" class="mj-pr-btn" data-pr="popmap" style="height:22px;padding:0 6px;font-size:.67rem;flex:1;display:inline-flex;align-items:center;justify-content:center" title="Pop out a large floating map over the live camera view">⤢ Pop Out Map</button>' +
 		'          <button type="button" class="mj-pr-btn mj-pr-icon-btn" data-mv="zoomout" title="Shrink preset dot spread on map">' + ICON_MINUS + '</button>' +
@@ -105,7 +105,7 @@
 		'        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding-top:2px;border-top:1px solid rgba(255,255,255,.08)">' +
 		'          <input type="text" class="mj-pr-input" data-pr="homename" maxlength="28" placeholder="Home title" style="width:96px;padding:3px 7px;font-size:.73rem">' +
 		'          <button type="button" class="mj-pr-btn" data-pr="sethome" style="padding:3px 8px;font-size:.72rem" title="Save current camera view as the ★ Home preset">Save View as Home</button>' +
-		'          <button type="button" class="mj-pr-btn" data-pr="capbg" style="padding:3px 8px;font-size:.72rem" title="Take a snapshot of the current camera view right where you placed it and use it as the map background">📷 Snap BG</button>' +
+		'          <button type="button" class="mj-pr-btn" data-pr="capbg" style="padding:3px 8px;font-size:.72rem" title="Use a snapshot of the current camera view as the map background. It is not aligned to the dots: drag the map to line them up">📷 Snap BG</button>' +
 		'          <button type="button" class="mj-pr-btn" data-pr="zero" style="padding:3px 7px;font-size:.71rem;opacity:.8" title="Set current view as (0,0) and shift all saved presets by the same offset">Zero (0,0)</button>' +
 		'        </div>' +
 		'        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding-top:2px;border-top:1px solid rgba(255,255,255,.08);font-size:.72rem">' +
@@ -150,7 +150,7 @@
 		'<div data-pm="hdr" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 11px;background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.1);cursor:move;user-select:none">' +
 		'  <span style="font-size:.8rem;font-weight:600;color:#fff">Preset Map <span data-pm="status" style="font-weight:400;font-size:.72rem;color:#adb5bd;margin-left:4px"></span></span>' +
 		'  <span style="display:inline-flex;gap:4px">' +
-		'    <button type="button" class="mj-pr-btn" data-pm="capbg" style="padding:2px 7px;font-size:.7rem" title="Take a snapshot of the current camera view right where you placed it and use it as the map background">📷 Snap BG</button>' +
+		'    <button type="button" class="mj-pr-btn" data-pm="capbg" style="padding:2px 7px;font-size:.7rem" title="Use a snapshot of the current camera view as the map background. It is not aligned to the dots: drag the map to line them up">📷 Snap BG</button>' +
 		'    <button type="button" class="mj-pr-btn" data-pm="modal" style="padding:2px 7px;font-size:.7rem" title="Return to full Presets modal">⤡ Presets List</button>' +
 		'    <button type="button" class="mj-pr-btn" data-pm="close" style="padding:2px 7px;font-size:.7rem" title="Close floating map">✕</button>' +
 		'  </span>' +
@@ -258,8 +258,6 @@
 
 	let selectedMapPresetId = null;
 	let hasMapBg = false;
-	let bgPan = null;
-	let bgTilt = null;
 	let mapBgVer = Date.now();
 	let mapView = { xPct: 0, yPct: 0, scale: 1 };
 	try {
@@ -276,12 +274,20 @@
 		try { localStorage.setItem('openipc.ptz.mapView', JSON.stringify(mapView)); } catch (e) {}
 	}
 
+	// Home is the boot-home preset the camera stores, never a guess from a
+	// preset's name: a name match and the camera's record could disagree.
 	function findHomePreset() {
-		if (bootHomeId !== null) {
-			const b = presets.find(p => Number(p.id) === Number(bootHomeId));
-			if (b) return b;
-		}
-		return presets.find(p => /^home\b/i.test(p.name || '')) || null;
+		if (bootHomeId === null) return null;
+		return presets.find(p => Number(p.id) === Number(bootHomeId)) || null;
+	}
+
+	// A tap on a dot only selects it. The dots are a few pixels across and
+	// sit inside a surface that is dragged, so a stray tap must not send the
+	// head on a move -- or, since a new move replaces a running one, cut a
+	// move short. Moving is the Go to button's job.
+	function selectOnMap(p) {
+		selectedMapPresetId = Number(p.id);
+		renderList('Selected ' + p.name + ' (#' + p.id + '). Go to moves the camera there.');
 	}
 
 	function populateMapCanvas(targetEl, isLarge, homePreset, magStr) {
@@ -346,13 +352,8 @@
 				color: isSel ? '#51cf66' : '#f1f3f5',
 				size: isSel ? (isLarge ? 11 : 9) : (isLarge ? 9 : 7),
 				label: isLarge ? ('#' + p.id + ' ' + p.name) : (isSel ? ('#' + p.id + ' ' + p.name) : ('#' + p.id)),
-				title: 'Click to go to & select: ' + p.name + ' (#' + p.id + ' · ' + fmtAxis('Pan', p.pan_ms) + ' · ' + fmtAxis('Tilt', p.tilt_ms) + ')',
-				onClick: () => {
-					selectedMapPresetId = Number(p.id);
-					stopTour();
-					callPreset(p, null, true);
-					renderList('Moving to ' + p.name + ' (#' + p.id + ')...');
-				},
+				title: 'Click to select: ' + p.name + ' (#' + p.id + ' · ' + fmtAxis('Pan', p.pan_ms) + ' · ' + fmtAxis('Tilt', p.tilt_ms) + ')',
+				onClick: () => selectOnMap(p),
 				zIdx: isSel ? 14 : 11,
 				ring: isSel ? 'rgba(81,207,102,.45)' : 'rgba(0,0,0,.5)',
 				prio: isSel ? 3 : 1
@@ -369,13 +370,8 @@
 				color: '#ffd43b',
 				size: isLarge ? 12 : 9,
 				label: isLarge ? ('★ ' + homePreset.name) : '★',
-				title: 'Home: ' + homePreset.name + ' (#' + homePreset.id + ') — click to go Home & select',
-				onClick: () => {
-					selectedMapPresetId = Number(homePreset.id);
-					stopTour();
-					callPreset(homePreset, null, true);
-					renderList('Moving to Home ' + homePreset.name + ' (#' + homePreset.id + ')...');
-				},
+				title: 'Home: ' + homePreset.name + ' (#' + homePreset.id + ') — click to select',
+				onClick: () => selectOnMap(homePreset),
 				zIdx: 15,
 				ring: isSel ? 'rgba(255,212,59,.5)' : 'rgba(0,0,0,.55)',
 				prio: 4
@@ -660,6 +656,10 @@
 	}
 
 	function applyData(d, pickNextSlot) {
+		if (d && !d.ok && d.error) {
+			showMessage(d.error);
+			return;
+		}
 		if (!d || !d.ok) return;
 		presets = Array.isArray(d.presets) ? d.presets : [];
 		bootHomeId = (typeof d.boot_home === 'number' && Number.isFinite(d.boot_home)) ? d.boot_home : null;
@@ -671,8 +671,6 @@
 			hasMapBg = d.has_map_bg;
 			if (d.message && d.message.indexOf('background') >= 0) mapBgVer = Date.now();
 		}
-		bgPan = (typeof d.bg_pan === 'number' && Number.isFinite(d.bg_pan)) ? d.bg_pan : null;
-		bgTilt = (typeof d.bg_tilt === 'number' && Number.isFinite(d.bg_tilt)) ? d.bg_tilt : null;
 		updateBtnCount();
 		if (pickNextSlot) {
 			modal.querySelector('[data-pr="slot"]').value = String(nextFreeSlot());
@@ -680,6 +678,13 @@
 		if (!modal.hidden || !popMap.hidden) renderList(d.message);
 		const pmStatus = popMap.querySelector('[data-pm="status"]');
 		if (pmStatus && d.message) pmStatus.textContent = '· ' + d.message;
+	}
+
+	function showMessage(msg) {
+		const subEl = modal.querySelector('[data-pr="sub"]');
+		if (subEl) subEl.textContent = msg;
+		const pmStatus = popMap.querySelector('[data-pm="status"]');
+		if (pmStatus) pmStatus.textContent = '· ' + msg;
 	}
 
 	function loadPresets(pickNextSlot) {
@@ -743,7 +748,7 @@
 			.then(d => {
 				if (gen !== gotoGen) return;
 				applyData(d, false);
-				if (d && d.ok && p.run_af) {
+				if (d && d.ok && !d.failed && p.run_af) {
 					apiFetch('/autofocus', { credentials: 'same-origin' }).catch(() => {});
 				}
 			})
@@ -978,13 +983,11 @@
 		}
 		const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
 		posWatchAbort = ac;
-		const since = [
-			Math.round(currentPan || 0),
-			Math.round(currentTilt || 0),
-			Math.round(currentFocus || 0),
-			liveMove ? 1 : 0
-		].join(',');
-		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=pos_wait&timeout=15&since=' + encodeURIComponent(since), {
+		// A plain read, paced from here: fast while the head moves, once a
+		// second while it rests. Holding a CGI open to wait for a change
+		// would keep a process busy on the camera for as long as the map
+		// is open.
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=pos', {
 			credentials: 'same-origin',
 			cache: 'no-store',
 			signal: ac ? ac.signal : undefined
@@ -1010,7 +1013,7 @@
 						else renderList();
 					}
 				}
-				setTimeout(runPosWatch, d && d.moving ? 80 : 50);
+				setTimeout(runPosWatch, d && d.moving ? 150 : 1000);
 			})
 			.catch(() => {
 				if (posWatchRunning && (!popMap.hidden || !modal.hidden)) {

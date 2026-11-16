@@ -1389,11 +1389,11 @@
 		const fastAfCtl = makeSelectRow(
 			left,
 			'af-trig-fast',
-			'AF sweep mode',
-			'Fast mode uses a single FV sweep and skips JPEG candidate verification to save time (hides AF Peaks button).',
+			'AF Peaks gallery',
+			'Whether the Live page offers the AF Peaks button and watches for new peak snapshots. The camera\'s autofocus pass is the same either way.',
 			[
-				['0', 'Standard (2-way sweep & JPEG peak verify)'],
-				['1', 'Fast (single sweep, skip JPEG verify)'],
+				['0', 'Shown'],
+				['1', 'Hidden'],
 			]
 		);
 
