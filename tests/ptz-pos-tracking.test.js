@@ -134,9 +134,24 @@ function presetsSandbox() {
 			fs.readFileSync(sb.file('tmp/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=300\nTILT_MS=-40\n'));
 		check('track does not write the flash copy',
 			fs.readFileSync(sb.file('etc/ptz_pos.conf'), 'utf8') === 'PAN_MS=0\nTILT_MS=0\nFOCUS_MS=0\n');
-		sb.run('act=persist');
+		const ok = sb.run('act=persist');
 		check('persist copies the position to flash',
-			fs.readFileSync(sb.file('etc/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=300\nTILT_MS=-40\n'));
+			ok.ok === true && fs.readFileSync(sb.file('etc/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=300\nTILT_MS=-40\n'));
+		check('persist leaves the RAM copy as it found it',
+			fs.readFileSync(sb.file('tmp/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=300\nTILT_MS=-40\n'));
+		sb.run('act=track&persist=1&pan_ms=50&tilt_ms=0&focus_ms=0');
+		check('track with persist=1 lands the delta and commits it in one request',
+			fs.readFileSync(sb.file('etc/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=350\nTILT_MS=-40\n'));
+		// Flash that cannot be written must be reported, not claimed.
+		sb.run('act=track&pan_ms=10&tilt_ms=0&focus_ms=0');
+		fs.chmodSync(sb.file('etc'), 0o555);
+		let failed;
+		try { failed = sb.run('act=persist'); } finally { fs.chmodSync(sb.file('etc'), 0o755); }
+		const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+		if (!asRoot) {
+			check('persist says so when flash cannot be written', failed.ok === false && /flash/.test(failed.error || ''),
+				JSON.stringify(failed));
+		}
 	} finally {
 		fs.rmSync(sb.dir, { recursive: true, force: true });
 	}

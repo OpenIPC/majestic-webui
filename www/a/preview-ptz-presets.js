@@ -680,11 +680,26 @@
 		if (pmStatus && d.message) pmStatus.textContent = '· ' + d.message;
 	}
 
+	// Where a reply's news goes: the open preset surface, or -- when a card's
+	// Go to has closed them all -- the page's toast stack, so an error or an
+	// unfinished move is never written only onto something hidden.
 	function showMessage(msg) {
+		if (!msg) return;
 		const subEl = modal.querySelector('[data-pr="sub"]');
 		if (subEl) subEl.textContent = msg;
 		const pmStatus = popMap.querySelector('[data-pm="status"]');
 		if (pmStatus) pmStatus.textContent = '· ' + msg;
+		if (modal.hidden && popMap.hidden) {
+			const box = document.getElementById('mj-toasts');
+			if (!box) return;
+			const p = document.createElement('p');
+			p.className = 'mj-adapt-toast small';
+			p.setAttribute('role', 'status');
+			p.textContent = msg;
+			p.addEventListener('click', () => p.remove());
+			box.appendChild(p);
+			setTimeout(() => p.remove(), 6000);
+		}
 	}
 
 	function loadPresets(pickNextSlot) {
@@ -748,6 +763,7 @@
 			.then(d => {
 				if (gen !== gotoGen) return;
 				applyData(d, false);
+				if (d && d.ok && d.failed) showMessage(d.message);
 				if (d && d.ok && !d.failed && p.run_af) {
 					apiFetch('/autofocus', { credentials: 'same-origin' }).catch(() => {});
 				}

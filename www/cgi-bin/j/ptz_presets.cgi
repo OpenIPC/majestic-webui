@@ -250,6 +250,7 @@ ZOOM_RESTORE="1"
 IN_PAN=""
 IN_TILT=""
 IN_FOCUS=""
+PERSIST="0"
 
 for param in $(echo "$RAW_QS" | tr '&' ' '); do
 	case "$param" in
@@ -262,6 +263,7 @@ for param in $(echo "$RAW_QS" | tr '&' ' '); do
 		pan_ms=*) IN_PAN=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		tilt_ms=*) IN_TILT=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		focus_ms=*) IN_FOCUS=$(echo "${param#*=}" | tr -cd '0-9-') ;;
+		persist=1) PERSIST="1" ;;
 	esac
 done
 
@@ -299,27 +301,7 @@ echo "Cache-Control: no-store, no-cache, must-revalidate"
 echo ""
 
 acquire_ptz_lock() {
-	if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-		echo "$$" > /tmp/ptz_job.lock/pid
-		return 0
-	fi
-	if [ -f /tmp/ptz_job.lock/pid ]; then
-		old_pid=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
-		if [ -z "$old_pid" ] || ! kill -0 "$old_pid" 2>/dev/null; then
-			rm -rf /tmp/ptz_job.lock
-			if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-				echo "$$" > /tmp/ptz_job.lock/pid
-				return 0
-			fi
-		fi
-	else
-		rm -rf /tmp/ptz_job.lock
-		if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-			echo "$$" > /tmp/ptz_job.lock/pid
-			return 0
-		fi
-	fi
-	return 1
+	ptz_acquire_lock
 }
 
 # For an action that rewrites the presets or the tracked position: it must
@@ -601,8 +583,12 @@ EOF
 				emit_list "Moved to '${pname}' (dPan=${DPAN}ms, dTilt=${DTILT}ms)"
 			elif [ -f /tmp/ptz_job.cancel ]; then
 				emit_list "Move to '${pname}' was replaced by a newer move; position tracked to where it stopped" 1
+			elif ! motor_service_ready; then
+				emit_list "Move to '${pname}' did not complete: the motor service stopped answering. Position tracked to where it stopped" 1
 			else
-				emit_list "Move to '${pname}' did not complete: the motor service refused or failed. Position tracked to where it stopped" 1
+				# motors-cli's exit does not tell a manual move that took the
+				# head over from a step the motor refused, so say both.
+				emit_list "Move to '${pname}' stopped before it arrived: a manual move takes over from a preset move, or the motor refused a step. Position tracked to where it stopped" 1
 			fi
 		else
 			echo '{"ok":false,"error":"Preset not found"}'
@@ -660,16 +646,20 @@ EOF
 		PAN_MS=$((PAN_MS + IN_PAN))
 		TILT_MS=$((TILT_MS + IN_TILT))
 		FOCUS_MS=$((FOCUS_MS + IN_FOCUS))
-		ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" 0
+		# persist=1 is the page leaving with a move not yet committed: the
+		# last delta and the flash copy in one request, in that order.
+		ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$PERSIST"
 		emit_list ""
 		;;
 
 	persist)
 		# The idle commit for manual moves: one flash write per spell of
 		# steering, and none if the position is what /etc already holds.
-		ptz_read_pos
-		ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" 1
-		echo '{"ok":true}'
+		if ptz_persist_pos; then
+			echo '{"ok":true}'
+		else
+			echo '{"ok":false,"error":"Could not save the camera position to flash; it is kept until the next reboot"}'
+		fi
 		;;
 
 	*)

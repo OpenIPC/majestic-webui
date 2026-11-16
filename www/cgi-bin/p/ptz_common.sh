@@ -43,6 +43,23 @@ ptz_read_pos() {
 	case "$FOCUS_MS" in ''|*[!0-9-]*) FOCUS_MS=0 ;; esac
 }
 
+# Copy the RAM position to /etc/ptz_pos.conf, which is flash, if it differs.
+# It reads the RAM file and never writes it: a `track` landing meanwhile
+# must not be overwritten by an older snapshot. Non-zero when the copy could
+# not be written, so a caller can say so instead of claiming it saved.
+ptz_persist_pos() {
+	[ -f "$PTZ_POS_TMP" ] || return 0
+	_content=$(cat "$PTZ_POS_TMP" 2>/dev/null)
+	_cur=""
+	[ -f "$PTZ_POS_ETC" ] && _cur=$(cat "$PTZ_POS_ETC" 2>/dev/null)
+	[ "$_cur" = "$_content" ] && return 0
+	if printf '%s\n' "$_content" 2>/dev/null > "${PTZ_POS_ETC}.tmp" && mv "${PTZ_POS_ETC}.tmp" "$PTZ_POS_ETC" 2>/dev/null; then
+		return 0
+	fi
+	rm -f "${PTZ_POS_ETC}.tmp" 2>/dev/null
+	return 1
+}
+
 # Write current position to /tmp/ptz_pos.conf (RAM), and when $4 = 1,
 # persist to /etc/ptz_pos.conf only if values changed (spares flash writes).
 ptz_write_pos() {
@@ -53,13 +70,34 @@ ptz_write_pos() {
 	case "$_f" in ''|*[!0-9-]*) _f=0 ;; esac
 	_content=$(printf "PAN_MS=%s\nTILT_MS=%s\nFOCUS_MS=%s\n" "$_p" "$_t" "$_f")
 	printf '%s\n' "$_content" > "${PTZ_POS_TMP}.tmp" && mv "${PTZ_POS_TMP}.tmp" "$PTZ_POS_TMP"
-	if [ "$_persist" = "1" ]; then
-		_cur=""
-		[ -f "$PTZ_POS_ETC" ] && _cur=$(cat "$PTZ_POS_ETC" 2>/dev/null)
-		if [ "$_cur" != "$_content" ]; then
-			printf '%s\n' "$_content" > "${PTZ_POS_ETC}.tmp" 2>/dev/null && mv "${PTZ_POS_ETC}.tmp" "$PTZ_POS_ETC" 2>/dev/null || rm -f "${PTZ_POS_ETC}.tmp"
-		fi
+	[ "$_persist" = "1" ] && { ptz_persist_pos; return $?; }
+	return 0
+}
+
+# The PTZ job lock, shared by every endpoint that drives a move or rewrites
+# the presets: a directory made atomically, with the holder's pid written
+# just after. A contender that finds the directory but no pid yet is looking
+# at a lock being taken, not a stale one, so it gives the holder a moment
+# before deciding -- taking it over then would let two jobs run at once.
+ptz_acquire_lock() {
+	if mkdir /tmp/ptz_job.lock 2>/dev/null; then
+		echo "$$" > /tmp/ptz_job.lock/pid
+		return 0
 	fi
+	_lp=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
+	if [ -z "$_lp" ] && [ -d /tmp/ptz_job.lock ]; then
+		usleep 300000 2>/dev/null || sleep 1
+		_lp=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
+	fi
+	if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then
+		return 1
+	fi
+	rm -rf /tmp/ptz_job.lock
+	if mkdir /tmp/ptz_job.lock 2>/dev/null; then
+		echo "$$" > /tmp/ptz_job.lock/pid
+		return 0
+	fi
+	return 1
 }
 
 ptz_now_ms() {
