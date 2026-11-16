@@ -224,8 +224,8 @@ focus_label="Focus"
 <% fi %>
 <% else %>
 <% if has_cap pan || has_cap tilt; then %>
+<span id="mj-ptz-xy-label-alt" class="mj-ptz-group" style="display:block;width:100%;" hidden>Pan / Tilt</span>
 <div id="mj-ptz-pad" class="mj-ptz-pad" role="group" aria-label="Pan and tilt" data-ptz-control="<%= $ptz_control %>" data-ptz-caps="<%= $ptz_caps %>" data-ptz-orient="<%= $ptz_orient %>" hidden>
-	<span id="mj-ptz-xy-label-alt" class="mj-ptz-group" style="grid-column: span 3;">Pan / Tilt</span>
 	<% if has_cap pan && has_cap tilt; then %>
 	<button type="button" class="mj-ptz-btn" data-dir="ul" aria-label="Pan up-left">
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.6 12.6V6.6h6"></path></svg>
