@@ -1046,6 +1046,13 @@ update_caminfo() {
 	ptz_support=""; ptz_backend=""; ptz_reason=""; ptz_line=""
 	ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 	case "$ptz_control" in
+		motorsd|anjoy)
+			if [ -S /run/motorsd.sock ] && [ -x /usr/bin/motorsctl ]; then
+				ptz_support="1"; ptz_backend="pelco"
+			else
+				ptz_reason="Motor service (motorsd) is not running."
+			fi
+			;;
 		gpio)
 			# The binary AND a pin list: gpio-motors without pins errors on
 			# every press, and the pad must not render what cannot work. The
@@ -1115,7 +1122,7 @@ update_caminfo() {
 	local cap
 	for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
 		case "$cap" in
-			pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
+			pan|tilt|zoom|focus|iris) ptz_caps="$ptz_caps $cap" ;;
 		esac
 	done
 	ptz_caps="${ptz_caps# }"
@@ -1185,7 +1192,7 @@ update_caminfo() {
 
 	local variables="counting_asked counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		ptz_backend ptz_caps ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
+		ptz_backend ptz_caps ptz_control ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
 	rm -f ${sysinfo_file} "$counting_file"
 
 	# Through shq, because this file is SOURCED on every request and several of
@@ -1325,6 +1332,12 @@ fi
 include $sysinfo_file
 include "$counting_file"
 recheck_counting
+
+has_cap() {
+	[ -z "$ptz_caps" ] && return 0
+	case " $ptz_caps " in *" $1 "*) return 0 ;; esac
+	return 1
+}
 
 pagename=$(basename "$SCRIPT_NAME")
 pagename="${pagename%%.*}"

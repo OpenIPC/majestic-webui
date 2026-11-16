@@ -13,6 +13,7 @@
 # camera better than this script does.
 
 . "$(dirname "$0")/../p/majestic.sh"
+. "$(dirname "$0")/../p/ptz_common.sh"
 
 # Moving hardware is not a safe method. A GET is what a browser issues on its
 # own -- a prefetch, a restored tab, an <img> or a form on somebody else's page
@@ -20,7 +21,8 @@
 # /ptz for exactly that reason, and refusing it here too is what stops this
 # endpoint being the deputy that turns an attacker's GET into a legitimate
 # POST: everything below either drives a motor or steps a pad.
-if [ "$REQUEST_METHOD" != "POST" ]; then
+if [ "$REQUEST_METHOD" != "POST" ] &&
+	{ [ "$REQUEST_METHOD" != "GET" ] || [ "$QUERY_STRING" != "describe=1" ]; }; then
 	echo "HTTP/1.1 405 Method Not Allowed
 Content-type: text/plain; charset=UTF-8
 Allow: POST
@@ -57,25 +59,7 @@ fi
 # What still gets through is what should: this page's own fetch, which sends its
 # arguments in the query string and so carries no body and no Content-Type at
 # all, and a command-line POST, which carries none either.
-cross_site=""
-if [ -n "$HTTP_REFERER" ]; then
-	ref_origin="${HTTP_REFERER#*://}"
-	ref_origin="${ref_origin%%/*}"
-	[ "$ref_origin" = "$HTTP_HOST" ] || cross_site=1
-fi
-case "$CONTENT_TYPE" in
-	application/x-www-form-urlencoded*|multipart/form-data*|text/plain*)
-		cross_site=1
-		;;
-esac
-if [ -n "$cross_site" ]; then
-	echo "HTTP/1.1 400 Bad Request
-Content-type: text/plain; charset=UTF-8
-Cache-Control: no-store
-
-Cross-site PTZ refused."
-	exit 1
-fi
+ptz_reject_cross_site
 
 echo "HTTP/1.1 200 OK
 Content-type: text/plain; charset=UTF-8
@@ -87,11 +71,21 @@ Pragma: no-cache
 HORIZONTAL=0
 VERTICAL=0
 ACTION=""
+DURATION_MS=""
+SPEED_PCT=""
+DESCRIBE=""
+COMMAND=""
+VALUE=""
 for param in $(echo "$QUERY_STRING" | tr '&' ' '); do
 	case "$param" in
 		h=*) HORIZONTAL="${param#*=}" ;;
 		v=*) VERTICAL="${param#*=}" ;;
 		act=*) ACTION="${param#*=}" ;;
+		duration_ms=*|ms=*) DURATION_MS="${param#*=}" ;;
+		speed=*) SPEED_PCT="${param#*=}" ;;
+		describe=*) DESCRIBE="${param#*=}" ;;
+		command=*) COMMAND="${param#*=}" ;;
+		value=*) VALUE="${param#*=}" ;;
 	esac
 done
 
@@ -101,13 +95,63 @@ done
 # zero, same as j/time.cgi's pattern.
 echo "$HORIZONTAL" | grep -qE '^-?[0-9]{1,2}$' || HORIZONTAL=0
 echo "$VERTICAL" | grep -qE '^-?[0-9]{1,2}$' || VERTICAL=0
+echo "$DURATION_MS" | grep -qE '^[0-9]{1,5}$' || DURATION_MS=""
+if [ -n "$DURATION_MS" ] &&
+	{ [ "$DURATION_MS" -lt 1 ] || [ "$DURATION_MS" -gt 10000 ]; }; then
+	DURATION_MS=""
+fi
+echo "$SPEED_PCT" | grep -qE '^[0-9]{1,3}$' || SPEED_PCT=""
+if [ -n "$SPEED_PCT" ] &&
+	{ [ "$SPEED_PCT" -lt 1 ] || [ "$SPEED_PCT" -gt 100 ]; }; then
+	SPEED_PCT=""
+fi
+
+ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
+
+service_ok=0
+if [ "$ptz_control" = "motorsd" ] || [ "$ptz_control" = "anjoy" ] ||
+	[ "$DESCRIBE" = 1 ] || [ -n "$COMMAND" ]; then
+	if [ -x /usr/bin/motorsctl ] && [ -S /run/motorsd.sock ]; then
+		motor_caps=$(/usr/bin/motorsctl --socket /run/motorsd.sock \
+			'{"version":1,"id":"webui-caps","op":"capabilities"}' 2>/dev/null)
+		case "$motor_caps" in *'"available":true'*) service_ok=1 ;; esac
+	fi
+fi
+
+if [ "$DESCRIBE" = 1 ]; then
+	[ "$service_ok" = 1 ] || {
+		echo '{"version":1,"id":"webui-settings","ok":false,"error":"motor service unavailable"}'
+		exit 1
+	}
+	exec /usr/bin/motorsctl --socket /run/motorsd.sock \
+		'{"version":1,"id":"webui-settings","op":"describe"}'
+fi
+
+if [ -n "$COMMAND" ]; then
+	if [ "$service_ok" != 1 ] ||
+		! echo "$COMMAND" | grep -qE '^[a-z0-9]+([.][a-z0-9]+)*$'; then
+		echo "Invalid or unavailable motor command."
+		exit 1
+	fi
+	if [ "$COMMAND" = "ircut" ] && [ -x /usr/bin/af-trigger-check ]; then
+		/usr/bin/af-trigger-check --ircut-event >/dev/null 2>&1 &
+	fi
+	if [ -n "$VALUE" ]; then
+		echo "$VALUE" | grep -qE '^[A-Za-z0-9_-]{1,64}$' || {
+			echo "Invalid motor command value."
+			exit 1
+		}
+		exec /usr/bin/motorsctl --socket /run/motorsd.sock \
+			"{\"version\":1,\"id\":\"webui-command\",\"op\":\"command\",\"name\":\"$COMMAND\",\"value\":\"$VALUE\"}"
+	fi
+	exec /usr/bin/motorsctl --socket /run/motorsd.sock \
+		"{\"version\":1,\"id\":\"webui-command\",\"op\":\"command\",\"name\":\"$COMMAND\"}"
+fi
 
 # The same switch update_caminfo honours (#227): ptz_control names the
 # method outright. Unset means no PTZ, same as "none" or an unknown method —
 # the reporter ruled that a camera without ptz_control serves nobody, so the
 # old auto-detection from gpio_motors/ptz alone is gone.
-ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
-
 pelco_ok=0
 ptz_line=""
 pelco_why=""
@@ -123,7 +167,7 @@ case "$ptz_control" in
 	# same action path serves it. gpiostep is a pan/tilt head of GPIO steppers
 	# that majestic-af drives through the gpiostep kernel module, likewise. This used to exec /usr/bin/btzoom(-xm), which
 	# opened the tty the camera was already driving for autofocus and raced it.
-	pelco-d|pelco-xm|ms41908|gpiostep|visca)
+	pelco-d|pelco-xm|ms41908|gpiostep|visca|motorsd|anjoy)
 		ptz_line=$(mj_ptz 2>/dev/null)
 		case $? in
 			0) pelco_ok=1 ;;
@@ -133,6 +177,7 @@ case "$ptz_control" in
 			# verb reachable and let the attempt report its own failure.
 			*) pelco_ok=1 ;;
 		esac
+		[ "$pelco_ok" = 1 ] || [ "$service_ok" != 1 ] || pelco_ok=1
 		;;
 	gpio)
 		# Binary AND a pin list (either name — the binary reads ptz_gpio
@@ -156,7 +201,7 @@ esac
 ptz_caps=""
 for cap in $(fw_printenv -n ptz_caps 2>/dev/null); do
 	case "$cap" in
-		pan|tilt|zoom|focus) ptz_caps="$ptz_caps $cap" ;;
+		pan|tilt|zoom|focus|iris) ptz_caps="$ptz_caps $cap" ;;
 	esac
 done
 # The same defaults update_caminfo applies: what majestic lists for a lens it
@@ -254,12 +299,18 @@ if [ -n "$ACTION" ]; then
 	fi
 	if [ "$pelco_ok" = 1 ]; then
 		case "$ACTION" in
-			up|down|left|right|stop|wide|tele|near|far)
+			up|down|left|right|stop|wide|tele|near|far|open|close)
 				# stop is always allowed — a caps change must never take
 				# away the one verb that halts a motor already moving.
 				case "$ACTION" in
 					wide|tele) has_cap zoom || ACTION="" ;;
 					near|far) has_cap focus || ACTION="" ;;
+					open|close)
+						case " $ptz_caps " in
+							*" iris "*) ;;
+							*) [ "$ptz_control" = "motorsd" ] || [ "$ptz_control" = "anjoy" ] || ACTION="" ;;
+						esac
+						;;
 					up|down) has_cap tilt || ACTION="" ;;
 					left|right) has_cap pan || ACTION="" ;;
 				esac
@@ -275,8 +326,31 @@ if [ -n "$ACTION" ]; then
 				# now -- it knows when the operator stopped driving, which
 				# is what the old ?settle call was trying to guess from a
 				# lock file.
-				out=$(mj_ptz "$ACTION")
-				rc=$?
+				if [ -n "$SPEED_PCT" ] && [ "$service_ok" = 1 ] && [ -x /usr/bin/motors-cli ] &&
+					{ [ "$ACTION" = "up" ] || [ "$ACTION" = "down" ] || [ "$ACTION" = "left" ] || [ "$ACTION" = "right" ]; }; then
+					PELCO_MAX_SPEED=63
+					pelco_spd=$(( (SPEED_PCT * PELCO_MAX_SPEED + 50) / 100 ))
+					[ "$pelco_spd" -lt 1 ] && pelco_spd=1
+					[ "$pelco_spd" -gt "$PELCO_MAX_SPEED" ] && pelco_spd="$PELCO_MAX_SPEED"
+					/usr/bin/motors-cli --socket /run/motorsd.sock --speed "$pelco_spd" "$ACTION" "${DURATION_MS:-250}"
+					exit $?
+				fi
+				if [ -n "$DURATION_MS" ] && [ "$ACTION" != "stop" ]; then
+					out=$(mj_ptz "$ACTION:$DURATION_MS")
+					rc=$?
+					if [ "$rc" -ne 0 ] && [ "$service_ok" != 1 ]; then
+						out=$(mj_ptz "$ACTION")
+						rc=$?
+					fi
+				else
+					out=$(mj_ptz "$ACTION")
+					rc=$?
+				fi
+				if { [ "$rc" -ne 0 ] || [ "$out" = "unavailable" ]; } &&
+					[ "$service_ok" = 1 ] && [ -x /usr/bin/motors-cli ]; then
+					/usr/bin/motors-cli --socket /run/motorsd.sock "$ACTION" "$DURATION_MS"
+					exit $?
+				fi
 				[ -n "$out" ] && echo "$out"
 				exit $rc
 				;;
