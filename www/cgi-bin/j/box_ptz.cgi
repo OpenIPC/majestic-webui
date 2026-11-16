@@ -49,27 +49,7 @@ Cache-Control: no-store
 fi
 
 acquire_ptz_lock() {
-	if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-		echo "$$" > /tmp/ptz_job.lock/pid
-		return 0
-	fi
-	if [ -f /tmp/ptz_job.lock/pid ]; then
-		old_pid=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
-		if [ -z "$old_pid" ] || ! kill -0 "$old_pid" 2>/dev/null; then
-			rm -rf /tmp/ptz_job.lock
-			if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-				echo "$$" > /tmp/ptz_job.lock/pid
-				return 0
-			fi
-		fi
-	else
-		rm -rf /tmp/ptz_job.lock
-		if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-			echo "$$" > /tmp/ptz_job.lock/pid
-			return 0
-		fi
-	fi
-	return 1
+	ptz_acquire_lock
 }
 
 if ! acquire_ptz_lock; then

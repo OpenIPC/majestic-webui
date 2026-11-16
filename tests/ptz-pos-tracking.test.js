@@ -101,4 +101,105 @@ for (const rel of [
 		parsed.current_mag === null || typeof parsed.current_mag === 'number');
 }
 
+// 5. ptz_presets.cgi actions against a sandbox. Each CGI is copied with its
+// /etc and /tmp paths moved under a temporary directory, so the real
+// actions run unmodified. Every failure here is silent on a camera: a flash
+// write nobody sees, a preset overwritten without a word, a position
+// written in the wrong frame.
+function presetsSandbox() {
+	const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ptz-presets-'));
+	for (const sub of ['etc', 'tmp', 'j', 'p']) fs.mkdirSync(path.join(dir, sub));
+	const relocate = (src, dst) => fs.writeFileSync(dst,
+		fs.readFileSync(path.join(root, src), 'utf8')
+			.replace(/\/(etc|tmp)\//g, (m, d) => dir + '/' + d + '/'));
+	relocate('www/cgi-bin/j/ptz_presets.cgi', path.join(dir, 'j/ptz_presets.cgi'));
+	relocate('www/cgi-bin/p/ptz_common.sh', path.join(dir, 'p/ptz_common.sh'));
+	const run = (qs) => {
+		const out = execFileSync('/bin/sh', [path.join(dir, 'j/ptz_presets.cgi')], {
+			env: { PATH: process.env.PATH, REQUEST_METHOD: 'POST', QUERY_STRING: qs, CONTENT_LENGTH: '0' },
+			encoding: 'utf8',
+		});
+		return JSON.parse(out.slice(out.indexOf('\n\n') + 2).trim());
+	};
+	const file = (rel) => path.join(dir, rel);
+	return { dir, run, file };
+}
+
+{
+	const sb = presetsSandbox();
+	try {
+		fs.writeFileSync(sb.file('etc/ptz_pos.conf'), 'PAN_MS=0\nTILT_MS=0\nFOCUS_MS=0\n');
+		sb.run('act=track&pan_ms=300&tilt_ms=-40&focus_ms=0');
+		check('track keeps the position in RAM',
+			fs.readFileSync(sb.file('tmp/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=300\nTILT_MS=-40\n'));
+		check('track does not write the flash copy',
+			fs.readFileSync(sb.file('etc/ptz_pos.conf'), 'utf8') === 'PAN_MS=0\nTILT_MS=0\nFOCUS_MS=0\n');
+		const ok = sb.run('act=persist');
+		check('persist copies the position to flash',
+			ok.ok === true && fs.readFileSync(sb.file('etc/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=300\nTILT_MS=-40\n'));
+		check('persist leaves the RAM copy as it found it',
+			fs.readFileSync(sb.file('tmp/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=300\nTILT_MS=-40\n'));
+		sb.run('act=track&persist=1&pan_ms=50&tilt_ms=0&focus_ms=0');
+		check('track with persist=1 lands the delta and commits it in one request',
+			fs.readFileSync(sb.file('etc/ptz_pos.conf'), 'utf8').startsWith('PAN_MS=350\nTILT_MS=-40\n'));
+		// Flash that cannot be written must be reported, not claimed.
+		sb.run('act=track&pan_ms=10&tilt_ms=0&focus_ms=0');
+		fs.chmodSync(sb.file('etc'), 0o555);
+		let failed;
+		try { failed = sb.run('act=persist'); } finally { fs.chmodSync(sb.file('etc'), 0o755); }
+		const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+		if (!asRoot) {
+			check('persist says so when flash cannot be written', failed.ok === false && /flash/.test(failed.error || ''),
+				JSON.stringify(failed));
+		}
+	} finally {
+		fs.rmSync(sb.dir, { recursive: true, force: true });
+	}
+}
+
+{
+	const sb = presetsSandbox();
+	try {
+		const rows = [];
+		for (let i = 1; i <= 32; i++) rows.push(i + '|View ' + i + '|1.0|0|1|' + (i * 100) + '|0|0');
+		fs.writeFileSync(sb.file('etc/ptz_presets.tsv'), rows.join('\n') + '\n');
+		const d = sb.run('act=set_home_here&name=Home');
+		check('Save Home refuses when every slot is taken and no Home is set', d.ok === false && /32 preset slots/.test(d.error || ''),
+			JSON.stringify(d));
+		check('Save Home leaves preset #1 alone',
+			fs.readFileSync(sb.file('etc/ptz_presets.tsv'), 'utf8').startsWith('1|View 1|1.0|0|1|100|0|0\n'));
+
+		fs.writeFileSync(sb.file('etc/ptz_presets.tsv'), '2|Homestead|1.0|0|1|500|0|0\n');
+		const h = sb.run('act=set_home_here&name=Home');
+		check('Save Home takes the first free slot, not a preset whose name starts with "home"',
+			h.ok === true && h.boot_home === 1 && h.presets.some(p => p.id === 2 && p.name === 'Homestead' && p.pan_ms === 500),
+			JSON.stringify(h));
+	} finally {
+		fs.rmSync(sb.dir, { recursive: true, force: true });
+	}
+}
+
+{
+	const sb = presetsSandbox();
+	try {
+		fs.writeFileSync(sb.file('etc/ptz_presets.tsv'), '1|Door|1.0|0|1|1000|200|0\n');
+		fs.writeFileSync(sb.file('tmp/ptz_pos.conf'), 'PAN_MS=400\nTILT_MS=0\nFOCUS_MS=0\n');
+		// A preset move in progress: the lock is held by a live process.
+		fs.mkdirSync(sb.file('tmp/ptz_job.lock'));
+		fs.writeFileSync(sb.file('tmp/ptz_job.lock/pid'), String(process.pid));
+		for (const act of ['zero', 'shift_all&pan_ms=500', 'sync_pos&id=1', 'set_home_here']) {
+			const d = sb.run('act=' + act);
+			check(act.split('&')[0] + ' waits for a running preset move', d.ok === false && /in progress/.test(d.error || ''),
+				JSON.stringify(d));
+		}
+		check('nothing was rewritten under the move',
+			fs.readFileSync(sb.file('etc/ptz_presets.tsv'), 'utf8') === '1|Door|1.0|0|1|1000|200|0\n' &&
+			fs.readFileSync(sb.file('tmp/ptz_pos.conf'), 'utf8') === 'PAN_MS=400\nTILT_MS=0\nFOCUS_MS=0\n');
+		check('a refused action leaves the move\'s lock in place',
+			fs.readFileSync(sb.file('tmp/ptz_job.lock/pid'), 'utf8') === String(process.pid));
+	} finally {
+		fs.rmSync(sb.dir, { recursive: true, force: true });
+	}
+}
+
 done();

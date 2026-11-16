@@ -902,10 +902,63 @@
 		pendingTrackPan = 0;
 		pendingTrackTilt = 0;
 		pendingTrackFocus = 0;
+		tracksInFlight++;
 		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=track&pan_ms=' + dp + '&tilt_ms=' + dt + '&focus_ms=' + df, {
 			method: 'POST',
 			credentials: 'same-origin'
-		}).catch(() => {});
+		}).catch(() => {}).finally(() => { tracksInFlight--; });
+		schedulePersist();
+	}
+	// `track` keeps the position in RAM. Once the pad has rested for a few
+	// seconds, one `persist` copies it to flash, so a spell of steering costs
+	// one write instead of one per move, and a reboot still finds the head
+	// where it was left. It waits for every `track` sent to land, or it
+	// would commit a position one move short.
+	let persistTimer = 0, tracksInFlight = 0;
+	function schedulePersist() {
+		if (persistTimer) clearTimeout(persistTimer);
+		persistTimer = setTimeout(() => {
+			persistTimer = 0;
+			if (activeTrack || trackFlushTimer || tracksInFlight) { schedulePersist(); return; }
+			apiFetch('/cgi-bin/j/ptz_presets.cgi?act=persist', {
+				method: 'POST',
+				credentials: 'same-origin'
+			})
+				.then(r => (r.ok ? r.json() : null))
+				.then(d => { if (d && !d.ok && d.error) toast(d.error); })
+				.catch(() => {});
+		}, 3000);
+	}
+	// Leaving the page inside that rest would drop the commit with the timer.
+	// One keepalive request carries the last delta and the flash copy
+	// together, so they cannot arrive out of order.
+	window.addEventListener('pagehide', () => {
+		commitActiveTrack();
+		if (trackFlushTimer) { clearTimeout(trackFlushTimer); trackFlushTimer = 0; }
+		const dp = Math.round(pendingTrackPan);
+		const dt = Math.round(pendingTrackTilt);
+		const df = Math.round(pendingTrackFocus);
+		pendingTrackPan = pendingTrackTilt = pendingTrackFocus = 0;
+		if (!dp && !dt && !df && !persistTimer) return;
+		if (persistTimer) { clearTimeout(persistTimer); persistTimer = 0; }
+		const url = (dp || dt || df)
+			? '/cgi-bin/j/ptz_presets.cgi?act=track&persist=1&pan_ms=' + dp + '&tilt_ms=' + dt + '&focus_ms=' + df
+			: '/cgi-bin/j/ptz_presets.cgi?act=persist';
+		try {
+			apiFetch(url, { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {});
+		} catch (e) {}
+	});
+	// A line in the page's toast stack, for news the pad has no place for.
+	function toast(text) {
+		const box = $('#mj-toasts');
+		if (!box) return;
+		const p = document.createElement('p');
+		p.className = 'mj-adapt-toast small';
+		p.setAttribute('role', 'status');
+		p.textContent = text;
+		p.addEventListener('click', () => p.remove());
+		box.appendChild(p);
+		setTimeout(() => p.remove(), 6000);
 	}
 	function scheduleTrackFlush() {
 		if (trackFlushTimer) clearTimeout(trackFlushTimer);

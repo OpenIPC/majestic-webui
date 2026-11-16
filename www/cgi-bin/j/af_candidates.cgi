@@ -109,20 +109,13 @@ if [ -n "$SELECT_ID" ]; then
         fi
         DRIVE_MS=$((MS + BACKLASH))
         if [ "$DRIVE_MS" -gt 0 ]; then
-            if ! mkdir /tmp/ptz_job.lock 2>/dev/null; then
-                old_pid=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
-                if [ -z "$old_pid" ] || ! kill -0 "$old_pid" 2>/dev/null; then
-                    rm -rf /tmp/ptz_job.lock
-                    mkdir /tmp/ptz_job.lock 2>/dev/null
-                else
-                    echo "HTTP/1.1 409 Conflict"
-                    echo "Content-Type: application/json"
-                    echo ""
-                    echo '{"ok":false,"error":"Another PTZ move is in progress"}'
-                    exit 0
-                fi
+            if ! ptz_acquire_lock; then
+                echo "HTTP/1.1 409 Conflict"
+                echo "Content-Type: application/json"
+                echo ""
+                echo '{"ok":false,"error":"Another PTZ move is in progress"}'
+                exit 0
             fi
-            echo "$$" > /tmp/ptz_job.lock/pid
             trap 'rm -rf /tmp/ptz_job.lock' EXIT
             /usr/bin/motors-cli --socket /run/motorsd.sock "$CMD" "$DRIVE_MS" >/dev/null 2>&1
             RC=$?

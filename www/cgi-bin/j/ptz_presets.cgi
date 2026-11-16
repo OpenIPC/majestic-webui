@@ -2,15 +2,17 @@
 # CGI endpoint for Named PTZ & Focus Presets
 # Stores presets in /etc/ptz_presets.tsv:
 #   id|name|mag|run_af|zoom_restore|pan_ms|tilt_ms
-# Tracks dead-reckoned open-loop pan/tilt position in /tmp/ptz_pos.conf
-# and persists to /etc/ptz_pos.conf on completed moves/releases.
+# Tracks dead-reckoned open-loop pan/tilt position in /tmp/ptz_pos.conf.
+# /etc/ptz_pos.conf, which is flash, is written only at the end of a
+# deliberate move (a preset arrival, Zero, Calibrate, Home) and by
+# act=persist, which the Live page sends once the pad has been idle: a
+# write per pad move would wear the flash for nothing a reboot needs.
 
 . "$(dirname "$0")/../p/ptz_common.sh"
 
 PRESETS_FILE="/etc/ptz_presets.tsv"
 BOOT_HOME_FILE="/etc/ptz_boot_home"
 MAP_BG_FILE="/tmp/ptz_map_bg.jpg"
-MAP_BG_META="/tmp/ptz_map_bg.meta"
 
 if [ ! -f "$PRESETS_FILE" ]; then
 	touch "$PRESETS_FILE" 2>/dev/null
@@ -57,7 +59,6 @@ restore_zoom_and_af() {
 	dtilt="$5"
 	dfocus="$6"
 
-	: > /tmp/majestic-af.cancel 2>/dev/null || true
 	/usr/bin/motorsctl --socket /run/motorsd.sock \
 		'{"version":1,"id":"preempt-af","op":"acquire","axis":"focus","role":"manual","lease_ms":50}' >/dev/null 2>&1 || true
 	/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1
@@ -132,7 +133,6 @@ restore_zoom_and_af() {
 			if [ "$zdir" = "done" ] || [ -z "$zdir" ]; then
 				break
 			fi
-			: > /tmp/majestic-af.cancel 2>/dev/null || true
 			/usr/bin/motors-cli --socket /run/motorsd.sock --role automation "$zdir" "$zms" >/dev/null 2>&1 || return 1
 			usleep 200000 2>/dev/null || sleep 1
 			step=$((step + 1))
@@ -153,7 +153,6 @@ restore_zoom_and_af() {
 			usleep 120000 2>/dev/null || true
 		fi
 	fi
-	rm -f /tmp/majestic-af.cancel 2>/dev/null || true
 	return 0
 }
 
@@ -194,21 +193,19 @@ ptz_read_live_pos() {
 	fi
 }
 
+# $2 = 1 marks the reply as a move that did not complete: the list and the
+# tracked position are still current, so the page refreshes from them, but
+# the caller must not treat it as an arrival.
 emit_list() {
 	extra_msg="$1"
+	failed="${2:-0}"
 	cur_mag=$(get_current_mag)
 	ptz_read_live_pos
 	boot_home=$(read_boot_home)
 	has_bg="false"
-	BG_PAN="null"
-	BG_TILT="null"
-	if [ -s "$MAP_BG_FILE" ]; then
-		has_bg="true"
-		[ -f "$MAP_BG_META" ] && . "$MAP_BG_META" 2>/dev/null
-		case "$BG_PAN" in ''|*[!0-9-]*) BG_PAN="null" ;; esac
-		case "$BG_TILT" in ''|*[!0-9-]*) BG_TILT="null" ;; esac
-	fi
-	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s,"boot_home":%s,"has_map_bg":%s,"bg_pan":%s,"bg_tilt":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$boot_home" "$has_bg" "$BG_PAN" "$BG_TILT"
+	[ -s "$MAP_BG_FILE" ] && has_bg="true"
+	printf '{"ok":true,"current_mag":%s,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s,"boot_home":%s,"has_map_bg":%s' "${cur_mag:-null}" "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$boot_home" "$has_bg"
+	[ "$failed" = "1" ] && printf ',"failed":true'
 	if [ -n "$extra_msg" ]; then
 		esc_msg=$(json_escape "$extra_msg")
 		printf ',"message":"%s"' "$esc_msg"
@@ -253,8 +250,7 @@ ZOOM_RESTORE="1"
 IN_PAN=""
 IN_TILT=""
 IN_FOCUS=""
-SINCE=""
-WAIT_TIMEOUT="15"
+PERSIST="0"
 
 for param in $(echo "$RAW_QS" | tr '&' ' '); do
 	case "$param" in
@@ -267,8 +263,7 @@ for param in $(echo "$RAW_QS" | tr '&' ' '); do
 		pan_ms=*) IN_PAN=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		tilt_ms=*) IN_TILT=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		focus_ms=*) IN_FOCUS=$(echo "${param#*=}" | tr -cd '0-9-') ;;
-		since=*) SINCE=$(urldecode "${param#*=}" | tr -cd '0-9,-') ;;
-		timeout=*) WAIT_TIMEOUT=$(echo "${param#*=}" | tr -cd '0-9') ;;
+		persist=1) PERSIST="1" ;;
 	esac
 done
 
@@ -288,7 +283,7 @@ if [ "$ACT" = "map_bg" ]; then
 	exit 0
 fi
 
-if [ "$ACT" != "list" ] && [ "$ACT" != "pos_wait" ] && [ "$REQUEST_METHOD" != "POST" ]; then
+if [ "$ACT" != "list" ] && [ "$ACT" != "pos" ] && [ "$REQUEST_METHOD" != "POST" ]; then
 	echo "HTTP/1.1 405 Method Not Allowed"
 	echo "Allow: POST"
 	echo "Content-Type: application/json"
@@ -306,27 +301,18 @@ echo "Cache-Control: no-store, no-cache, must-revalidate"
 echo ""
 
 acquire_ptz_lock() {
-	if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-		echo "$$" > /tmp/ptz_job.lock/pid
-		return 0
+	ptz_acquire_lock
+}
+
+# For an action that rewrites the presets or the tracked position: it must
+# not run under a preset move, which ends by writing a position computed in
+# the frame it started in.
+need_ptz_lock() {
+	if ! acquire_ptz_lock; then
+		echo '{"ok":false,"error":"Another PTZ move is in progress"}'
+		exit 0
 	fi
-	if [ -f /tmp/ptz_job.lock/pid ]; then
-		old_pid=$(cat /tmp/ptz_job.lock/pid 2>/dev/null)
-		if [ -z "$old_pid" ] || ! kill -0 "$old_pid" 2>/dev/null; then
-			rm -rf /tmp/ptz_job.lock
-			if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-				echo "$$" > /tmp/ptz_job.lock/pid
-				return 0
-			fi
-		fi
-	else
-		rm -rf /tmp/ptz_job.lock
-		if mkdir /tmp/ptz_job.lock 2>/dev/null; then
-			echo "$$" > /tmp/ptz_job.lock/pid
-			return 0
-		fi
-	fi
-	return 1
+	trap 'if [ "$(cat /tmp/ptz_job.lock/pid 2>/dev/null)" = "$$" ]; then rm -rf /tmp/ptz_job.lock 2>/dev/null || true; fi' EXIT
 }
 
 upsert_preset_row() {
@@ -429,6 +415,7 @@ EOF
 		;;
 
 	zero)
+		need_ptz_lock
 		ptz_read_pos
 		if [ -f "$PRESETS_FILE" ] && { [ "$PAN_MS" -ne 0 ] || [ "$TILT_MS" -ne 0 ] || [ "$FOCUS_MS" -ne 0 ]; }; then
 			awk -F'|' -v OFS='|' -v dp="$PAN_MS" -v dt="$TILT_MS" -v df="$FOCUS_MS" '
@@ -441,19 +428,12 @@ EOF
 				}
 			' "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" && mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
 		fi
-		if [ -f "$MAP_BG_META" ] && { [ "$PAN_MS" -ne 0 ] || [ "$TILT_MS" -ne 0 ]; }; then
-			BG_PAN=""
-			BG_TILT=""
-			. "$MAP_BG_META" 2>/dev/null || true
-			case "$BG_PAN" in ''|*[!0-9-]*) ;; *) BG_PAN=$((BG_PAN - PAN_MS)) ;; esac
-			case "$BG_TILT" in ''|*[!0-9-]*) ;; *) BG_TILT=$((BG_TILT - TILT_MS)) ;; esac
-			printf "BG_PAN=%s\nBG_TILT=%s\n" "${BG_PAN:-0}" "${BG_TILT:-0}" > "$MAP_BG_META"
-		fi
 		ptz_write_pos 0 0 0 1
 		emit_list "Current camera direction set as new Origin (0, 0, 0); saved presets shifted to match"
 		;;
 
 	shift_all)
+		need_ptz_lock
 		case "$IN_PAN" in ''|*[!0-9-]*) IN_PAN=0 ;; esac
 		case "$IN_TILT" in ''|*[!0-9-]*) IN_TILT=0 ;; esac
 		if [ -f "$PRESETS_FILE" ] && { [ "$IN_PAN" -ne 0 ] || [ "$IN_TILT" -ne 0 ]; }; then
@@ -474,6 +454,7 @@ EOF
 			echo '{"ok":false,"error":"Invalid preset ID"}'
 			exit 0
 		fi
+		need_ptz_lock
 		ROW=$(grep "^${ID}|" "$PRESETS_FILE" 2>/dev/null | head -n 1)
 		if [ -z "$ROW" ]; then
 			echo '{"ok":false,"error":"Preset not found"}'
@@ -491,19 +472,23 @@ EOF
 		;;
 
 	set_home_here)
+		need_ptz_lock
 		ptz_read_pos
 		CUR_MAG=$(get_current_mag)
+		# Home is the boot-home preset and nothing else -- not a guess from
+		# a name. Without one, the first free slot; with none free, refuse
+		# rather than overwrite somebody's preset.
 		bh=$(read_boot_home)
 		if [ "$bh" = "null" ] || [ -z "$bh" ]; then
-			bh=$(awk -F'|' 'tolower($2) ~ /^home/ { print $1; exit }' "$PRESETS_FILE" 2>/dev/null)
-		fi
-		if [ -z "$bh" ]; then
 			bh=1
 			while [ "$bh" -le 32 ]; do
 				grep -q "^${bh}|" "$PRESETS_FILE" 2>/dev/null || break
 				bh=$((bh + 1))
 			done
-			[ "$bh" -gt 32 ] && bh=1
+			if [ "$bh" -gt 32 ]; then
+				echo '{"ok":false,"error":"All 32 preset slots are in use. Pick a preset and make it Home, or delete one first."}'
+				exit 0
+			fi
 		fi
 		EXISTING_NAME=""
 		EXISTING_AF="0"
@@ -575,7 +560,7 @@ EOF
 			fi
 		fi
 		rm -f /tmp/ptz_job.cancel 2>/dev/null || true
-		trap 'if [ "$(cat /tmp/ptz_job.lock/pid 2>/dev/null)" = "$$" ]; then rm -rf /tmp/ptz_job.lock /tmp/ptz_job.cancel /tmp/majestic-af.cancel /tmp/ptz_live.conf 2>/dev/null || true; fi' EXIT
+		trap 'if [ "$(cat /tmp/ptz_job.lock/pid 2>/dev/null)" = "$$" ]; then rm -rf /tmp/ptz_job.lock /tmp/ptz_job.cancel /tmp/ptz_live.conf 2>/dev/null || true; fi' EXIT
 		ROW=$(grep "^${ID}|" "$PRESETS_FILE" | head -n 1)
 		if [ -n "$ROW" ]; then
 			IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus <<EOF
@@ -596,8 +581,14 @@ EOF
 			if restore_zoom_and_af "$pmag" "$paf" "$pzoom" "$DPAN" "$DTILT" "$DFOCUS"; then
 				ptz_write_pos "$ppan" "$ptilt" "$NEW_FOCUS" 1
 				emit_list "Moved to '${pname}' (dPan=${DPAN}ms, dTilt=${DTILT}ms)"
+			elif [ -f /tmp/ptz_job.cancel ]; then
+				emit_list "Move to '${pname}' was replaced by a newer move; position tracked to where it stopped" 1
+			elif ! motor_service_ready; then
+				emit_list "Move to '${pname}' did not complete: the motor service stopped answering. Position tracked to where it stopped" 1
 			else
-				emit_list "Preset move interrupted by manual control (position tracked)"
+				# motors-cli's exit does not tell a manual move that took the
+				# head over from a step the motor refused, so say both.
+				emit_list "Move to '${pname}' stopped before it arrived: a manual move takes over from a preset move, or the motor refused a step. Position tracked to where it stopped" 1
 			fi
 		else
 			echo '{"ok":false,"error":"Preset not found"}'
@@ -607,9 +598,8 @@ EOF
 	capture_map_bg)
 		ptz_read_pos
 		CUR_MAG=$(get_current_mag)
-		if wget -qO "${MAP_BG_FILE}.tmp" "http://127.0.0.1/image.jpg" 2>/dev/null && [ -s "${MAP_BG_FILE}.tmp" ]; then
+		if wget -q -T 5 -O "${MAP_BG_FILE}.tmp" "http://127.0.0.1/image.jpg" 2>/dev/null && [ -s "${MAP_BG_FILE}.tmp" ]; then
 			mv "${MAP_BG_FILE}.tmp" "$MAP_BG_FILE"
-			printf "BG_PAN=%s\nBG_TILT=%s\n" "$PAN_MS" "$TILT_MS" > "$MAP_BG_META"
 			emit_list "Captured map background at current view (Pan ${PAN_MS}ms, Tilt ${TILT_MS}ms, Zoom ${CUR_MAG:-1.0}x)"
 		else
 			rm -f "${MAP_BG_FILE}.tmp"
@@ -641,21 +631,7 @@ EOF
 		fi
 		;;
 
-	pos_wait)
-		case "$WAIT_TIMEOUT" in ''|*[!0-9]*) WAIT_TIMEOUT=15 ;; esac
-		[ "$WAIT_TIMEOUT" -lt 1 ] && WAIT_TIMEOUT=1
-		[ "$WAIT_TIMEOUT" -gt 30 ] && WAIT_TIMEOUT=30
-		max_ticks=$((WAIT_TIMEOUT * 12))
-		tick=0
-		while [ "$tick" -lt "$max_ticks" ]; do
-			ptz_read_live_pos
-			cur_key="${PAN_MS},${TILT_MS},${FOCUS_MS},${LIVE_MOVING}"
-			if [ -z "$SINCE" ] || [ "$cur_key" != "$SINCE" ]; then
-				break
-			fi
-			tick=$((tick + 1))
-			usleep 80000 2>/dev/null || sleep 1
-		done
+	pos)
 		ptz_read_live_pos
 		cur_mag=$(get_current_mag)
 		printf '{"ok":true,"pan_ms":%s,"tilt_ms":%s,"focus_ms":%s,"moving":%s,"dp":%s,"dt":%s,"current_mag":%s}\n' \
@@ -670,8 +646,20 @@ EOF
 		PAN_MS=$((PAN_MS + IN_PAN))
 		TILT_MS=$((TILT_MS + IN_TILT))
 		FOCUS_MS=$((FOCUS_MS + IN_FOCUS))
-		ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" 1
+		# persist=1 is the page leaving with a move not yet committed: the
+		# last delta and the flash copy in one request, in that order.
+		ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$PERSIST"
 		emit_list ""
+		;;
+
+	persist)
+		# The idle commit for manual moves: one flash write per spell of
+		# steering, and none if the position is what /etc already holds.
+		if ptz_persist_pos; then
+			echo '{"ok":true}'
+		else
+			echo '{"ok":false,"error":"Could not save the camera position to flash; it is kept until the next reboot"}'
+		fi
 		;;
 
 	*)
