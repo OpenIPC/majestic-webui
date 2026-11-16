@@ -938,24 +938,34 @@
 			const dp = verb.indexOf('right') >= 0 ? 1 : (verb.indexOf('left') >= 0 ? -1 : 0);
 			const dt = verb.indexOf('up') >= 0 ? 1 : (verb.indexOf('down') >= 0 ? -1 : 0);
 			const spdScale = pct / 100;
-			if (useCgi) {
-				if (ms > 0) {
+			// Every move is tracked, whichever path carries it: a pad tap
+			// that went to /ptz moved the head as surely as a stick tick
+			// that went to ptz.cgi, and an untracked one leaves every preset
+			// recall driving from a place the head is not.
+			if (ms > 0) {
+				commitActiveTrack();
+				pendingTrackPan += dp * ms * spdScale;
+				pendingTrackTilt += dt * ms * spdScale;
+				scheduleTrackFlush();
+			} else {
+				if (!activeTrack || activeTrack.dp !== dp || activeTrack.dt !== dt || activeTrack.df) {
 					commitActiveTrack();
-					pendingTrackPan += dp * ms * spdScale;
-					pendingTrackTilt += dt * ms * spdScale;
-					scheduleTrackFlush();
+					activeTrack = { dp, dt, df: 0, startMs: Date.now(), scale: spdScale };
 				} else {
-					if (!activeTrack || activeTrack.dp !== dp || activeTrack.dt !== dt || activeTrack.df) {
-						commitActiveTrack();
-						activeTrack = { dp, dt, df: 0, startMs: Date.now(), scale: spdScale };
-					} else {
-						activeTrack.scale = spdScale;
-					}
+					activeTrack.scale = spdScale;
 				}
 			}
 			try { window.dispatchEvent(new CustomEvent('mj:ptz-moving', { detail: { dp, dt, df: 0, scale: useCgi ? spdScale : 1, durationMs: ms || 0, stop: false } })); } catch (e) {}
 		} else if (!isStop && (verb === 'near' || verb === 'far')) {
 			const df = verb === 'far' ? 1 : -1;
+			if (ms > 0) {
+				commitActiveTrack();
+				pendingTrackFocus += df * ms;
+				scheduleTrackFlush();
+			} else if (!activeTrack || activeTrack.df !== df) {
+				commitActiveTrack();
+				activeTrack = { dp: 0, dt: 0, df, startMs: Date.now(), scale: 1 };
+			}
 			try { window.dispatchEvent(new CustomEvent('mj:ptz-moving', { detail: { dp: 0, dt: 0, df, scale: 1, durationMs: ms || 0, stop: false } })); } catch (e) {}
 		} else if (isStop) {
 			commitActiveTrack();
