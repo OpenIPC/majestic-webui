@@ -1597,6 +1597,38 @@
           "help": "An average that looks right can still burn out a close subject. Watch isp_highlight to pick a number.",
           "x-reload": "service:night"
         },
+        "whiteLightPwmFreq": {
+          "minimum": 50,
+          "maximum": 20000,
+          "type": "integer",
+          "title": "White lamp PWM frequency (Hz)",
+          "hint": "Empty runs the white lamp at backlightPwmFreq.",
+          "x-reload": "service:night"
+        },
+        "whiteLightPwmMin": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Minimum white lamp duty (%)",
+          "hint": "Empty uses backlightPwmMin.",
+          "x-reload": "service:night"
+        },
+        "whiteLightPwmMax": {
+          "minimum": 0,
+          "maximum": 100,
+          "type": "integer",
+          "title": "Maximum white lamp duty (%)",
+          "hint": "How bright the white lamp is when it is lit. Empty uses backlightPwmMax.",
+          "x-reload": "service:night"
+        },
+        "whiteLightPwmGamma": {
+          "type": "number",
+          "title": "White lamp brightness curve",
+          "minimum": 0.2,
+          "maximum": 4.0,
+          "hint": "Empty uses backlightPwmGamma.",
+          "x-reload": "service:night"
+        },
         "transitionDelayMs": {
           "minimum": 0,
           "maximum": 2000,

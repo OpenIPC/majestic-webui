@@ -17,6 +17,7 @@ IFS_ORIG=$IFS
 # "Missing" that same tag, several hundred lines later.)
 . ./p/majestic.sh
 . ./p/flash.sh
+. ./p/sdcard-dev.sh
 
 # card_head "title" "note"
 #
@@ -103,6 +104,10 @@ uses_default_password() {
 
 	[ "$(mkpasswd -m "$method" -S "$salt" 12345 2>/dev/null)" = "$hash" ]
 }
+
+# A card the camera could record to (p/sdcard-dev.sh, which j/sdcard.cgi asks
+# too, so the menu offers the SD pages exactly when there is a card for them).
+has_mmc_card() { sd_card_name >/dev/null; }
 
 check_password() {
 	local p="/cgi-bin/access.cgi"
@@ -1038,7 +1043,7 @@ update_caminfo() {
 	# The backend decides which pad p/motor.cgi draws — gpio and motor are
 	# stepped eight-way pan/tilt, the Pelco variants are four directions in
 	# timed pulses plus zoom and focus.
-	ptz_support=""; ptz_backend=""; ptz_reason=""
+	ptz_support=""; ptz_backend=""; ptz_reason=""; ptz_line=""
 	ptz_control=$(fw_printenv -n ptz_control 2>/dev/null)
 	case "$ptz_control" in
 		motorsd|anjoy)
@@ -1058,9 +1063,10 @@ update_caminfo() {
 				ptz_support="1"; ptz_backend="gpio"
 			fi
 			;;
-		pelco-d|pelco-xm|ms41908|gpiostep)
-			# All four are motors majestic itself drives -- the two XiongMai
-			# near-Pelco variants over a UART, the Panasonic MS41908M SPI
+		pelco-d|pelco-xm|ms41908|gpiostep|visca)
+			# All five are motors majestic itself drives -- the two XiongMai
+			# near-Pelco variants over a UART, a Sony VISCA zoom block's lens
+			# MCU over a UART (the XiongMai N51813L), the Panasonic MS41908M SPI
 			# stepper on the Hi3516A V100 boards, which has no UART MCU and is
 			# stepped straight off the ISP by the majestic-af plugin, and a
 			# pan/tilt head of plain GPIO steppers behind the gpiostep kernel
@@ -1081,7 +1087,7 @@ update_caminfo() {
 			# "this camera has no PTZ", which is the confusion this endpoint
 			# exists to end, and would put the explanation j/ptz.cgi
 			# prepares somewhere nothing can reach.
-			mj_ptz > /dev/null 2>&1
+			ptz_line=$(mj_ptz 2>/dev/null)
 			case $? in
 				0|2) ptz_support="1"; ptz_backend="pelco" ;;
 				3)
@@ -1120,6 +1126,10 @@ update_caminfo() {
 		esac
 	done
 	ptz_caps="${ptz_caps# }"
+	# Unset, a lens majestic drives has the axes majestic lists (mj_ptz_axes):
+	# a VISCA block without a head draws no pan or tilt buttons that move
+	# nothing, and grows them once ptz.head gives it a head.
+	[ -z "$ptz_caps" ] && [ -n "$ptz_line" ] && ptz_caps=$(mj_ptz_axes "$ptz_line")
 	# A gpiostep head pans and tilts and has nothing else to drive, so its
 	# full capability is those two: an unset ptz_caps must not draw zoom and
 	# focus buttons that move nothing.

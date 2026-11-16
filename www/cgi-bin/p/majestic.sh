@@ -103,6 +103,24 @@ mj_ptz() {
 	printf '%s' "${_mj_r%|*}"
 }
 
+# mj_ptz_axes <capability line> -- the axes the line's verbs= drive, as
+# ptz_caps words (pan tilt zoom focus), or nothing for a line without verbs.
+#
+# The default for ptz_caps on a lens majestic drives: what majestic says it can
+# move, rather than every axis. A VISCA zoom block lists only zoom and focus
+# until a pan/tilt head is configured beside it (ptz.head), and then lists the
+# head's verbs too -- so its pad follows the camera with no ptz_caps to keep in
+# step. Pure: no request, the caller passes what mj_ptz printed.
+mj_ptz_axes() {
+	_mj_v=$(printf '%s' " $1" | sed -n 's/.* verbs=\([a-z,]*\).*/\1/p')
+	_mj_a=""
+	case ",$_mj_v," in *,left,*|*,right,*) _mj_a="$_mj_a pan" ;; esac
+	case ",$_mj_v," in *,up,*|*,down,*) _mj_a="$_mj_a tilt" ;; esac
+	case ",$_mj_v," in *,tele,*|*,wide,*) _mj_a="$_mj_a zoom" ;; esac
+	case ",$_mj_v," in *,near,*|*,far,*) _mj_a="$_mj_a focus" ;; esac
+	printf '%s' "${_mj_a# }"
+}
+
 # mj_set <dotted.key> <value> -- write one key through majestic's own API.
 #
 # The nested body is built from the dotted path, because that shape is the
