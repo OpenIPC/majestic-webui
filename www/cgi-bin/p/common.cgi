@@ -1193,7 +1193,7 @@ update_caminfo() {
 	local variables="counting_asked counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
 		ptz_backend ptz_caps ptz_control ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
-	rm -f ${sysinfo_file} "$counting_file"
+	rm -f "$counting_file"
 
 	# Through shq, because this file is SOURCED on every request and several of
 	# these values come off the device or out of a form. The line this replaced
@@ -1211,11 +1211,19 @@ update_caminfo() {
 	#
 	# The assignment is the escaped `\$${v}` form on purpose: an assignment's
 	# right-hand side is not word-split or globbed, so the value arrives whole.
-	local v val
+	# Written to a temporary file and renamed into place. The delete-then-append
+	# this replaced left a window in which two requests that both found the cache
+	# stale wrote the same file at the same time: the appends interleaved, values
+	# landed on the wrong variable, and the file stopped parsing -- every page 500
+	# again, from nothing but a browser opening the interface (#728). The rename is
+	# atomic, so a reader sees the old file or the new one, never a half-written one.
+	local v val tmp="${sysinfo_file}.$$"
+	: > "$tmp" || return
 	for v in $variables; do
 		eval "val=\$${v}"
-		conf_write "$v" "$val" >> ${sysinfo_file}
+		conf_write "$v" "$val" >> "$tmp"
 	done
+	mv "$tmp" "$sysinfo_file"
 
 	generate_signature
 }
