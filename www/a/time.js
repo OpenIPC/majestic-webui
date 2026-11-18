@@ -20,7 +20,7 @@
 		btn.disabled = true;
 		s.className = 'small text-secondary';
 		s.textContent = 'working…';
-		apiFetch(url, { credentials: 'same-origin' })
+		apiFetch(url, { method: 'POST', credentials: 'same-origin' })
 			.then(r => r.json())
 			.then(j => {
 				s.className = 'small alert alert-' + j.result + ' py-1 px-2 mb-0';

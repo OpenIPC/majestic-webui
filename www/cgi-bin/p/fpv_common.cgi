@@ -88,7 +88,18 @@ yaml_set_value() {
     local key="$2"
     local item="$3"
     local value="$4"
-    
+
+    # Every value this page stores is a number, a router name or a serial
+    # device. Anything else is refused before it reaches either writer: the
+    # fallback below builds a sed program out of it, where a `|` adds flags --
+    # `w <file>` among them -- and a newline adds whole commands.
+    case "$value" in
+        "" | *[!A-Za-z0-9._/-]*)
+            log_debug "Refused YAML value for $key.$item"
+            return 1
+            ;;
+    esac
+
     # Create file if it doesn't exist
     if [ ! -f "$file" ]; then
         ensure_directory "$(dirname "$file")"

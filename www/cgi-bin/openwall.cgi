@@ -9,9 +9,14 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		eval openwall_${p}=\$POST_openwall_${p}
 	done
 
-	if [ "$openwall_enabled" = "true" ]; then
-		[ "$openwall_interval" -lt "15" ] && set_error_flag "Keep interval at 15 minutes or longer."
-	fi
+	# One of the four the page offers, and nothing else. This used to be
+	# `[ "$openwall_interval" -lt 15 ]`, which on anything not a number fails
+	# with an error rather than a verdict -- so it never flagged, and the value
+	# went into root's crontab below as written, newlines and all.
+	case "$openwall_interval" in
+	15 | 30 | 60 | 120) ;;
+	*) set_error_flag "Interval must be 15, 30, 60 or 120 minutes." ;;
+	esac
 
 	if [ -z "$error" ]; then
 		rm -f "$config_file"
@@ -34,7 +39,14 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 
 		sed -i /openwall/d /etc/crontabs/root
 		if [ "$openwall_enabled" = "true" ] && [ "$openwall_crontab" = "true" ]; then
-			echo "*/${openwall_interval} * * * * /usr/sbin/openwall" >> /etc/crontabs/root
+			# A word for the cron line, as telegram.cgi does: `*/60` and `*/120`
+			# both match only minute 0, which made them the same hourly schedule.
+			case "$openwall_interval" in
+			15 | 30) cron_when="*/${openwall_interval} * * * *" ;;
+			60) cron_when="0 * * * *" ;;
+			120) cron_when="0 */2 * * *" ;;
+			esac
+			echo "${cron_when} /usr/sbin/openwall" >> /etc/crontabs/root
 		fi
 
 		redirect_back "success" "OpenWall config updated."
