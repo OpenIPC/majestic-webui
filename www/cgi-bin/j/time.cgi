@@ -3,6 +3,15 @@
 # With ?set=<epoch>: set the system clock from the caller's Unix time (used by
 # the "Set from browser" button for offline cameras; no RTC, so this is volatile
 # across reboots). Always returns {"result":"success|danger","message":"..."}.
+#
+# POST only. Both arms change the clock, and a GET is what a cross-site <img>
+# sends: with Basic credentials cached in the browser, any page could set the
+# camera's time -- and a share's expiry with it.
+
+if [ "$REQUEST_METHOD" != "POST" ]; then
+	printf 'HTTP/1.1 405 Method Not Allowed\nAllow: POST\nContent-type: application/json\n\n{"result":"danger","message":"POST only."}\n'
+	exit 0
+fi
 
 case "$QUERY_STRING" in
 	*set=*)

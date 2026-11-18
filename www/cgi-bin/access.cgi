@@ -40,6 +40,15 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 				redirect_to "$SCRIPT_NAME" "danger" "Password does not match!"
 			fi
 
+			# chpasswd reads one user:password per line, so a newline in the
+			# posted value would set a second account's password too.
+			case "$password_default" in
+				*"
+"* | *"$(printf '\r')"*)
+					redirect_to "$SCRIPT_NAME" "danger" "Password cannot contain a line break."
+					;;
+			esac
+
 			echo "root:${password_default}" | chpasswd
 			update_caminfo
 			redirect_to "/" "success" "Password updated."

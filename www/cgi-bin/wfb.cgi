@@ -223,12 +223,11 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
     
     case "$POST_action" in
         update)
-            # Log all POST variables for debugging
-            for var in $(set | grep ^POST_ | cut -d= -f1); do
-                val=$(t_value "$var")
-                debug_log "$var = $val"
-            done
-            
+            # Each field below is logged as it is stored. This used to walk
+            # `set | grep ^POST_` and eval every name it found, and a value
+            # with a newline in it put a name of its sender's choosing on
+            # that list -- `POST_$(...)`, run as root.
+
             # Process all form fields regardless of current tab
 
             # Update YAML configuration
