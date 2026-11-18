@@ -27,15 +27,16 @@ function run(script, args, env, input) {
 
 group('setnetwork refuses what would become a line of the stanza');
 {
-	const base = ['-i', 'eth0', '-m', 'static', '-a', '192.168.1.10', '-n', '255.255.255.0'];
+	const base = ['-i', 'eth0', '-m', 'static', '-a', '192.0.2.10', '-n', '255.255.255.0'];
 	const refused = [
 		['a nameserver with a pre-up after a newline', [...base, '-d', '1.1.1.1\n    pre-up touch /tmp/x']],
 		['a nameserver with a command after it', [...base, '-d', '1.1.1.1;id']],
-		['an address with a newline', ['-i', 'eth0', '-m', 'static', '-a', '192.168.1.10\n    up id', '-n', '255.255.255.0']],
-		['a netmask that is not one', ['-i', 'eth0', '-m', 'static', '-a', '192.168.1.10', '-n', '255.255.255.0 x']],
-		['a gateway past 255', [...base, '-g', '192.168.1.256']],
+		['an address with a newline', ['-i', 'eth0', '-m', 'static', '-a', '192.0.2.10\n    up id', '-n', '255.255.255.0']],
+		['a netmask that is not one', ['-i', 'eth0', '-m', 'static', '-a', '192.0.2.10', '-n', '255.255.255.0 x']],
+		['a gateway past 255', [...base, '-g', '192.0.2.256']],
 		['an interface that is a path', ['-i', '../../etc/init.d/S99x', '-m', 'dhcp']],
-		['a mode that is not one', ['-i', 'eth0', '-m', 'static\n    up id', '-a', '192.168.1.10', '-n', '255.255.255.0']],
+		['an interface with a second line', ['-i', 'eth0\nwlan0', '-m', 'dhcp']],
+		['a mode that is not one', ['-i', 'eth0', '-m', 'static\n    up id', '-a', '192.0.2.10', '-n', '255.255.255.0']],
 	];
 	for (const [name, args] of refused) {
 		const r = run('sbin/setnetwork', args);
@@ -48,7 +49,7 @@ group('setnetwork refuses what would become a line of the stanza');
 	check('is_ipv4 is in setnetwork (otherwise this tests nothing)', start >= 0);
 	const fn = src.slice(start, src.indexOf('\n}\n', start) + 3);
 	const ok = (v) => spawnSync(SH[0], [SH[1], '-c', fn + 'is_ipv4 "$1"', 'sh', v]).status === 0;
-	for (const v of ['192.168.1.10', '255.255.255.0', '0.0.0.0', '10.0.0.1'])
+	for (const v of ['192.0.2.10', '255.255.255.0', '0.0.0.0', '198.51.100.1'])
 		check(v + ' is an address', ok(v));
 	for (const v of ['', '1.2.3', '1.2.3.4.5', '01.2.3.4x', '1.2.3.4 ', '1.2.3.4\n5.6.7.8'])
 		check(JSON.stringify(v) + ' is not', !ok(v));
@@ -76,6 +77,15 @@ group('j/save.cgi writes on POST only, whole or not at all');
 	r = run('www/cgi-bin/j/save.cgi', [], { REQUEST_METHOD: 'PUT', GET_path: link }, 'through\n');
 	check('a symlink is written through', fs.readFileSync(f, 'utf8') === 'through\n', r.out);
 	check('...and stays a symlink', fs.lstatSync(link).isSymbolicLink());
+
+	// Two names for one file: both must read what was saved.
+	const other = path.join(d, 'other-name');
+	fs.linkSync(f, other);
+	r = run('www/cgi-bin/j/save.cgi', [], { REQUEST_METHOD: 'POST', GET_path: f }, 'linked\n');
+	check('a hard-linked file is saved', /"ok":true/.test(r.out), r.out);
+	check('...and its other name reads the new text', fs.readFileSync(other, 'utf8') === 'linked\n');
+	check('...through the same inode', fs.statSync(f).ino === fs.statSync(other).ino);
+	fs.unlinkSync(other);
 
 	const missing = path.join(d, 'no-such-dir', 'x');
 	r = run('www/cgi-bin/j/save.cgi', [], { REQUEST_METHOD: 'POST', GET_path: missing }, 'x');

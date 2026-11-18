@@ -142,8 +142,13 @@ is_ipv4() {
 	echo "$1" | grep -Eqx '((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
 }
 
-# Also a file name under interfaces.d.
-if ! echo "$network_interface" | grep -Eqx '[a-z][a-z0-9]{0,14}'; then
+# Also a file name under interfaces.d. The case first, for the same reason as
+# in is_ipv4: grep -x would pass a second line after a good first one.
+case "$network_interface" in
+	"" | *[!a-z0-9]*) network_interface_bad=1 ;;
+esac
+if [ -n "$network_interface_bad" ] ||
+	! echo "$network_interface" | grep -Eqx '[a-z][a-z0-9]{0,14}'; then
 	echo "Not a network interface: $network_interface"
 	exit 1
 fi
