@@ -225,7 +225,10 @@ value() {
 post() {
 	failed=
 	rm -f "$workdir/answer"
+	# https all the way: a bundle carries majestic's memory, and a redirect
+	# may move it to a mirror but not down to cleartext.
 	set -- curl --silent --show-error --connect-timeout 30 --max-time 60 \
+		--proto =https --proto-redir =https \
 		--location --max-redirs 3 --post301 --post302 \
 		--output "$workdir/answer" --write-out '%{http_code}' \
 		--url "$URL" -F "bundle=@${1};type=application/gzip" ${2:+-F} ${2:+"meta=<${2}"}

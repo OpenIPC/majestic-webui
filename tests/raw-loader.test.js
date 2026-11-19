@@ -76,8 +76,9 @@ function load(opts) {
 	group('the pin');
 
 	m = load({});
-	check('points at a version, never at a moving tag',
-		/@v\d+\.\d+\.\d+\//.test(m.BASE), m.BASE);
+	// A version tag was the pin once; a tag can be moved, a commit cannot.
+	check('points at a commit, never at a moving tag or branch',
+		/@[0-9a-f]{40}\//.test(m.BASE), m.BASE);
 	check('and at bytes this project publishes',
 		m.BASE.indexOf('/gh/OpenIPC/') !== -1, m.BASE);
 

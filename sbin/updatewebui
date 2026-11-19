@@ -158,6 +158,12 @@ done
 # asked for has to be kept apart from it: write_version reports the source, and
 # must report the one that was requested rather than the one derived from it.
 zip_url_given=$zip_url
+# Not over plain http: what arrives is unpacked and run as root, and anyone on
+# the path could swap it. https, or copy the zip here and use file://, which
+# is the offline route anyway.
+case $zip_url in
+[Hh][Tt][Tt][Pp]://*) die "refusing a plain http:// archive; use https:// or file://" ;;
+esac
 
 # Where a write to / physically lands, and where the firmware's own copy of a
 # file lives. /init mounts the overlay two ways depending on the kernel: the
@@ -276,7 +282,9 @@ fetch_tree() {
 		source_name=$branch
 	fi
 	echo "Fetch $zip_url"
-	curl -fsSL --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
+	# The http refusal above holds through redirects too: https, or the
+	# file:// an offline camera is updated with, and a redirect only to https.
+	curl -fsSL --proto =https,file --proto-redir =https --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
 		die "download failed, nothing has been changed"
 	# Unpacking into the scratch directory is the whole validation: it rejects
 	# what is not a zip and what is a truncated one, and it needs no option

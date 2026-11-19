@@ -36,6 +36,7 @@ group('setnetwork refuses what would become a line of the stanza');
 		['a gateway past 255', [...base, '-g', '192.0.2.256']],
 		['an interface that is a path', ['-i', '../../etc/init.d/S99x', '-m', 'dhcp']],
 		['an interface with a second line', ['-i', 'eth0\nwlan0', '-m', 'dhcp']],
+		['a hostname with a second line', ['-i', 'eth0', '-m', 'dhcp', '-h', 'cam\n192.0.2.66 example.org']],
 		['a mode that is not one', ['-i', 'eth0', '-m', 'static\n    up id', '-a', '192.0.2.10', '-n', '255.255.255.0']],
 	];
 	for (const [name, args] of refused) {
@@ -91,6 +92,38 @@ group('j/save.cgi writes on POST only, whole or not at all');
 	r = run('www/cgi-bin/j/save.cgi', [], { REQUEST_METHOD: 'POST', GET_path: missing }, 'x');
 	check('a write that cannot happen says so', /"ok":false/.test(r.out), r.out);
 	fs.rmSync(d, { recursive: true, force: true });
+}
+
+group('the WebUI updater installs nothing that came over plain http');
+{
+	// Both read --url: the fetcher, and the installer it hands over to. Each
+	// refuses before it fetches, writes or runs anything.
+	for (const script of ['sbin/updatewebui', 'sbin/updatewebui-fetch']) {
+		const r = run(script, ['--url=http://192.0.2.1/tree.zip', '--dry-run']);
+		check(script + ' refuses an http:// archive', r.status !== 0 && /http/.test(r.out), r.out);
+	}
+}
+
+group('time.cgi takes every zone its own list offers, and no second line');
+{
+	// The checks as they ship, run over the whole bundled list: a zone the page
+	// offers and the save refuses is a camera that cannot be set to it.
+	const src = fs.readFileSync(path.join(ROOT, 'www/cgi-bin/time.cgi'), 'utf8');
+	const nameCase = src.match(/case "\$POST_tz_name" in\n[\s\S]*?esac/);
+	const dataCase = src.match(/case "\$POST_tz_data" in\n[\s\S]*?esac/);
+	check('both checks are in time.cgi (otherwise this tests nothing)', !!nameCase && !!dataCase);
+	const tz = fs.readFileSync(path.join(ROOT, 'www/a/timezone.js'), 'utf8');
+	const zones = [...tz.matchAll(/n:\s*'([^']*)',\s*v:\s*'([^']*)'/g)].map((m) => [m[1], m[2]]);
+	check('the bundled list was read (otherwise this tests nothing)', zones.length > 400, String(zones.length));
+	// One shell for the whole list: prints each refused pair.
+	const script = 'redirect_to() { echo "REFUSED $POST_tz_name|$POST_tz_data"; }\n' +
+		'while IFS="|" read -r POST_tz_name POST_tz_data; do\n' + nameCase[0] + '\n' + dataCase[0] + '\ndone';
+	const r = spawnSync(SH[0], [SH[1], '-c', script], { input: zones.map((z) => z.join('|')).join('\n') + '\n', encoding: 'utf8' });
+	check('every bundled zone is accepted', r.stdout === '', r.stdout.split('\n').slice(0, 5).join(' / '));
+	const one = (name, data) => spawnSync(SH[0], [SH[1], '-c', 'redirect_to() { echo REFUSED; }\n' + nameCase[0] + '\n' + dataCase[0]],
+		{ env: { PATH: process.env.PATH, POST_tz_name: name, POST_tz_data: data }, encoding: 'utf8' }).stdout;
+	check('a zone name with a second line is refused', /REFUSED/.test(one('Europe/Berlin\nserver 192.0.2.66', 'CET-1')));
+	check('a TZ value with a second line is refused', /REFUSED/.test(one('Europe/Berlin', 'CET-1\nx')));
 }
 
 group('j/time.cgi changes the clock on POST only');

@@ -35,8 +35,13 @@ window.MajesticWasm = (function () {
 	//
 	// MJ_WASM_BASE overrides it, for a development build or an operator who
 	// would rather host it themselves.
+	// Pinned to the release's commit, not its tag: jsDelivr follows a tag, and a
+	// tag can be moved, which would change the code this page runs as root with
+	// no change here. The module graph is import()ed, which takes no integrity
+	// hash, so the commit is the pin. Bump both when bumping the release.
+	// hevc-wasm v0.2.1.
 	const BASE = (window.MJ_WASM_BASE ||
-		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@v0.2.1/dist/');
+		'https://cdn.jsdelivr.net/gh/OpenIPC/hevc-wasm@f71f53012459d98f3bb1238419b36645d8729fad/dist/');
 	// The channel feed (preview-datachannel.js), when the camera has one:
 	// the worker is asked to run in its feed mode and this page owns the
 	// transport — a data channel cannot be created in, or transferred into,

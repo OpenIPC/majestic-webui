@@ -184,6 +184,19 @@ if [ -z "$upload_url" ]; then
 	echo "MAX would not take an upload (${slot})"
 	exit 1
 fi
+# The upload host is the reply's choice, so it may not step down from the
+# server's own https to cleartext.
+case "$max_server" in
+https://*)
+	case "$upload_url" in
+	https://*) ;;
+	*)
+		echo "MAX offered an upload address that is not https; nothing was sent"
+		exit 1
+		;;
+	esac
+	;;
+esac
 
 if [ "$kind" = video ]; then
 	token=$(printf '%s' "$slot" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')

@@ -25,9 +25,16 @@
 	const LOAD_MS = 15000;
 	const CDN = 'https://cdn.jsdelivr.net/npm/';
 
-	function load(src) {
+	// Every file carries its hash. This page drives a root shell, and without
+	// one whoever serves these bytes -- the CDN, or anything on the path to it
+	// -- would run as that shell's owner. A file that does not match is
+	// refused by the browser and takes the same "could not be loaded" path.
+	// Bump the hash with the version: `openssl dgst -sha384 -binary | base64`.
+	function load(src, hash) {
 		return new Promise(res => {
 			const s = document.createElement('script');
+			s.integrity = hash;
+			s.crossOrigin = 'anonymous';
 			s.src = src;
 			const to = setTimeout(() => res(false), LOAD_MS);
 			s.onload = () => { clearTimeout(to); res(true); };
@@ -40,11 +47,13 @@
 	// same host did too.
 	const css = document.createElement('link');
 	css.rel = 'stylesheet';
+	css.integrity = 'sha384-tStR1zLfWgsiXCF3IgfB3lBa8KmBe/lG287CL9WCeKgQYcp1bjb4/+mwN6oti4Co';
+	css.crossOrigin = 'anonymous';
 	css.href = CDN + '@xterm/xterm@5.5.0/css/xterm.min.css';
 	document.head.appendChild(css);
 
-	load(CDN + '@xterm/xterm@5.5.0/lib/xterm.min.js')
-		.then(ok => ok && load(CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.min.js'))
+	load(CDN + '@xterm/xterm@5.5.0/lib/xterm.min.js', 'sha384-J4qzUjBl1FxyLsl/kQPQIOeINsmp17OHYXDOMpMxlKX53ZfYsL+aWHpgArvOuof9')
+		.then(ok => ok && load(CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.min.js', 'sha384-XGqKrV8Jrukp1NITJbOEHwg01tNkuXr6uB6YEj69ebpYU3v7FvoGgEg23C1Gcehk'))
 		.then(ok => {
 			if (ok && window.Terminal && window.FitAddon) return startTerminal();
 			$('#console-status').textContent = 'The terminal could not be loaded from cdn.jsdelivr.net. ' +

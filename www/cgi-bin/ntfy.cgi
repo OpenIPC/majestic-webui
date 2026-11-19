@@ -61,6 +61,12 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 
 	if [ "$ntfy_enabled" = "true" ]; then
 		[ -z "$ntfy_server" ] && set_error_flag "Enter the server before switching Ntfy on."
+	fi
+	case "$ntfy_server" in
+	"" | http://* | https://*) ;;
+	*) set_error_flag "The server must start with https:// (or http:// for one on your own network)." ;;
+	esac
+	if [ "$ntfy_enabled" = "true" ]; then
 		[ -z "$ntfy_topic" ] && set_error_flag "Enter a topic before switching Ntfy on."
 	fi
 

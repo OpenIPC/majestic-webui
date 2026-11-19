@@ -11,19 +11,26 @@ on:
     branches: [master]
   workflow_dispatch:
 
+# Read-only by default. The build runs `npm ci`, and a dependency's install
+# script, or a moved action tag, would otherwise run beside a token that can
+# replace the release every nightly firmware fetches. Only `publish` can write,
+# and it runs no third-party code: it uploads the file `build` produced, with
+# its checksum. Actions are pinned by commit for the same reason.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: dist
   cancel-in-progress: true
 
 jobs:
-  dist:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
       # Before the build, not after: this workflow publishes to every nightly
@@ -35,11 +42,31 @@ jobs:
       - run: npm test
       - run: npm ci
       - run: npm run build:dist
+      - run: sha256sum majestic-webui-dist.tar.gz > majestic-webui-dist.tar.gz.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dist
+          path: |
+            majestic-webui-dist.tar.gz
+            majestic-webui-dist.tar.gz.sha256
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist
       - name: Publish rolling dist release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
+          sha256sum -c majestic-webui-dist.tar.gz.sha256
           gh release view dist >/dev/null 2>&1 || \
             gh release create dist --prerelease --title "Minified dist (rolling)" \
               --notes "Auto-built minified assets consumed by the OpenIPC firmware buildroot package. Tracks master; refreshed on every push."
-          gh release upload dist majestic-webui-dist.tar.gz --clobber
+          gh release upload dist majestic-webui-dist.tar.gz majestic-webui-dist.tar.gz.sha256 --clobber

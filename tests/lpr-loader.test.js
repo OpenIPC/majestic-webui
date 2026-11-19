@@ -50,7 +50,7 @@ function load(opts) {
 	return { m: sandbox.MajesticLpr, state: state };
 }
 
-const CDN = 'https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/';
+const CDN = 'https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@d9a0209345cebcf4d0d731b935c48feed3d6ed74/dist/';
 
 (async () => {
 	group('a camera that was told nothing uses the pinned tag');

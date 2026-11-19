@@ -23,7 +23,7 @@ rather than left to suggest a code path that never existed. Git history has them
 
 ## The plate reader is fetched, and `webui_lpr_base` names a mirror
 
-`lpr-loader.js` is pinned to `lpr-wasm@v0.1.0` and behaves like `raw-loader.js`
+`lpr-loader.js` is pinned to `lpr-wasm` v0.1.0 by its commit and behaves like `raw-loader.js`
 next door: the **Plates** tab is there on every camera that can serve a raw
 frame, and about nine megabytes of model and runtime arrives the first time
 somebody uses it. `webui_lpr_base` in `/etc/webui/webui.conf` points a camera at

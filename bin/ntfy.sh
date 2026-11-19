@@ -182,7 +182,9 @@ fi
 # no value needs escaping and none can be split, globbed or truncated -- and
 # the hand-rolled escaping those three carried is gone with the eval that
 # required it.
-set -- curl -s --connect-timeout 100 --max-time 100
+# http or https only, the server included: curl also speaks file://, and a
+# server of file:///etc/<x> would have had -T write the snapshot over it.
+set -- curl -s --connect-timeout 100 --max-time 100 --proto =http,https --proto-redir =http,https
 
 # Add a proxy, if available
 if [ "$ntfy_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
