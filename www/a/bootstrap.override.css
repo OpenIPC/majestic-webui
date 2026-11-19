@@ -4244,6 +4244,17 @@ button.mj-osd-chip,
 	z-index: 4;
 }
 
+/* The way out of a stage banner, in its top right corner, with the text kept
+   clear of it (#733). */
+#mj-blind {
+	padding-right: 2.75rem;
+}
+#mj-blind > .btn-close {
+	position: absolute;
+	top: 0.75rem;
+	right: 0.75rem;
+}
+
 /* Anchored to the PICTURE, not to the stage. Fill leaves the two the same, so
    this changes nothing in the ordinary case; on a letterboxed view a chip at
    the stage's corner floats in black, describing nothing. preview-zoom.js

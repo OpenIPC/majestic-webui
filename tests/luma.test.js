@@ -130,4 +130,29 @@ group('the drawn path is a closed step function over the box');
 		flat.indexOf('NaN') < 0 && /^M0,100/.test(flat), flat);
 }
 
+group('a canvas nothing was drawn onto is not a black frame (#733)');
+{
+	const vc = require(path.join(__dirname, '..', 'www', 'a', 'video-check.js'));
+	// What a canvas holds when drawImage() silently drew nothing, as Firefox
+	// for Android does with a stream <video>: every byte zero, alpha included.
+	const undrawn = new Uint8ClampedArray(16 * 16 * 4);
+	const u = luma.histogram(undrawn, 16, 16);
+	check('nothing drawn measures no pixels', u.total === 0, u.total);
+	check('and claims no shadows', u.low === 0 && u.mean === 0, u.low + '/' + u.mean);
+	check('and is no verdict at all, not "black"', vc.look(u) === null, vc.look(u));
+
+	// The real thing still convicts: a black frame is opaque.
+	const b = luma.histogram(grey(0)(16, 16), 16, 16);
+	check('an opaque black frame is every pixel', b.total === 256, b.total);
+	check('and is still black', vc.look(b) === 'black', vc.look(b));
+
+	// Half drawn: the transparent half is absent, not dark.
+	const half = grey(200)(16, 16);
+	for (let i = 0; i < 128; i++) half.fill(0, i * 4, i * 4 + 4);
+	const hh = luma.histogram(half, 16, 16);
+	check('only the drawn half is counted', hh.total === 128, hh.total);
+	check('and it is not dragged into the shadows', hh.low === 0 && near(hh.mean, 200, 1e-6),
+		hh.low + '/' + hh.mean);
+}
+
 done();
