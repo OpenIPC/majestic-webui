@@ -151,7 +151,7 @@ if [ -n "$url" ]; then
 	# file protocol compiled in is not something to find out there.
 	case $url in
 	file://*) cp "${url#file://}" "$tmp/tree.zip" 2>/dev/null ;;
-	*) curl -fsSL --connect-timeout 15 -m 300 -o "$tmp/tree.zip" "$url" 2>/dev/null ;;
+	*) curl -fsSL --proto =https --proto-redir =https --connect-timeout 15 -m 300 -o "$tmp/tree.zip" "$url" 2>/dev/null ;;
 	esac
 	if [ -s "$tmp/tree.zip" ] &&
 		unzip -qo -d "$tmp/x" "$tmp/tree.zip" "*/sbin/$scr_name" >/dev/null 2>&1; then
@@ -173,7 +173,7 @@ fi
 
 url_raw="https://raw.githubusercontent.com/$REPO/$branch/sbin/$scr_name"
 
-if curl -fsSL --connect-timeout 15 -m 120 -o "$staged" "$url_raw" 2>/dev/null; then
+if curl -fsSL --proto =https --proto-redir =https --connect-timeout 15 -m 120 -o "$staged" "$url_raw" 2>/dev/null; then
 	usable "$staged" || die "what $url_raw returned is not the installer"
 	chmod +x "$staged" 2>/dev/null
 	run_staged "$@"

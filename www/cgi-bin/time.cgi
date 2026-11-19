@@ -26,10 +26,11 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			[ -z "$POST_tz_data" ] && redirect_to "$SCRIPT_NAME" "warning" "Empty timezone value. Skipping."
 			# Each goes into a file a line at a time, and a line break in one
 			# would be a second line -- another ntp.conf directive. A zone name
-			# is a path in the zone database; a POSIX TZ string has its own
+			# is a path in the zone database, written with spaces where the
+			# database has underscores (America/New York); a POSIX TZ string has its own
 			# small alphabet; a server is a host name or an address.
 			case "$POST_tz_name" in
-			*[!A-Za-z0-9_/+-]*) redirect_to "$SCRIPT_NAME" "danger" "That is not a time zone name." ;;
+			*[!A-Za-z0-9_/+\ -]*) redirect_to "$SCRIPT_NAME" "danger" "That is not a time zone name." ;;
 			esac
 			case "$POST_tz_data" in
 			*[!A-Za-z0-9\<\>+,.:/-]*) redirect_to "$SCRIPT_NAME" "danger" "That is not a time zone value." ;;

@@ -104,6 +104,28 @@ group('the WebUI updater installs nothing that came over plain http');
 	}
 }
 
+group('time.cgi takes every zone its own list offers, and no second line');
+{
+	// The checks as they ship, run over the whole bundled list: a zone the page
+	// offers and the save refuses is a camera that cannot be set to it.
+	const src = fs.readFileSync(path.join(ROOT, 'www/cgi-bin/time.cgi'), 'utf8');
+	const nameCase = src.match(/case "\$POST_tz_name" in\n[\s\S]*?esac/);
+	const dataCase = src.match(/case "\$POST_tz_data" in\n[\s\S]*?esac/);
+	check('both checks are in time.cgi (otherwise this tests nothing)', !!nameCase && !!dataCase);
+	const tz = fs.readFileSync(path.join(ROOT, 'www/a/timezone.js'), 'utf8');
+	const zones = [...tz.matchAll(/n:\s*'([^']*)',\s*v:\s*'([^']*)'/g)].map((m) => [m[1], m[2]]);
+	check('the bundled list was read (otherwise this tests nothing)', zones.length > 400, String(zones.length));
+	// One shell for the whole list: prints each refused pair.
+	const script = 'redirect_to() { echo "REFUSED $POST_tz_name|$POST_tz_data"; }\n' +
+		'while IFS="|" read -r POST_tz_name POST_tz_data; do\n' + nameCase[0] + '\n' + dataCase[0] + '\ndone';
+	const r = spawnSync(SH[0], [SH[1], '-c', script], { input: zones.map((z) => z.join('|')).join('\n') + '\n', encoding: 'utf8' });
+	check('every bundled zone is accepted', r.stdout === '', r.stdout.split('\n').slice(0, 5).join(' / '));
+	const one = (name, data) => spawnSync(SH[0], [SH[1], '-c', 'redirect_to() { echo REFUSED; }\n' + nameCase[0] + '\n' + dataCase[0]],
+		{ env: { PATH: process.env.PATH, POST_tz_name: name, POST_tz_data: data }, encoding: 'utf8' }).stdout;
+	check('a zone name with a second line is refused', /REFUSED/.test(one('Europe/Berlin\nserver 192.0.2.66', 'CET-1')));
+	check('a TZ value with a second line is refused', /REFUSED/.test(one('Europe/Berlin', 'CET-1\nx')));
+}
+
 group('j/time.cgi changes the clock on POST only');
 {
 	const r = run('www/cgi-bin/j/time.cgi', [], { REQUEST_METHOD: 'GET', QUERY_STRING: 'set=0' });

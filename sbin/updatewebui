@@ -282,7 +282,9 @@ fetch_tree() {
 		source_name=$branch
 	fi
 	echo "Fetch $zip_url"
-	curl -fsSL --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
+	# The http refusal above holds through redirects too: https, or the
+	# file:// an offline camera is updated with, and a redirect only to https.
+	curl -fsSL --proto =https,file --proto-redir =https --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
 		die "download failed, nothing has been changed"
 	# Unpacking into the scratch directory is the whole validation: it rejects
 	# what is not a zip and what is a truncated one, and it needs no option
