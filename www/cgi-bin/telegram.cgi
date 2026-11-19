@@ -91,7 +91,12 @@ fi
 
 [ -e "$config_file" ] && include $config_file
 [ -z "$telegram_crontab" ] && telegram_crontab="true"
-[ -z "$telegram_interval" ] && telegram_interval="15"
+# Narrowed to the four values the page offers, as max.cgi does: it is written
+# into the JSON block below unquoted, and a stored `</script>` ended the block.
+case "$telegram_interval" in
+15 | 30 | 60 | 360) ;;
+*) telegram_interval="15" ;;
+esac
 
 # The sender's own default and the sender's own clamp, both said here too.
 # The page reads whatever is in the file, which nothing obliges to be one of

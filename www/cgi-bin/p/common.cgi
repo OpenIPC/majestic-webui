@@ -368,8 +368,12 @@ field_textedit() {
 	# whatever the query string said. Nothing is hidden by it: the operator's
 	# answer is the empty textarea either way, and editor.cgi writes the banner
 	# that explains why.
+	# Escaped: a textarea is RCDATA, so `</textarea>` in the file ends it and
+	# whatever follows is markup. The path is the query string's, and
+	# /proc/self/environ is a file whose content is that query string, decoded
+	# -- so this was a reflected XSS on a link, not just a stored one.
 	local v=""
-	[ -f "$3" ] && [ -r "$3" ] && v=$(cat "$3" 2>/dev/null)
+	[ -f "$3" ] && [ -r "$3" ] && v=$(sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$3" 2>/dev/null)
 	echo "<p class=\"textarea\" id=\"${n}_wrap\">" \
 		"<label for=\"${n}\" class=\"form-label\">${l}</label>" \
 		"<textarea id=\"${n}\" name=\"${n}\" class=\"form-control\">${v}</textarea>"
@@ -924,11 +928,14 @@ moved_to() {
 
 redirect_to() {
 	[ -n "$3" ] && log_create "$2" "$3"
+	# A line break in the target would end the Location header and start
+	# another of the caller's choosing; editor.cgi puts a posted path here.
+	local loc=$(printf '%s' "$1" | tr -d '\r\n')
 	echo "HTTP/1.1 303 See Other"
 	echo "Content-type: text/html; charset=UTF-8"
 	echo "Cache-Control: no-store"
 	echo "Pragma: no-cache"
-	echo "Location: $1"
+	echo "Location: $loc"
 	echo
 	exit 0
 }
@@ -1008,7 +1015,6 @@ update_caminfo() {
 	[ -n "$mj_pid" ] && read_starttime "$mj_pid" && mj_started=$mj_started_now
 
 	# WebUI
-	ui_password=$(grep root /etc/shadow | cut -d: -f2)
 	# The deployed WebUI's own version, shown on the Dashboard the way majestic's
 	# is. What updatewebui recorded wins over the image's own stamp: an install
 	# hides the image's www/.version without replacing it, so that file still
@@ -1192,7 +1198,7 @@ update_caminfo() {
 
 	local variables="counting_asked counting_support flash_size flash_type fw_build fw_variant fw_version mj_pid mj_started mj_version network_address
 		network_gateway network_hostname network_interface network_macaddr overlay_root ptz_support
-		ptz_backend ptz_caps ptz_control ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version ui_password webui_version"
+		ptz_backend ptz_caps ptz_control ptz_reason sensor soc soc_family soc_has_temp soc_vendor tz_data tz_name uboot_version webui_version"
 	rm -f "$counting_file"
 
 	# Through shq, because this file is SOURCED on every request and several of

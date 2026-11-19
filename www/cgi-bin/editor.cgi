@@ -28,7 +28,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			;;
 
 		*)
-			log_create "danger" "UNKNOWN ACTION: $POST_action"
+			log_create "danger" "UNKNOWN ACTION: $(esc "$POST_action")"
 			;;
 	esac
 else

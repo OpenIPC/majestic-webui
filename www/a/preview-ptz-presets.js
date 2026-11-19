@@ -661,7 +661,11 @@
 			return;
 		}
 		if (!d || !d.ok) return;
-		presets = Array.isArray(d.presets) ? d.presets : [];
+		// Only rows with an integer id and a string name. The id is built into
+		// markup unquoted all through this file, and the list is written by
+		// whoever may move the camera -- a share guest among them.
+		presets = (Array.isArray(d.presets) ? d.presets : [])
+			.filter(p => p && Number.isInteger(p.id) && typeof p.name === 'string');
 		bootHomeId = (typeof d.boot_home === 'number' && Number.isFinite(d.boot_home)) ? d.boot_home : null;
 		if (typeof d.current_mag === 'number') currentMag = d.current_mag;
 		if (typeof d.pan_ms === 'number') currentPan = d.pan_ms;

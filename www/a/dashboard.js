@@ -1301,7 +1301,12 @@
 	function humanKB(kb) {
 		return kb >= 1024 ? (kb / 1024).toFixed(kb >= 10240 ? 0 : 1) + ' MB' : (kb | 0) + ' KB';
 	}
-	function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+	// HTML-escaped as well: the names are top-level entries in the overlay, which
+	// is whatever anything on the camera wrote there.
+	function cap(s) {
+		s = s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+		return s.replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';');
+	}
 
 	function renderOverlay() {
 		const el = $('#overlay-data'); if (!el) return;

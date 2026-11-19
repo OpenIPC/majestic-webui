@@ -65,7 +65,7 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 			;;
 
 		*)
-			redirect_to "$SCRIPT_NAME" "danger" "UNKNOWN ACTION: $POST_action"
+			redirect_to "$SCRIPT_NAME" "danger" "UNKNOWN ACTION: $(esc "$POST_action")"
 			;;
 	esac
 fi

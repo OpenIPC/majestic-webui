@@ -14,6 +14,12 @@ hide_title=1
 # first leaf of the first group; defaulting to "image" would have resolved to
 # the section of that name rather than the group, which is a different page.
 label="$GET_tab"
+# A section name is a word. It is written into the JSON block below, and
+# anything else in it -- a quote, a `</script>` -- was script on the page a
+# link sent the owner to (login.html forwards a signed-in browser to ?next=).
+case "$label" in
+*[!a-z0-9_-]*) label="" ;;
+esac
 
 # Everything this escapes lands inside <script type="application/json">, which
 # is a RAW TEXT element: the HTML parser looks for `</script` in it and stops

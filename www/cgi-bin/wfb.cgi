@@ -4,6 +4,10 @@
 <%
 # Set page title and determine active tab
 label="$GET_tab"
+case "$label" in
+wireless | broadcast | telemetry) ;;
+*) label="" ;;
+esac
 [ -z "$label" ] && label="wireless"
 
 # Debug logging disabled (kept as a no-op so existing call sites are harmless).
@@ -210,7 +214,7 @@ field_string_tooltip() {
         done
         echo "</select>"
     else
-        echo "<input type=\"text\" id=\"${name}\" name=\"${name}\" class=\"form-control\" value=\"${value}\">"
+        echo "<input type=\"text\" id=\"${name}\" name=\"${name}\" class=\"form-control\" value=\"$(attr_escape "$value")\">"
     fi
     echo "</span></span></p>"
 }
