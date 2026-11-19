@@ -109,6 +109,18 @@ group('a preset name is one row, whatever it holds');
 
 group('pages that write a request value into a script block narrow it first');
 {
+	// camera.cgi's narrowing, run: section ids are camelCase words, and the
+	// page's own links use nightMode and motionDetect.
+	{
+		const s = read('www/cgi-bin/camera.cgi');
+		const m = s.match(/^case "\$label" in\n[\s\S]*?^esac$/m);
+		check('camera.cgi has the case (otherwise this tests nothing)', !!m);
+		const run = (v) => spawnSync('busybox', ['sh', '-c', 'label="$1"\n' + m[0] + '\nprintf %s "$label"', 'sh', v], { encoding: 'utf8' }).stdout;
+		for (const v of ['nightMode', 'motionDetect', 'video0', 'isp'])
+			check(v + ' is kept', run(v) === v, run(v));
+		for (const v of ['</script><script>x</script>', 'a"b', 'x y'])
+			check(JSON.stringify(v) + ' is dropped', run(v) === '', run(v));
+	}
 	for (const f of ['www/cgi-bin/camera.cgi', 'www/cgi-bin/wfb.cgi']) {
 		const s = read(f);
 		const at = s.indexOf('label="$GET_tab"');

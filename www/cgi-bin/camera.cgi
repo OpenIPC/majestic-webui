@@ -18,7 +18,7 @@ label="$GET_tab"
 # anything else in it -- a quote, a `</script>` -- was script on the page a
 # link sent the owner to (login.html forwards a signed-in browser to ?next=).
 case "$label" in
-*[!a-z0-9_-]*) label="" ;;
+*[!A-Za-z0-9_-]*) label="" ;;
 esac
 
 # Everything this escapes lands inside <script type="application/json">, which
