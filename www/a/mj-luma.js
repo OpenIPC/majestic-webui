@@ -105,6 +105,9 @@
 	//             player swaps its element on every reconnect, so a captured
 	//             one is detached within a session and samples nothing.
 	// opts.onData (result) — result is what histogram() returns, plus `path`.
+	// opts.onNone ()       — a draw was attempted and measured nothing (#733):
+	//             the last result handed to onData no longer describes the
+	//             picture and must be withdrawn, not left standing.
 	// opts.hz     samples per second (default 4).
 	function start(opts) {
 		const canvas = document.createElement('canvas');
@@ -143,9 +146,13 @@
 				const r = histogram(d, SW, SH);
 				// Nothing measured is nothing to say: a histogram of no pixels
 				// reads as "the picture is black" on the Picture panel and as a
-				// black sample to the Live page's run (#733). Silence is what
-				// the caller already gets when there is no element to read.
-				if (!r.total) return;
+				// black sample to the Live page's run (#733). But not silence
+				// either: whatever the caller last showed is from a frame that
+				// is no longer being measured, so it is told, and withdraws it.
+				if (!r.total) {
+					if (opts.onNone) opts.onNone();
+					return;
+				}
 				r.path = path(r.bins);
 				opts.onData(r);
 			} catch (e) {

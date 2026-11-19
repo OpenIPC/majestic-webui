@@ -98,10 +98,27 @@
 			video: visibleMedia,
 			hz: 1,
 			onData: function (h) {
-				picNow = { blackS: track.picture(VC.look(h), now()) };
+				picNow = { blackS: track.picture(VC.look(h), now()), at: now() };
+				decide();
+			},
+			// A frame nothing could be measured from breaks the run, exactly
+			// as look() returning null does (#733).
+			onNone: function () {
+				picNow = { blackS: track.picture(null, now()), at: now() };
 				decide();
 			},
 		});
+	}
+
+	// The picture reading as of now. The heartbeat calls decide() every two
+	// seconds whether or not the sampler has spoken, and the sampler goes
+	// quiet whenever there is nothing to read -- tab hidden, player between
+	// elements -- so a reading older than the gap the tracker itself treats
+	// as a break is no reading. Without this, a black run that was current
+	// when the sampler stopped went on convicting for as long as it stayed
+	// stopped.
+	function picture() {
+		return picNow && now() - picNow.at <= VC.PIC_GAP_S ? picNow : null;
 	}
 
 	function render(f) {
@@ -150,7 +167,7 @@
 	}
 
 	function decide() {
-		const f = VC.diagnose(cfg, lastSample, trackNow, picNow);
+		const f = VC.diagnose(cfg, lastSample, trackNow, picture());
 		render(f);
 		if (!f || !f.conclusive || seen()) return;
 		// Not while nobody is looking. A background tab that navigates itself
