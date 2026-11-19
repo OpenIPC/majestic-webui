@@ -169,6 +169,12 @@ printf '%s' \
 			     one an owner cannot fix from a settings page, and the log is
 			     what they can screenshot for whoever sold them the camera. -->
 			<a id="mj-blind-help" href="logs.cgi" hidden></a>
+			<!-- It sits over the picture, and on a phone that is most of the
+			     picture -- the one somebody framing the camera is looking at
+			     (#733). Not data-bs-dismiss: main.js removes the node for that,
+			     and a different finding must still be able to show here.
+			     preview-health.js owns what the dismissal covers. -->
+			<button type="button" class="btn-close" id="mj-blind-x" aria-label="Dismiss"></button>
 		</p>
 		<!-- The status chip. Same id as the badge it replaces, so every state
 		     write (connecting… / no signal / MJPEG / reconnecting…) keeps

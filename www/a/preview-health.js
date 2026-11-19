@@ -44,6 +44,20 @@
 	const alertWhy = document.getElementById('mj-blind-why');
 	const alertAct = document.getElementById('mj-blind-act');
 	const alertHelp = document.getElementById('mj-blind-help');
+	const alertX = document.getElementById('mj-blind-x');
+
+	// A finding the viewer has closed. The banner lies over the picture, and on
+	// a phone in landscape it covers most of it -- the picture somebody framing
+	// the camera during installation is looking at (#733) -- so it must be
+	// possible to put away. What is put away is that SENTENCE, keyed exactly
+	// as render() keys it: a different finding, or this one upgraded by the
+	// second signal arriving, is news and shows again. Per tab, as the
+	// hand-off above is, so a reload while framing does not bring it back and
+	// a fresh visit does.
+	const DISMISS = 'mj-blind-dismissed';
+	function dismissed() {
+		try { return sessionStorage.getItem(DISMISS); } catch (e) { return null; }
+	}
 
 	let cfg = {};
 	if (typeof mjConfig === 'function') {
@@ -84,10 +98,27 @@
 			video: visibleMedia,
 			hz: 1,
 			onData: function (h) {
-				picNow = { blackS: track.picture(VC.look(h), now()) };
+				picNow = { blackS: track.picture(VC.look(h), now()), at: now() };
+				decide();
+			},
+			// A frame nothing could be measured from breaks the run, exactly
+			// as look() returning null does (#733).
+			onNone: function () {
+				picNow = { blackS: track.picture(null, now()), at: now() };
 				decide();
 			},
 		});
+	}
+
+	// The picture reading as of now. The heartbeat calls decide() every two
+	// seconds whether or not the sampler has spoken, and the sampler goes
+	// quiet whenever there is nothing to read -- tab hidden, player between
+	// elements -- so a reading older than the gap the tracker itself treats
+	// as a break is no reading. Without this, a black run that was current
+	// when the sampler stopped went on convicting for as long as it stayed
+	// stopped.
+	function picture() {
+		return picNow && now() - picNow.at <= VC.PIC_GAP_S ? picNow : null;
 	}
 
 	function render(f) {
@@ -104,7 +135,7 @@
 		if (shown === key) return;
 		shown = key;
 		if (!alertEl) return;
-		if (!f) { alertEl.style.display = 'none'; return; }
+		if (!f || key === dismissed()) { alertEl.style.display = 'none'; return; }
 		if (alertWhy) alertWhy.textContent = f.title + ' — ' + f.detail;
 		if (alertAct) {
 			// A destination and its words. The prompt that used to be wired
@@ -123,8 +154,20 @@
 		alertEl.style.display = '';
 	}
 
+	if (alertX) {
+		alertX.addEventListener('click', function () {
+			if (shown) {
+				try { sessionStorage.setItem(DISMISS, shown); } catch (e) {}
+			}
+			// Hidden here as well as remembered: with storage refused the
+			// banner still goes away until the finding changes, since
+			// render() redraws only on a new key.
+			if (alertEl) alertEl.style.display = 'none';
+		});
+	}
+
 	function decide() {
-		const f = VC.diagnose(cfg, lastSample, trackNow, picNow);
+		const f = VC.diagnose(cfg, lastSample, trackNow, picture());
 		render(f);
 		if (!f || !f.conclusive || seen()) return;
 		// Not while nobody is looking. A background tab that navigates itself

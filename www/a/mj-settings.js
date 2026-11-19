@@ -3202,6 +3202,16 @@
 				verdict.textContent = parts.length ? parts.join(' · ') : 'no detail lost';
 				if (meanEl) meanEl.textContent = 'average ' + Math.round(r.mean / 255 * 100) + '%';
 			},
+			// The picture could not be read (#733): back to the empty plot it
+			// started as, rather than a histogram of a frame no longer measured.
+			onNone: () => {
+				pathEl.setAttribute('d', '');
+				clipL.hidden = true;
+				clipR.hidden = true;
+				verdict.className = 'mj-luma-verdict';
+				verdict.textContent = '';
+				if (meanEl) meanEl.textContent = 'average —';
+			},
 		});
 		// Torn down with the rest of the leaf, so a section change does not
 		// leave a timer reading a detached element four navigations later.

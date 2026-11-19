@@ -36,12 +36,26 @@
 	// `low`/`high` are the fraction of pixels in the first and last bucket.
 	// They are the point of the whole panel: everything else here is a shape,
 	// but those two numbers are the fault an installer is actually looking for.
+	//
+	// Only pixels something was drawn onto are counted, and alpha is how that
+	// is known. A decoded frame is opaque -- a black one included, which is
+	// (0,0,0,255) -- while a canvas nothing reached is (0,0,0,0). Without that
+	// distinction a draw that silently does nothing is read as a black frame:
+	// Firefox for Android composites a stream <video> from a surface the canvas
+	// cannot read back, and drawImage() there draws nothing and does not
+	// throw, so every sample came out as `mean 0, low 1` and the Live page
+	// declared a camera that was plainly showing a picture blind (#733).
+	// `total` is therefore the number of pixels MEASURED, and 0 means nothing
+	// was -- not that the frame was empty.
 	function histogram(data, w, h) {
 		const bins = new Array(BINS).fill(0);
-		const n = w * h;
+		const all = w * h;
+		let n = 0;
 		let sum = 0;
-		for (let i = 0; i < n; i++) {
+		for (let i = 0; i < all; i++) {
 			const p = i * 4;
+			if (data[p + 3] === 0) continue;
+			n++;
 			const y = luma(data[p], data[p + 1], data[p + 2]);
 			// Bucket the rounded 8-bit code value, not the raw float. The 709
 			// coefficients do not sum to exactly 1 in binary — 0.2126 + 0.7152
@@ -91,6 +105,9 @@
 	//             player swaps its element on every reconnect, so a captured
 	//             one is detached within a session and samples nothing.
 	// opts.onData (result) — result is what histogram() returns, plus `path`.
+	// opts.onNone ()       — a draw was attempted and measured nothing (#733):
+	//             the last result handed to onData no longer describes the
+	//             picture and must be withdrawn, not left standing.
 	// opts.hz     samples per second (default 4).
 	function start(opts) {
 		const canvas = document.createElement('canvas');
@@ -119,9 +136,23 @@
 		// pixels and nothing larger.
 		function sampleFrom(source) {
 			try {
+				// Cleared first, so a draw that silently does nothing leaves a
+				// transparent canvas -- which histogram() knows is not a picture
+				// -- rather than the last frame that did draw, republished as
+				// this one.
+				ctx.clearRect(0, 0, SW, SH);
 				ctx.drawImage(source, 0, 0, SW, SH);
 				const d = ctx.getImageData(0, 0, SW, SH).data;
 				const r = histogram(d, SW, SH);
+				// Nothing measured is nothing to say: a histogram of no pixels
+				// reads as "the picture is black" on the Picture panel and as a
+				// black sample to the Live page's run (#733). But not silence
+				// either: whatever the caller last showed is from a frame that
+				// is no longer being measured, so it is told, and withdraws it.
+				if (!r.total) {
+					if (opts.onNone) opts.onNone();
+					return;
+				}
 				r.path = path(r.bins);
 				opts.onData(r);
 			} catch (e) {
