@@ -38,8 +38,8 @@ fi
 			<% if ip link show wg0 >/dev/null 2>&1; then %>
 				<dl class="small list">
 					<dt>Status</dt><dd><span class="text-success">Up</span></dd>
-					<dt>Endpoint</dt><dd class="text-break"><%= $(fw_printenv -n wg_endpoint) %></dd>
-					<dt>Address</dt><dd class="text-break"><%= $(fw_printenv -n wg_address) %></dd>
+					<dt>Endpoint</dt><dd class="text-break"><%= $(esc "$(fw_printenv -n wg_endpoint)") %></dd>
+					<dt>Address</dt><dd class="text-break"><%= $(esc "$(fw_printenv -n wg_address)") %></dd>
 				</dl>
 			<% fi %>
 			<form action="<%= $SCRIPT_NAME %>" method="post">

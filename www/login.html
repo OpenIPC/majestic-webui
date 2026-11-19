@@ -131,22 +131,25 @@
 			var err = document.getElementById('err');
 			var btn = document.getElementById('submit');
 
-			// Where to land after a successful login. Only accept a same-origin
-			// absolute path — never a protocol-relative ("//host") or scheme URL,
-			// which would turn ?next= into an open redirect.
+			// Where to land after a successful login. Only a same-origin path,
+			// decided the way the browser will decide it: by parsing. Checking
+			// the first characters let "/<TAB>/host" through, and the URL parser
+			// drops tabs and line breaks before it looks, which leaves "//host"
+			// -- another site, reached with no click from a link on the
+			// camera's own address. What is returned is rebuilt from the parsed
+			// URL, never the raw string.
 			function safeNext() {
+				var home = '/cgi-bin/live.cgi';
 				var raw = new URLSearchParams(location.search).get('next');
-				if (!raw) return '/cgi-bin/live.cgi';
-				if (raw.charAt(0) !== '/' || raw.charAt(1) === '/' || raw.indexOf('\\') !== -1) {
-					return '/cgi-bin/live.cgi';
-				}
+				if (!raw || raw.charAt(0) !== '/' || /[\u0000-\u001f\\]/.test(raw)) return home;
+				var u;
+				try { u = new URL(raw, location.origin); } catch (e) { return home; }
+				if (u.origin !== location.origin) return home;
 				// Never point back at this page. The already-signed-in check below
 				// acts on it, so a ?next= aimed here would spin: probe says OK,
 				// replace() lands here again, probe says OK…
-				if (raw.split(/[?#]/)[0] === location.pathname) {
-					return '/cgi-bin/live.cgi';
-				}
-				return raw;
+				if (u.pathname === location.pathname) return home;
+				return u.pathname + u.search + u.hash;
 			}
 
 			// A network change sends the browser to the camera's new address,

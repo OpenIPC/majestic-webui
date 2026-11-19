@@ -192,9 +192,13 @@ if [ "$telegram_proxy" = "true" ] && [ -e "/etc/webui/proxy.conf" ]; then
 	set -- "$@" --proxy-user "${socks5_username}:${socks5_password}"
 fi
 
-set -- "$@" -F "chat_id=${telegram_channel}"
+# --form-string for every value the operator typed, as crashlog-send and
+# openwall do: under -F a value starting with < or @ is a file for curl to
+# read, so a caption of `</etc/shadow` posted that file to the chat, and a
+# chat_id of `@channel` -- a real channel name -- failed to send.
+set -- "$@" --form-string "chat_id=${telegram_channel}"
 if [ -n "$telegram_thread_id" ]; then
-	set -- "$@" -F "message_thread_id=${telegram_thread_id}"
+	set -- "$@" --form-string "message_thread_id=${telegram_thread_id}"
 fi
 
 # HEIF is not a valid sendPhoto format (Telegram only accepts JPEG/PNG/GIF/WEBP),
@@ -220,7 +224,7 @@ else
 	method=sendPhoto
 	set -- "$@" -F "photo=@${snapshot}"
 fi
-[ "$mode" = "text" ] || set -- "$@" -F "caption=${telegram_message}"
+[ "$mode" = "text" ] || set -- "$@" --form-string "caption=${telegram_message}"
 set -- "$@" --url "https://api.telegram.org/bot${telegram_token}/${method}"
 
 # The response body still goes to stdout for anyone running this by hand or out

@@ -214,10 +214,12 @@ emit_list() {
 	first=1
 	if [ -f "$PRESETS_FILE" ]; then
 		while IFS='|' read -r pid pname pmag paf pzoom ppan ptilt pfocus; do
-			[ -z "$pid" ] && continue
-			[ -z "$pmag" ] && pmag="null"
-			[ -z "$paf" ] && paf="1"
-			[ -z "$pzoom" ] && pzoom="1"
+			# Every field is printed into JSON unquoted but the name, so each
+			# is held to its shape here, whatever the file says.
+			case "$pid" in '' | *[!0-9]*) continue ;; esac
+			case "$pmag" in "" | *[!0-9.]* | *.*.* | .* | *.) pmag="null" ;; esac
+			case "$paf" in 0 | 1) ;; *) paf="1" ;; esac
+			case "$pzoom" in 0 | 1) ;; *) pzoom="1" ;; esac
 			case "$ppan" in ''|*[!0-9-]*) ppan=0 ;; esac
 			case "$ptilt" in ''|*[!0-9-]*) ptilt=0 ;; esac
 			case "$pfocus" in ''|*[!0-9-]*) pfocus="null" ;; esac
@@ -318,8 +320,11 @@ need_ptz_lock() {
 upsert_preset_row() {
 	target_id="$1"
 	new_row="$2"
-	awk -v id="$target_id" -v row="$new_row" '
-		BEGIN { done = 0 }
+	# Through the environment, not -v: awk -v processes escapes, so a `\n` in
+	# a preset name became a newline -- a second row of the caller's making,
+	# with an id that reached the page as markup.
+	ID_="$target_id" ROW_="$new_row" awk '
+		BEGIN { done = 0; id = ENVIRON["ID_"]; row = ENVIRON["ROW_"] }
 		/^[[:space:]]*$/ { next }
 		{
 			split($0, f, "|")
