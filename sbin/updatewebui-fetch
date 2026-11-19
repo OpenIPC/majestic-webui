@@ -139,6 +139,12 @@ fi
 # too -- the stub is a separate file -- so either way what comes out of the
 # archive is what installs the archive, and a tree carrying an installer fix
 # applies it to its own install rather than to the next one.
+# Not over plain http: what arrives is unpacked and run as root, and anyone on
+# the path could swap it. https, or copy the zip here and use file://, which
+# is the offline route anyway.
+case $url in
+[Hh][Tt][Tt][Pp]://*) die "refusing a plain http:// archive; use https:// or file://" ;;
+esac
 if [ -n "$url" ]; then
 	# file:// by hand rather than through curl: it is the case that has to work
 	# on a camera with no route out, and whether this curl was built with the

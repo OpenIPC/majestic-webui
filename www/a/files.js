@@ -380,9 +380,16 @@
 		if (cmLoad) return cmLoad;
 		cmLoad = new Promise(res => {
 			const css = document.createElement('link');
-			css.rel = 'stylesheet'; css.href = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css';
+			// With their hashes, as console.cgi's: this editor writes any file
+			// on the camera as root, so the bytes it runs are pinned, not trusted.
+			css.rel = 'stylesheet';
+			css.integrity = 'sha384-phfEUVAmRZV1Pzn/Xgxc3NH6zPMDuer0wHU9jRQKhNBBLyV4MP1gaBY1sxfxxPRT';
+			css.crossOrigin = 'anonymous';
+			css.href = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css';
 			document.head.appendChild(css);
 			const js = document.createElement('script');
+			js.integrity = 'sha384-CtBuRlcKITyrd+aBeTPNFB1/T8+kvtNQiWMCLtiGvD6NpLOJAdt8e8PpJJ2Gn1D0';
+			js.crossOrigin = 'anonymous';
 			js.src = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js';
 			js.onload = () => res(true); js.onerror = () => res(false);
 			document.head.appendChild(js);

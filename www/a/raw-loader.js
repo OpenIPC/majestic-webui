@@ -20,8 +20,13 @@
  * rather host it themselves.
  */
 window.MajesticRaw = (function () {
+	// Pinned to the release's commit, not its tag: jsDelivr follows a tag, and a
+	// tag can be moved, which would change the code this page runs as root with
+	// no change here. The module graph is import()ed, which takes no integrity
+	// hash, so the commit is the pin. Bump both when bumping the release.
+	// raw-editor v0.21.0.
 	const BASE = (window.MJ_RAW_BASE ||
-		'https://cdn.jsdelivr.net/gh/OpenIPC/raw-editor@v0.21.0/dist/');
+		'https://cdn.jsdelivr.net/gh/OpenIPC/raw-editor@2aedf4b689f67d1ba16d1ece2dd9f995313c3e4f/dist/');
 	const LOAD_TIMEOUT_MS = 8000;
 
 	// Remembered for the session once the module has failed to arrive. Without

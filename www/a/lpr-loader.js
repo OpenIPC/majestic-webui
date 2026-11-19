@@ -67,7 +67,12 @@ window.MajesticLpr = (function () {
 		return v.charAt(v.length - 1) === '/' ? v : v + '/';
 	}
 
-	const DEFAULT_BASE = 'https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@v0.1.0/dist/';
+	// Pinned to the release's commit, not its tag: jsDelivr follows a tag, and a
+	// tag can be moved, which would change the code this page runs as root with
+	// no change here. The module graph is import()ed, which takes no integrity
+	// hash, so the commit is the pin. Bump both when bumping the release.
+	// lpr-wasm v0.1.0.
+	const DEFAULT_BASE = 'https://cdn.jsdelivr.net/gh/OpenIPC/lpr-wasm@d9a0209345cebcf4d0d731b935c48feed3d6ed74/dist/';
 
 	// Unset means the pinned default; refused means no reader. See above.
 	const CONFIGURED = configuredBase();

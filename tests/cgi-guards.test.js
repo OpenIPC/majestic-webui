@@ -36,6 +36,7 @@ group('setnetwork refuses what would become a line of the stanza');
 		['a gateway past 255', [...base, '-g', '192.0.2.256']],
 		['an interface that is a path', ['-i', '../../etc/init.d/S99x', '-m', 'dhcp']],
 		['an interface with a second line', ['-i', 'eth0\nwlan0', '-m', 'dhcp']],
+		['a hostname with a second line', ['-i', 'eth0', '-m', 'dhcp', '-h', 'cam\n192.0.2.66 example.org']],
 		['a mode that is not one', ['-i', 'eth0', '-m', 'static\n    up id', '-a', '192.0.2.10', '-n', '255.255.255.0']],
 	];
 	for (const [name, args] of refused) {
@@ -91,6 +92,16 @@ group('j/save.cgi writes on POST only, whole or not at all');
 	r = run('www/cgi-bin/j/save.cgi', [], { REQUEST_METHOD: 'POST', GET_path: missing }, 'x');
 	check('a write that cannot happen says so', /"ok":false/.test(r.out), r.out);
 	fs.rmSync(d, { recursive: true, force: true });
+}
+
+group('the WebUI updater installs nothing that came over plain http');
+{
+	// Both read --url: the fetcher, and the installer it hands over to. Each
+	// refuses before it fetches, writes or runs anything.
+	for (const script of ['sbin/updatewebui', 'sbin/updatewebui-fetch']) {
+		const r = run(script, ['--url=http://192.0.2.1/tree.zip', '--dry-run']);
+		check(script + ' refuses an http:// archive', r.status !== 0 && /http/.test(r.out), r.out);
+	}
 }
 
 group('j/time.cgi changes the clock on POST only');

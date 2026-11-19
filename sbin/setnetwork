@@ -153,6 +153,15 @@ if [ -n "$network_interface_bad" ] ||
 	exit 1
 fi
 
+# The hostname is written into /etc/hosts as a line; a line break in it was a
+# hosts entry of the caller's choosing.
+case "$network_hostname" in
+	*[!A-Za-z0-9._-]*)
+		echo "Not a host name: $network_hostname"
+		exit 1
+		;;
+esac
+
 case "$network_mode" in
 	dhcp | static) ;;
 	*)

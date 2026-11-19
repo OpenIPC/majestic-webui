@@ -614,8 +614,17 @@ EOF
 
 	delete)
 		if [ -n "$ID" ] && [ -f "$PRESETS_FILE" ]; then
-			grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null || true
-			mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
+			# grep -v answers 1 when it kept nothing, which is a list of one
+			# preset deleted; 2 is a failure -- a full overlay -- and replacing
+			# the list then would lose every preset.
+			grep -v "^${ID}|" "$PRESETS_FILE" > "${PRESETS_FILE}.tmp" 2>/dev/null
+			if [ $? -le 1 ]; then
+				mv "${PRESETS_FILE}.tmp" "$PRESETS_FILE"
+			else
+				rm -f "${PRESETS_FILE}.tmp"
+				emit_list "Preset could not be deleted"
+				exit 0
+			fi
 			if [ "$(read_boot_home)" = "$ID" ] || { [ -f "$BOOT_HOME_FILE" ] && [ "$(tr -cd '0-9' < "$BOOT_HOME_FILE" 2>/dev/null)" = "$ID" ]; }; then
 				rm -f "$BOOT_HOME_FILE"
 			fi

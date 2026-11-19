@@ -24,6 +24,22 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
 		update)
 			[ -z "$POST_tz_name" ] && redirect_to "$SCRIPT_NAME" "warning" "Empty timezone name. Skipping."
 			[ -z "$POST_tz_data" ] && redirect_to "$SCRIPT_NAME" "warning" "Empty timezone value. Skipping."
+			# Each goes into a file a line at a time, and a line break in one
+			# would be a second line -- another ntp.conf directive. A zone name
+			# is a path in the zone database; a POSIX TZ string has its own
+			# small alphabet; a server is a host name or an address.
+			case "$POST_tz_name" in
+			*[!A-Za-z0-9_/+-]*) redirect_to "$SCRIPT_NAME" "danger" "That is not a time zone name." ;;
+			esac
+			case "$POST_tz_data" in
+			*[!A-Za-z0-9\<\>+,.:/-]*) redirect_to "$SCRIPT_NAME" "danger" "That is not a time zone value." ;;
+			esac
+			for i in 0 1 2 3; do
+				eval ntp="\$POST_server_${i}"
+				case "$ntp" in
+				*[!A-Za-z0-9.:-]*) redirect_to "$SCRIPT_NAME" "danger" "NTP server $((i + 1)) is not a host name or an address." ;;
+				esac
+			done
 			if [ "$tz_data" != "$POST_tz_data" ]; then
 				echo "${POST_tz_data}" > /etc/TZ
 				touch /tmp/system-reboot
