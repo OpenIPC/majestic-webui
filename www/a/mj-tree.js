@@ -17,7 +17,8 @@
 //      schema actually carries. A section in no group is on no leaf (#176).
 //   2. The first group with any `x-live` key OWNS the Live leaf, and those
 //      keys — from every section of that group — are LIFTED onto it, beside
-//      the picture. That set is the only thing the flag decides. The flag
+//      the picture, with the few keys in PRESS_APPLIED, which the leaf gives
+//      a control that saves and applies on the press itself. That set is the only thing the flag decides. The flag
 //      itself is the daemon's word for "a save applies this without a
 //      rebuild", and majestic puts it on every key it can apply that way; a
 //      bitrate and the overlay's placement carry it and are drawn on their own
@@ -32,8 +33,12 @@
 //      Save and a pipeline reload reads as a control that does nothing. That
 //      is what the quarter turn was — drawn beside the Orientation pad
 //      (#316), its 90° cells staged a value the picture did not show until
-//      Save and "Apply now" (#583). `image` — every key live but Rotate — is
-//      the absorbed section, and Rotate lives on ISP / Exposure. A section
+//      Save and "Apply now" (#583). Sending it to ISP / Exposure instead put
+//      it where nobody looking for the picture's orientation would find it
+//      (OpenIPC/majestic#383), so it is now lifted as a press-applied key:
+//      beside the pad, and a press turns the picture. `image` is absorbed
+//      with nothing left over; a key it gains that is neither live nor
+//      press-applied goes to ISP / Exposure. A section
 //      with leftovers and no home is not absorbed: it keeps its page, which
 //      is the safe answer for a key a daemon adds tomorrow. A section the
 //      leaf lifts LESS of keeps its page too, and says where the rest went:
@@ -47,12 +52,20 @@
 	'use strict';
 
 	// Where an absorbed section's leftovers are drawn (rule 3): the leaf of
-	// `home`, under a heading called `label`. `image` leaves only Rotate, and
-	// it goes with the picture-pipeline settings that already need Save and a
-	// reload.
+	// `home`, under a heading called `label`. `image` leaves nothing today
+	// (rule 2 lifts Rotate); a key it gains that is neither live nor
+	// press-applied goes with the picture-pipeline settings that already need
+	// Save and a reload.
 	const LEFTOVER_HOME = {
-		image: { home: 'isp', label: 'Rotation' },
+		image: { home: 'isp', label: 'Picture' },
 	};
+
+	// Keys the camera cannot apply live but the Live leaf draws anyway (rule
+	// 2), because they belong beside the picture and a press there saves and
+	// applies them on the spot: the quarter turn rebuilds the stream, and the
+	// Turn row says so and does it. A key belongs here only if its control
+	// does that; one that would stage a value for Save does not (#583).
+	const PRESS_APPLIED = new Set(['image.rotate']);
 
 	// The types the form's renderField actually draws — an object falls
 	// through its dispatch and returns nothing, so it must not make a section
@@ -130,7 +143,8 @@
 			for (const section of group.sections) {
 				const sp = (props[section] || {}).properties || {};
 				for (const key of Object.keys(sp)) {
-					if (!sp[key] || !sp[key]['x-live']) continue;
+					if (!sp[key]) continue;
+					if (!sp[key]['x-live'] && !PRESS_APPLIED.has(section + '.' + key)) continue;
 					if (exclude.has(section + '.' + key)) continue;
 					out.push({ section, key, sub: sp[key], dot: section + '.' + key });
 				}
@@ -145,7 +159,11 @@
 		// Only the first such group owns the leaf: the tree keys on section id,
 		// and two "Picture" entries would collide.
 		function owner() {
-			return memo('\0owner', () => groups().find(g => groupLiveFields(g).length) || null);
+			// Owned by a live key only. A press-applied one rides along on a
+			// leaf that exists for live keys; on its own it would make a
+			// Picture leaf of a camera that has nothing to adjust live.
+			return memo('\0owner', () => groups().find(g =>
+				groupLiveFields(g).some(f => f.sub['x-live'])) || null);
 		}
 
 		function liveFields() {
@@ -269,6 +287,7 @@
 			groups, groupLiveFields, owner, liveFields, lifted, sectionFields,
 			absorbed, absorbedSections, leafFields, leafIds, liveId,
 			leftoverHome, homedAt,
+			pressApplied: (dot) => PRESS_APPLIED.has(dot),
 			custom: () => custom,
 		};
 	}
