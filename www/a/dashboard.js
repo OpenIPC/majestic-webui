@@ -260,15 +260,23 @@
 	// heartbeat, so it stops on its own while the camera is unreachable rather
 	// than piling up fetches at something that is not answering.
 	let wiringAt = 0;
+	//
+	// A read is only as new as the moment it was ASKED, so one that set out
+	// before the page wrote the camera itself is older than what the page
+	// already knows and is dropped. Every write bumps wiringGen; a reply that
+	// left under an older one would otherwise land after the write and paint
+	// back the banner the write had just answered.
+	let wiringGen = 0;
 	function refreshWiring() {
 		if (!IC || !nmCfg || !ircutTested()) return;
 		const now = Date.now();
 		if (now - wiringAt < WIRING_REFRESH_MS) return;
 		wiringAt = now;
+		const gen = wiringGen;
 		apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
 			.then(r => (r.ok ? r.json() : null))
 			.then((c) => {
-				if (!c || !Object.keys(c).length) return;
+				if (!c || !Object.keys(c).length || gen !== wiringGen) return;
 				nmCfg = c.nightMode || {};
 				paintIrcut();
 			})
@@ -309,26 +317,53 @@
 		// Asked here rather than through main.js's .btn-warning confirm: that
 		// one calls preventDefault(), which stops a form submit and does not
 		// stop this listener, so it would ask and then write either way.
+		//
+		// And the wiring is read again at the press, not taken from the page.
+		// The page loaded its copy once and re-reads it only while a test
+		// record exists, so a Dashboard left open while the coils were assigned
+		// in another tab would still be offering this — and off on a wired
+		// filter is parked, which hides exactly the fault the banner was
+		// about. The offer is decided again from what the camera says now; if
+		// it no longer stands, the banner is repainted from that instead of
+		// writing. A read that fails writes nothing: not knowing the wiring is
+		// no ground for a write that depends on it.
+		const fail = (msg) => { ircutNoneErr = msg; };
 		if (b) b.addEventListener('click', () => {
 			if (!IC || !nmCfg) return;
-			if (!confirm(b.dataset.confirm)) return;
 			b.disabled = true;
 			ircutNoneErr = '';
-			apiFetch('/api/v1/config', {
-				method: 'POST', credentials: 'same-origin',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ nightMode: { irCut: 'off' } }),
-			}).then((r) => {
-				if (!r.ok) throw new Error('HTTP ' + r.status);
-				nmCfg = Object.assign({}, nmCfg, { irCut: 'off' });
-			}).catch(() => {
-				ircutNoneErr = 'The camera did not accept the change, so ' +
-					'nothing was saved. Try again, or set "IR-cut filter" to off ' +
-					'on Day / Night.';
-			}).then(() => {
-				b.disabled = false;
-				paintIrcut();
-			});
+			apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
+				.then(r => (r.ok ? r.json() : null))
+				.catch(() => null)
+				.then((c) => {
+					if (!c || !Object.keys(c).length) {
+						fail('The camera could not be asked how the filter is ' +
+							'wired, so nothing was changed. Try again.');
+						return;
+					}
+					const now = c.nightMode || {};
+					wiringGen++;
+					nmCfg = now;
+					const f = IC.diagnose(now, ircutSample, ircutTrackNow, ircutPic,
+						ircutTested()).filter(x => x.level !== 'info')[0];
+					if (!IC.unfittedOffer(now, f)) return;
+					if (!confirm(b.dataset.confirm)) return;
+					wiringGen++;
+					return apiFetch('/api/v1/config', {
+						method: 'POST', credentials: 'same-origin',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ nightMode: { irCut: 'off' } }),
+					}).then((r) => {
+						if (!r.ok) throw new Error('HTTP ' + r.status);
+						nmCfg = Object.assign({}, now, { irCut: 'off' });
+					}).catch(() => fail('The camera did not accept the change, ' +
+						'so nothing was saved. Try again, or set "IR-cut filter" ' +
+						'to off on Day / Night.'));
+				})
+				.then(() => {
+					b.disabled = false;
+					paintIrcut();
+				});
 		});
 	}
 
