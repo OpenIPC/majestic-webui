@@ -914,6 +914,30 @@
 	// camera we are, never achieved-versus-configured fps: a VBR encoder on a
 	// quiet scene legitimately sends 12 frames where 30 were configured, and
 	// grading on that would accuse the client of a fault the camera committed.
+	//
+	// A dismissal is REMEMBERED, per browser (#736). The fact is about this
+	// browser — it cannot decode H.265 — and does not change from one page
+	// load to the next, so a note that comes back on every reload after being
+	// closed is not dismissible, it is a nag with a button on it: the same
+	// finding as the Dashboard's legacy notice (#325). Per browser rather than
+	// on the camera, like the transport and channel choices beside it, because
+	// it is this browser's limitation and a phone and a desk differ.
+	//
+	// What is remembered is the WORST note dismissed, and only that far: a
+	// viewer who closed "decoding in software" has not been told "and cannot
+	// keep up", which is still news and still shows. Closing that one stands
+	// both down. The latch below still dies with the session, so a dismissal
+	// is the only thing that keeps a later software session quiet.
+	const SW_NOTE_KEY = 'mj-preview-sw-note-dismissed';
+	const SW_RANK = { plain: 1, behind: 2 };
+	function swDismissed() {
+		try { return SW_RANK[localStorage.getItem(SW_NOTE_KEY)] || 0; }
+		catch (e) { return 0; }
+	}
+	function rememberSwDismiss(key) {
+		if (!SW_RANK[key] || SW_RANK[key] <= swDismissed()) return;
+		try { localStorage.setItem(SW_NOTE_KEY, key); } catch (e) {}
+	}
 	let swNoteKey = '';
 	function softwareNote(s) {
 		// A PROPORTION, and a standing delay — not "has ever dropped a frame".
@@ -929,6 +953,7 @@
 		// actually changed — going from coping to not coping is news.
 		if (swNoteKey && key === 'plain') return;
 		swNoteKey = key;
+		if (SW_RANK[key] <= swDismissed()) return;
 		showStageMsg('software',
 			behind
 				? 'This browser can’t decode H.265, so the page is decoding it in ' +
@@ -2252,6 +2277,7 @@
 		// Whatever is in the slot, not just a served message: the fallback
 		// borrows the same element and a dismissal that checked the owner
 		// would leave its sentence stuck on the picture for good.
+		if (msgOwner === 'software') rememberSwDismiss(swNoteKey);
 		hideStageMsg();
 	});
 
