@@ -68,13 +68,17 @@ done) %>
 	     that was never fitted. But majestic already stores that statement:
 	     "IR-cut filter" set to off is it, and with it off and no pads
 	     assigned there is no finding to show in the first place. So the way to
-	     silence this is on the page the button already opens, in the camera's
-	     own configuration, where a backup carries it and the daemon agrees with
-	     it (#367). -->
+	     silence this is in the camera's own configuration, where a backup
+	     carries it and the daemon agrees with it (#367).
+	     It is also said HERE, as a button, because "set it on another page"
+	     was a sentence at the end of a paragraph, and an owner of a camera with
+	     no filter read the banner as one with no way out (#736). The button
+	     writes that same setting through the API and nothing else, so it is
+	     not a dismissal: Day / Night shows the result and can undo it. -->
 	<div class="mj-notice mj-notice-warn" id="st-alert-ircut" hidden>
 		<svg class="mj-notice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.6 21.2 19.4H2.8z"/><path d="M12 10.2v4"/><path d="M12 17.1h.01"/></svg>
-		<div class="mj-notice-txt"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span></div>
-		<span class="mj-notice-acts"><a class="btn btn-sm btn-primary" href="camera.cgi?tab=nightMode">Open Day / Night</a></span>
+		<div class="mj-notice-txt"><b id="st-alert-ircut-t"></b> &mdash; <span id="st-alert-ircut-d"></span><span id="st-alert-ircut-e" hidden></span></div>
+		<span class="mj-notice-acts"><button type="button" class="btn btn-sm btn-secondary" id="st-alert-ircut-none" hidden data-acts="api" data-confirm="Set &quot;IR-cut filter&quot; to off? Nothing will warn about the filter again until it is set back on Day / Night." title="Sets &quot;IR-cut filter&quot; to off on Day / Night">No IR-cut filter fitted</button><a class="btn btn-sm btn-primary" href="camera.cgi?tab=nightMode">Open Day / Night</a></span>
 	</div>
 	<!-- A camera upgraded from a version that only had the raw-gain thresholds
 	     necessarily starts out switching on them, and nothing else would tell

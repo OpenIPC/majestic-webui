@@ -1377,6 +1377,29 @@ function runRest() {
 			/set "IR-cut filter" to off/.test(noPins({})));
 		check('alongside the fault itself',
 			/Nothing is connected to the filter/.test(noPins({})));
+		// The Dashboard's "No IR-cut filter fitted" button sets exactly that
+		// switch, so it may stand only where the switch would be true to set,
+		// and only beside the finding it answers (#736).
+		const offer = (nm) => ic.unfittedOffer(nm, ic.diagnose(nm, null, null)[0]);
+		check('the button is offered on a camera with nothing wired',
+			offer({}) === true);
+		check('...and pressing it leaves nothing for it to stand beside',
+			ic.diagnose({ irCut: 'off' }, null, null).length === 0);
+		// The closing coil on a pad means a filter was wired. Off there is
+		// parked, which would hide a coil that cannot be driven.
+		check('not where the closing coil has a pad',
+			offer({ irCutPin2: 6 }) === false);
+		check('...even when that pad is GPIO 0',
+			offer({ irCutPin2: 0 }) === false);
+		check('not on a wired camera',
+			offer({ irCutPin1: 5, irCutPin2: 6 }) === false);
+		check('not beside a finding about something else',
+			ic.unfittedOffer({}, { id: 'picture-open' }) === false);
+		check('not with no finding at all',
+			ic.unfittedOffer({}, undefined) === false);
+		check('not where it is already off (YAML\'s unquoted off included)',
+			ic.unfittedOffer({ irCut: false }, { id: 'no-pins' }) === false);
+
 		// The way back is BOTH modes, and in the words the select prints.
 		// auto hands the actuator to dusk and manual hands it to the operator
 		// — a sentence offering only auto tells a manual-mode owner the wrong

@@ -292,6 +292,45 @@
 	//
 	// One statement, in the camera's own configuration. Nothing to keep in
 	// step, and nothing left that can go stale.
+	//
+	// What that left was the statement being made somewhere else: the banner
+	// named the setting in its last sentence and sent the owner to another page
+	// to find it, and an owner with no filter read it as a warning with no way
+	// out (#736). So the banner makes it too, as a button that writes that same
+	// setting and nothing else. It is not the × back: nothing is kept here, and
+	// what the button sets is what Day / Night shows and can set back.
+	// IC.unfittedOffer() decides when it may be offered.
+	//
+	// The banner goes only once the camera has said yes. A write that failed is
+	// a failed write, not a dismissal, so the finding stays and says so.
+	let ircutNoneErr = '';
+	{
+		const b = $('#st-alert-ircut-none');
+		// Asked here rather than through main.js's .btn-warning confirm: that
+		// one calls preventDefault(), which stops a form submit and does not
+		// stop this listener, so it would ask and then write either way.
+		if (b) b.addEventListener('click', () => {
+			if (!IC || !nmCfg) return;
+			if (!confirm(b.dataset.confirm)) return;
+			b.disabled = true;
+			ircutNoneErr = '';
+			apiFetch('/api/v1/config', {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ nightMode: { irCut: 'off' } }),
+			}).then((r) => {
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				nmCfg = Object.assign({}, nmCfg, { irCut: 'off' });
+			}).catch(() => {
+				ircutNoneErr = 'The camera did not accept the change, so ' +
+					'nothing was saved. Try again, or set "IR-cut filter" to off ' +
+					'on Day / Night.';
+			}).then(() => {
+				b.disabled = false;
+				paintIrcut();
+			});
+		});
+	}
 
 	// What the snapshot tile's frame looks like. Kept as the last observation
 	// plus its run length, so the banner is driven by the picture the page is
@@ -342,6 +381,13 @@
 			setSeverity('#st-alert-ircut', f.level);
 			$('#st-alert-ircut-t').textContent = f.title;
 			$('#st-alert-ircut-d').textContent = f.detail;
+		}
+		const none = $('#st-alert-ircut-none');
+		if (none) none.hidden = !IC.unfittedOffer(nmCfg, f);
+		const err = $('#st-alert-ircut-e');
+		if (err) {
+			err.textContent = f && ircutNoneErr ? ' ' + ircutNoneErr : '';
+			err.hidden = !(f && ircutNoneErr);
 		}
 		setAlert('#st-alert-ircut', !!f);
 	}

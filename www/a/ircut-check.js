@@ -193,6 +193,25 @@
 		return !!tested && tested.id === 'ok' && tested.wiring === wiringKey(nm);
 	}
 
+	// May a page offer "No IR-cut filter fitted" as the answer to this camera?
+	// The press writes "IR-cut filter" off and nothing else, which is the same
+	// statement as choosing Off on Day / Night, so the only question is whether
+	// the statement could be true. With neither coil on a pad nothing
+	// measurable separates a filter nobody wired from one never fitted, and the
+	// owner is the one who knows. With the closing coil on a pad somebody wired
+	// a filter, and offering the button would turn "the opening coil is
+	// missing" into a mode that hides it: off with a pad assigned is parked, and
+	// parked says nothing about a coil that cannot be driven. That camera keeps
+	// the fault, and the Day / Night button.
+	//
+	// Asked of the finding the page is SHOWING, not of the configuration alone,
+	// so the button never stands beside a banner about something else.
+	function unfittedOffer(nm, finding) {
+		nm = nm || {};
+		return !!finding && finding.id === 'no-pins' && mode(nm.irCut) !== 'off' &&
+			!has(nm.irCutPin1) && !has(nm.irCutPin2);
+	}
+
 	// Findings, worst first. `fix` names the section to send someone to; the
 	// consumer decides whether that becomes a link or a tab switch.
 	//
@@ -1823,7 +1842,7 @@
 	const api = {
 		diagnose: diagnose, tracker: tracker, monitorView: monitorView,
 		wiringKey: wiringKey, settledBy: settledBy, follows: follows,
-		mode: mode,
+		mode: mode, unfittedOffer: unfittedOffer,
 		projector: projector,
 		stats: stats, irLook: irLook, colourLook: colourLook,
 		look: look, lookAt: lookAt,
