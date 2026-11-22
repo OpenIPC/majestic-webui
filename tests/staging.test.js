@@ -1031,9 +1031,17 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			behind.el('mj-served-why').textContent);
 		behind.el('mj-served').fire('click');
 
-		const after = await soft({ queuedMs: 900 });
-		check('once that is closed too, neither comes back', !shown(after),
-			after.el('mj-served-why').textContent);
+		// "Cannot keep up" is about the stream being decoded at the time, so
+		// closing it lasts the page load. On a later load that keeps up, the
+		// plain fact stays closed; on one that falls behind, it is said again.
+		const keeps = await soft();
+		check('closing "cannot keep up" does not bring the plain note back',
+			!shown(keeps), keeps.el('mj-served-why').textContent);
+		const behindAgain = await soft({ queuedMs: 900 });
+		check('and falling behind on a later load is said again',
+			shown(behindAgain) &&
+				/cannot keep up/.test(behindAgain.el('mj-served-why').textContent),
+			behindAgain.el('mj-served-why').textContent);
 
 		// A browser with nothing stored is still told.
 		const fresh = load('mse', { 'jpeg.enabled': true }, 0, true);

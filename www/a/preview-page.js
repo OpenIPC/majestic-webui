@@ -915,28 +915,31 @@
 	// quiet scene legitimately sends 12 frames where 30 were configured, and
 	// grading on that would accuse the client of a fault the camera committed.
 	//
-	// A dismissal is REMEMBERED, per browser (#736). The fact is about this
-	// browser — it cannot decode H.265 — and does not change from one page
-	// load to the next, so a note that comes back on every reload after being
-	// closed is not dismissible, it is a nag with a button on it: the same
-	// finding as the Dashboard's legacy notice (#325). Per browser rather than
-	// on the camera, like the transport and channel choices beside it, because
-	// it is this browser's limitation and a phone and a desk differ.
+	// Closing the plain note is REMEMBERED (#736). It states a fact about this
+	// browser — it cannot decode H.265 — that is just as true on the next page
+	// load, so a note that comes back on every reload after being closed is
+	// not dismissible, it is a nag with a button on it: the same finding as
+	// the Dashboard's legacy notice (#325). Kept in localStorage, beside the
+	// transport and channel choices, which makes it per browser AND per
+	// camera: storage belongs to the camera's address, so a browser opening a
+	// second camera is told once more there.
 	//
-	// What is remembered is the WORST note dismissed, and only that far: a
-	// viewer who closed "decoding in software" has not been told "and cannot
-	// keep up", which is still news and still shows. Closing that one stands
-	// both down. The latch below still dies with the session, so a dismissal
-	// is the only thing that keeps a later software session quiet.
+	// Only the plain note. "Cannot keep up at this size" is about the stream
+	// being decoded right now — another channel, another resolution, a faster
+	// machine are all different answers — so closing it hides it for this
+	// page load and no longer. Closing it does say the viewer has read the
+	// plain fact it extends, so that much is remembered.
+	//
+	// The whole note is the close target, as the handler below says, and a
+	// tap on it is not passed on to the stage, so it is a tap aimed at the
+	// note rather than one meant for the control bar.
 	const SW_NOTE_KEY = 'mj-preview-sw-note-dismissed';
-	const SW_RANK = { plain: 1, behind: 2 };
 	function swDismissed() {
-		try { return SW_RANK[localStorage.getItem(SW_NOTE_KEY)] || 0; }
-		catch (e) { return 0; }
+		try { return localStorage.getItem(SW_NOTE_KEY) !== null; }
+		catch (e) { return false; }
 	}
-	function rememberSwDismiss(key) {
-		if (!SW_RANK[key] || SW_RANK[key] <= swDismissed()) return;
-		try { localStorage.setItem(SW_NOTE_KEY, key); } catch (e) {}
+	function rememberSwDismiss() {
+		try { localStorage.setItem(SW_NOTE_KEY, 'plain'); } catch (e) {}
 	}
 	let swNoteKey = '';
 	function softwareNote(s) {
@@ -953,7 +956,7 @@
 		// actually changed — going from coping to not coping is news.
 		if (swNoteKey && key === 'plain') return;
 		swNoteKey = key;
-		if (SW_RANK[key] <= swDismissed()) return;
+		if (key === 'plain' && swDismissed()) return;
 		showStageMsg('software',
 			behind
 				? 'This browser can’t decode H.265, so the page is decoding it in ' +
@@ -2277,7 +2280,7 @@
 		// Whatever is in the slot, not just a served message: the fallback
 		// borrows the same element and a dismissal that checked the owner
 		// would leave its sentence stuck on the picture for good.
-		if (msgOwner === 'software') rememberSwDismiss(swNoteKey);
+		if (msgOwner === 'software') rememberSwDismiss();
 		hideStageMsg();
 	});
 
