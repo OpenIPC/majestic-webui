@@ -13698,14 +13698,36 @@
 				const chans = lamp ? ['irLightPwmChannel', 'whiteLightPwmChannel']
 					.map(padOf) : [];
 				const wired = wiredPad || chans.some((c) => c && c !== 'none');
+				// The filter's row is not like the lamp's in one case. With
+				// nothing wired, Off is not three choices doing the same nothing:
+				// it is how a camera with no filter fitted is told so, and the
+				// only thing that stops the Dashboard's "cannot move the
+				// filter" banner (#367). Saying "this will start to mean
+				// something" there told exactly that owner their choice did
+				// nothing, under a banner that sent them here to make it (#736).
+				// The row's own control is read, as for the pads, so the
+				// sentence follows the select before Save.
+				// IRCUT.mode, so YAML's unquoted off (a boolean false) reads as off
+				// here exactly as it does in the finding it silences.
+				const offNow = !lamp && !!IRCUT &&
+					IRCUT.mode(padOf('irCut')) === 'off';
 				warn.textContent = wired ? '' : (lamp
 					? 'Nothing is connected to the camera light yet — assign its pad on the map above, or a PWM channel below, and this will start to mean something.'
-					: 'Nothing is connected to the IR-cut filter yet — assign its coils on the map above, and this will start to mean something.');
+					: offNow
+						? 'Nothing is connected and this is off, which is what a camera with no IR-cut filter fitted is set to: nothing will ask about the filter.'
+						: 'Nothing is connected to the IR-cut filter. If this camera has no filter fitted, choose Off, and nothing will ask about it again. If it has one, assign its coils on the map above.');
 				warn.hidden = wired;
 			};
 			paint();
 			p.appendChild(warn);
 			state.repaint.push(paint);
+			// Its own value is half of the filter's sentence now, and an edit
+			// of the row reaches updateDirty() and nothing else; the x-requires
+			// block below binds the row for the same reason.
+			if (!lamp) {
+				p.addEventListener('input', paint);
+				p.addEventListener('change', paint);
+			}
 		}
 
 		if (!live && sub['x-requires']

@@ -201,6 +201,16 @@ group('one vocabulary for the actions, wherever they are written');
 // destination, wrong shape.
 const ACTS_ON_CAMERA = new Set(['restart.cgi']);
 
+// The third shape: a button with no form and no page, whose own script writes
+// the camera through the API. Marked `data-acts="api"`, so the scan reads it as
+// acting rather than as a navigation with nothing to link to. It asks first,
+// like every acting action, but with its own confirm() and a data-confirm of
+// its own rather than the .btn-warning class: main.js's handler for that class
+// calls preventDefault(), which stops a form and not a sibling click listener,
+// so the class would ask and the write would happen anyway. The Dashboard's
+// "No IR-cut filter fitted" is the one there is (#736).
+const actsByScript = (attrs) => /\bdata-acts="api"/.test(attrs);
+
 // Every action in the tree, named. Named rather than counted, because the
 // failure this scan exists to catch is an action written in a spelling
 // actionGroups() cannot read: it then escapes every check below and the run
@@ -219,6 +229,8 @@ const EXPECTED = [
 	'cgi-bin/camera.cgi logs.cgi "Open the log"',
 	'cgi-bin/camera.cgi restart.cgi "Restart camera"',
 	'cgi-bin/dashboard.cgi camera.cgi "Open Day / Night"',
+	// Beside it, shown only on a camera with nothing wired to the filter.
+	'cgi-bin/dashboard.cgi api "No IR-cut filter fitted"',
 	// The two on the no-video banner are empty here and filled by dashboard.js.
 	'cgi-bin/dashboard.cgi camera.cgi ""',
 	'cgi-bin/dashboard.cgi logs.cgi ""',
@@ -330,6 +342,17 @@ groups.forEach((g) => {
 		const page = target.split(/[?#]/)[0].replace(/^.*\//, '');
 		const where = g.file + ': ' + a[0];
 		const has = (c) => cls.indexOf(c) >= 0;
+		if (actsByScript(attrs)) {
+			found.push(g.file + ' api "' + text + '"');
+			check('"' + text + '" in ' + g.file + ' is a plain button, not a submit',
+				tag === 'button' && /\btype="button"/.test(attrs) && has('btn'), where);
+			check('"' + text + '" in ' + g.file + ' says what it will ask',
+				/\bdata-confirm="[^"]+"/.test(attrs), where);
+			check('"' + text + '" in ' + g.file + ' does not also wear the class that asks',
+				!has('btn-danger') && !has('btn-warning'),
+				where + '\n    it would be asked twice, and the first answer ignored');
+			continue;
+		}
 		const acts = ACTS_ON_CAMERA.has(page);
 		found.push(g.file + ' ' + page + ' "' + text + '"');
 
