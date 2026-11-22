@@ -328,8 +328,15 @@
 		// writing. A read that fails writes nothing: not knowing the wiring is
 		// no ground for a write that depends on it.
 		const fail = (msg) => { ircutNoneErr = msg; };
+		//
+		// The question comes FIRST, before that read, because a confirm() can
+		// stand open for as long as somebody leaves it. Asked after the read it
+		// would sit between the read and the write, and the wiring could
+		// change under it; asked before, what separates the read from the
+		// write is one round trip.
 		if (b) b.addEventListener('click', () => {
 			if (!IC || !nmCfg) return;
+			if (!confirm(b.dataset.confirm)) return;
 			b.disabled = true;
 			ircutNoneErr = '';
 			apiFetch('/api/v1/config.json', { credentials: 'same-origin' })
@@ -347,7 +354,6 @@
 					const f = IC.diagnose(now, ircutSample, ircutTrackNow, ircutPic,
 						ircutTested()).filter(x => x.level !== 'info')[0];
 					if (!IC.unfittedOffer(now, f)) return;
-					if (!confirm(b.dataset.confirm)) return;
 					wiringGen++;
 					return apiFetch('/api/v1/config', {
 						method: 'POST', credentials: 'same-origin',
