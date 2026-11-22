@@ -110,8 +110,9 @@
 		hue:        { label: 'Hue' },
 		mirror:     { label: 'Mirror' },
 		flip:       { label: 'Flip' },
+		rotate:     { label: 'Rotate' },
 	};
-	const LIVE_ORDER = ['luminance', 'contrast', 'saturation', 'hue', 'mirror', 'flip'];
+	const LIVE_ORDER = ['luminance', 'contrast', 'saturation', 'hue', 'mirror', 'flip', 'rotate'];
 
 	// Stroked 20px-grid icons, currentColor, used on the stage chrome. Kept as
 	// strings because every consumer builds its markup with innerHTML.
@@ -157,9 +158,9 @@
 	// Four, not the eight the pad once offered. The other four need a quarter
 	// turn, which the camera cannot apply live: it swaps the stream's width and
 	// height and waits for Save and a pipeline reload, so those cells staged a
-	// value the picture did not show (#583). The Live leaf holds only what
-	// moves the picture as it is pressed; the quarter turn is set under
-	// Rotation on ISP / Exposure, and the pad says so when one is in force.
+	// value the picture did not show (#583). The quarter turn is the Turn row
+	// under the pad instead (renderPress), whose press saves it and has the
+	// camera rebuild the stream, so it too moves the picture when pressed.
 	//
 	// The arithmetic. The sensor mirrors and flips; a vertical flip is a
 	// mirror plus a half turn, so a picture is (mirrored k, turned a) with
@@ -180,6 +181,16 @@
 	// The glyph: the frame, and the F put through the same mirror and half
 	// turn as the picture.
 	const GEO_FRAME = '<rect x="1.5" y="3.5" width="17" height="13" rx="1.8" opacity="0.4"></rect>';
+	// A quarter turn turns the whole frame, so the glyph does too: a portrait
+	// outline with the F on its side, the way the picture will stand.
+	function turnSvg(deg) {
+		return '<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" ' +
+			'stroke-width="1.3" stroke-linecap="round" aria-hidden="true">' +
+			'<g transform="rotate(' + deg + ' 10 10)">' + GEO_FRAME +
+			'<path d="M7.6 6.8h5.2M7.6 10h3.7M7.6 6.8v6.4" stroke-width="1.7"></path></g>' +
+			'</svg>';
+	}
+
 	function orientSvg(o) {
 		const tf = 'rotate(' + o.a + ' 10 10)' + (o.k ? ' translate(20,0) scale(-1,1)' : '');
 		return '<svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" ' +
@@ -2671,11 +2682,8 @@
 	// learn that a pad exists. Both are live, so a press turns the picture
 	// over as it is pressed, which is the one promise this leaf makes.
 	//
-	// A quarter turn in force is said under the pad rather than offered on it:
-	// it is set on ISP / Exposure (see ORIENT), and without the line the lit
-	// cell would read as the whole of the orientation when the stream is also
-	// turned. Read from the config, so it follows a save there and refresh().
-	function renderOrientation(body, mirrorField, flipField, sec) {
+	// The quarter turn is the Turn row beside it (renderPress).
+	function renderOrientation(body, mirrorField, flipField) {
 		const row = el('div', 'mj-geo-row');
 		const btns = ORIENT.map((o) => {
 			const b = el('button', 'mj-geo' + (o.home ? ' mj-geo-home' : ''));
@@ -2691,9 +2699,6 @@
 			return b;
 		});
 		body.appendChild(row);
-		const turned = el('p', 'mj-live-hint mj-geo-turned');
-		turned.hidden = true;
-		body.appendChild(turned);
 
 		const sync = () => {
 			const cur = orientOf(toBool(mirrorField.getValue()), toBool(flipField.getValue()));
@@ -2702,14 +2707,6 @@
 				btns[i].classList.toggle('mj-geo-on', on);
 				btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
 			});
-			const t = Number(getDotted(state.config, sec + '.rotate'));
-			const home = treeOf().leftoverHome(sec);
-			turned.hidden = !home || !(t === 90 || t === 270);
-			if (!turned.hidden) {
-				turned.innerHTML = 'The picture is also turned ' + t + '° clockwise, ' +
-					'set under ' + esc(home.label) + ' on <a href="?tab=' + esc(home.home) +
-					'">' + esc(label(home.home)) + '</a>.';
-			}
 		};
 		[mirrorField, flipField].forEach(f => {
 			f.control.addEventListener('input', sync);
@@ -2719,6 +2716,135 @@
 		// pad has to be told to re-read after a save or a reset.
 		state.liveSync.push(sync);
 		sync();
+	}
+
+	// A press-applied choice (mj-tree.js rule 3): on today's daemon the
+	// quarter turn, beside the pad, because that is where someone looking for
+	// which way up the picture stands looks for it (OpenIPC/majestic#383).
+	// It cannot be live like the pad: a turn swaps the stream's width and
+	// height, so the camera rebuilds the pipeline and every viewer reconnects.
+	// A cell that only staged the value for Save is what got it taken off this
+	// leaf before (#583), so a press does the whole thing: it saves the one
+	// key, has the camera rebuild if the save did not already, and reloads the
+	// page once the rebuild is seen, so the picture comes back changed. Other
+	// unsaved edits would be lost to that reload, so the press asks first.
+	//
+	// Drawn from the schema alone: a cell per value of the enum, labelled by
+	// x-enum-titles, which mj-tree.js requires for every value. Where x-unit
+	// says the values are degrees, each cell also draws the frame turned that
+	// far, and the words say "turn". The field stays real and hidden like
+	// mirror and flip.
+	function renderPress(body, rotField) {
+		const sub = rotField.schema;
+		const turn = sub['x-unit'] === '°';
+		const offered = sub.enum.map(String);
+		const titles = sub['x-enum-titles'];
+		const row = el('div', 'mj-geo-row');
+		const NOTE = (turn ? 'A turn' : 'A change') + ' restarts the video streams: ' +
+			'every viewer reconnects, and this page reloads.';
+		const note = el('p', 'mj-live-hint');
+		note.textContent = NOTE;
+		const btns = offered.map((v) => {
+			const b = el('button', 'mj-geo' + (v === String(sub.default) ? ' mj-geo-home' : ''));
+			b.type = 'button';
+			b.title = titles[v];
+			b.innerHTML = (turn ? turnSvg(Number(v) || 0) : '') + '<span>' + esc(titles[v]) + '</span>';
+			b.addEventListener('click', () => turnTo(v));
+			row.appendChild(b);
+			return b;
+		});
+		body.appendChild(row);
+		body.appendChild(note);
+
+		// What the camera holds, or null when it has not said: no cell is lit
+		// then, rather than Upright by default.
+		const current = () => {
+			const v = rotField.getValue();
+			return v === undefined || v === null || v === '' ? null : String(v);
+		};
+		const sync = () => {
+			const cur = current();
+			offered.forEach((v, i) => {
+				btns[i].classList.toggle('mj-geo-on', v === cur);
+				btns[i].setAttribute('aria-pressed', v === cur ? 'true' : 'false');
+			});
+		};
+		state.liveSync.push(sync);
+		sync();
+
+		const fail = (msg) => {
+			showError(msg);
+			note.textContent = NOTE;
+			btns.forEach(b => { b.disabled = false; });
+		};
+
+		async function turnTo(v) {
+			if (v === current()) return;
+			if (hasDirty() && !confirm((turn ? 'Turning the picture' : 'Applying this') +
+					' reloads this page, and your other unsaved changes would be lost. ' +
+					(turn ? 'Turn it anyway?' : 'Apply it anyway?'))) return;
+			btns.forEach(b => { b.disabled = true; });
+			note.textContent = (turn ? 'Turning the picture' : 'Applying') +
+				'… the video streams are restarting.';
+			clearError();
+			const before = await pipelineRebuilds();
+			let res;
+			try {
+				const doc = {};
+				setDotted(doc, rotField.dot, v);
+				res = await apiFetch('/api/v1/config', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'same-origin',
+					body: JSON.stringify(doc),
+				});
+			} catch (e) {
+				fail('The change could not be sent: ' + e.message + '. Nothing was changed.');
+				return;
+			}
+			if (!res.ok) {
+				fail('The camera did not take the change (HTTP ' + res.status + '). ' +
+					await safeText(res));
+				return;
+			}
+			// Only now is the leaf going away. Discarded live edits are put back
+			// through the live queue and waited for, so the reload cannot cut
+			// the revert off behind an edit still on the wire.
+			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+			if (state.fields.length && liveDrift()) await postKnobs(liveDocOf(null));
+			stopLivePreview();
+
+			// A camera whose save already rebuilt the pipeline is done. One that
+			// did not is sent the reload Apply sends, and the page waits to SEE
+			// the rebuild counter move: Apply answers before it signals, so the
+			// camera answering again proves nothing on its own. Where the counter
+			// cannot be read at all, coming back is the most there is to go on,
+			// as for Apply itself.
+			let done = await rebuiltSince(before);
+			if (!done) {
+				let applied = true;
+				try {
+					const r = await apiFetch('j/mj-apply.cgi', { credentials: 'same-origin' });
+					applied = r.ok;
+				} catch (e) { /* the rebuild may sever this request */ }
+				if (!applied) {
+					state.applyPending = true;
+					fail('The change is saved, but the camera did not take the restart. ' +
+						'Press Apply now to bring it into force.');
+					return;
+				}
+				const up = await pollUp(30000);
+				done = before === null ? up : up && await rebuiltSince(before);
+			}
+			if (done) {
+				state.applyPending = false;
+				location.reload();
+				return;
+			}
+			state.applyPending = true;
+			fail('The change is saved, but the camera has not confirmed restarting the ' +
+				'video streams. Reload this page in a moment, or press Apply now.');
+		}
 	}
 
 	// Scene presets. Which one is "on" is DERIVED by comparing the current tone
@@ -3439,6 +3565,9 @@
 		const mirror = fields.find(f => f.key === 'mirror' && f.sub.type === 'boolean');
 		const flip = fields.find(f => f.key === 'flip' && f.sub.type === 'boolean');
 		const useGeo = !!(mirror && flip);
+		// Choices lifted as press-applied (mj-tree.js rule 3) -- on today's
+		// daemon, the quarter turn.
+		const pressed = fields.filter(f => treeOf().pressApplied(f.dot));
 		// What this leaf has an instrument for, and what it has not.
 		//
 		// LIVE_META is the leaf's whole vocabulary: four tone knobs it has a
@@ -3585,7 +3714,7 @@
 		};
 
 		for (const f of placed) {
-			const geoField = useGeo && (f === mirror || f === flip);
+			const geoField = (useGeo && (f === mirror || f === flip)) || pressed.includes(f);
 			// The geometry checkboxes stay real fields — hidden — beside the pad
 			// that replaces them, so Save and dirty tracking never learn any of
 			// this happened.
@@ -3747,14 +3876,19 @@
 			if (figs) lumaBody.appendChild(figs);
 		}
 
-		if (useGeo) {
-			const mf = state.fields.find(f => f.dot === mirror.dot);
-			const ff = state.fields.find(f => f.dot === flip.dot);
-			if (mf && ff) {
-				const geo = liveGroup(colGeo, 'Orientation', '');
-				renderOrientation(geo, mf, ff, mirror.section);
-			}
+		const mf = useGeo && state.fields.find(f => f.dot === mirror.dot);
+		const ff = useGeo && state.fields.find(f => f.dot === flip.dot);
+		const pf = pressed.map(p => state.fields.find(f => f.dot === p.dot)).filter(Boolean);
+		// A choice in degrees turns the picture, so it joins the pad under
+		// Orientation; any other is a group of its own, under its title.
+		const turns = pf.filter(f => f.schema['x-unit'] === '°');
+		if ((mf && ff) || turns.length) {
+			const geo = liveGroup(colGeo, 'Orientation', '');
+			if (mf && ff) renderOrientation(geo, mf, ff);
+			turns.forEach(f => renderPress(geo, f));
 		}
+		pf.filter(f => !turns.includes(f)).forEach(f =>
+			renderPress(liveGroup(colGeo, f.schema.title || f.key, ''), f));
 
 		// Every group above is conditional — on the schema, and on which player
 		// scripts loaded — so an empty column is reachable rather than
@@ -8689,7 +8823,8 @@
 	// description of the page it was on — and a description naming six settings
 	// the page did not have (#316).
 	function liftedNote(sec) {
-		const mine = liveFields().filter(f => f.section === sec);
+		// Press-applied keys are not dragged: the Turn row says what it does.
+		const mine = liveFields().filter(f => f.section === sec && !treeOf().pressApplied(f.dot));
 		if (!mine.length) return null;
 		const names = mine.map(f => liveLabel(f.key, f.sub).toLowerCase());
 		const list = names.length > 1

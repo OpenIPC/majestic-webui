@@ -26,9 +26,19 @@ const TREE = require(path.join(__dirname, '..', 'www', 'a', 'mj-tree.js'));
 const SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'schema-hisi.json'), 'utf8'));
 
 // The deck's order for the lifted knobs, as mj-settings.js passes it.
-const ORDER = ['luminance', 'contrast', 'saturation', 'hue', 'mirror', 'flip'];
+const ORDER = ['luminance', 'contrast', 'saturation', 'hue', 'mirror', 'flip', 'rotate'];
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
+// The fixture predates majestic describing the quarter turn: today's daemon
+// says its values are degrees and names each (OpenIPC/majestic#383).
+const withTurn = (schema) => {
+	const s = clone(schema);
+	Object.assign(s.properties.image.properties.rotate, {
+		'x-unit': '°',
+		'x-enum-titles': { 0: 'Upright', 90: '90° clockwise', 270: '270° clockwise' },
+	});
+	return s;
+};
 const build = (schema, exclude) => TREE.build(schema, { exclude: exclude || [], liveOrder: ORDER, liveId: 'live' });
 const leaves = (t) => t.groups().reduce((acc, g) => acc.concat(t.leafIds(g)), []);
 // Every leaf that draws a given key — the answer should always be one.
@@ -82,25 +92,95 @@ group('a live-flagged key outside the owner group is drawn on its own section');
 
 group('the image section is absorbed onto the Live leaf');
 {
-	const t = build(SCHEMA);
+	const t = build(withTurn(SCHEMA));
 	check('image is absorbed', t.absorbed('image'));
 	check('image has no leaf of its own', !leaves(t).includes('image'));
 	check('the image group leads with the Live leaf', t.leafIds(t.groups()[0]).join() === 'live,isp,nightMode');
-	// Rule 3: an absorbed section's leftovers go home, never to the Live leaf.
-	// This fixture predates Automatic tuning being classed live, so it is a
-	// leftover here and goes home with Rotate; on today's daemon it is lifted.
-	check('Rotate is drawn on ISP / Exposure', leafOf(t, 'image.rotate').join() === 'isp');
+	// Rule 2: the quarter turn is lifted as press-applied, beside the pad,
+	// where someone looking for the picture's orientation finds it
+	// (OpenIPC/majestic#383). Rule 3: what is left goes home. This fixture
+	// predates Automatic tuning being classed live, so it is a leftover here;
+	// on today's daemon it is lifted.
+	check('Rotate is drawn on the Live leaf', leafOf(t, 'image.rotate').join() === 'live');
+	check('Rotate is lifted as press-applied',
+		t.lifted().has('image.rotate') && t.pressApplied('image.rotate'));
 	check('a leftover goes home, not to the Live leaf', leafOf(t, 'image.tuning').join() === 'isp');
 	check('mirror and flip are lifted', t.lifted().has('image.mirror') && t.lifted().has('image.flip'));
 	check('the Live leaf lists the knobs first, in deck order',
-		t.leafFields('live').slice(0, 6).map(f => f.dot.split('.').pop()).join() === ORDER.join());
-	check('and nothing after them', t.leafFields('live').length === 6);
-	check('the leftovers alone are what image still has to draw',
-		t.sectionFields('image').map(f => f.dot).join() === 'image.rotate,image.tuning');
+		t.leafFields('live').slice(0, 6).map(f => f.dot.split('.').pop()).join() === ORDER.slice(0, 6).join());
+	check('then the quarter turn, and nothing after it',
+		t.leafFields('live').length === 7 && t.leafFields('live')[6].dot === 'image.rotate');
+	check('the leftover alone is what image still has to draw',
+		t.sectionFields('image').map(f => f.dot).join() === 'image.tuning');
 	check('asked with the lifted keys in, image is all eight', t.sectionFields('image', true).length === 8);
-	check('ISP / Exposure draws them after its own keys',
-		t.leafFields('isp').slice(-2).map(f => f.dot).join() === 'image.rotate,image.tuning');
+	check('ISP / Exposure draws it after its own keys',
+		t.leafFields('isp').slice(-1).map(f => f.dot).join() === 'image.tuning');
+	everyKeyOnce('annotated turn', t, withTurn(SCHEMA));
+}
+
+// The Turn row is drawn from what the schema says about the key: without the
+// unit and the names, there is nothing to draw it from, so the key is not
+// lifted into a row that would hide it -- it stays an ordinary field.
+group('an undescribed quarter turn stays an ordinary field');
+{
+	const t = build(SCHEMA);
+	check('Rotate is not lifted', !t.lifted().has('image.rotate'));
+	check('Rotate is drawn on ISP / Exposure', leafOf(t, 'image.rotate').join() === 'isp');
+	check('the Live leaf is the six knobs', t.leafFields('live').length === 6);
 	everyKeyOnce('shipped schema', t, SCHEMA);
+}
+
+// Lifted only beside a live key of its own section: a press-applied key never
+// makes a section look live that is not.
+group('a quarter turn rides along, it does not own');
+{
+	const s = withTurn(SCHEMA);
+	for (const k of Object.keys(s.properties.image.properties))
+		delete s.properties.image.properties[k]['x-live'];
+	const t = build(s);
+	check('with nothing live in image, Rotate is not lifted', !t.lifted().has('image.rotate'));
+	check('and is drawn where image is', leafOf(t, 'image.rotate').length === 1 &&
+		leafOf(t, 'image.rotate')[0] !== 'live');
+	everyKeyOnce('image not live', t, s);
+}
+
+// Rule 3 lifts a described choice by its shape alone: no key is named.
+group('a press-applied choice is chosen by the schema, not by name');
+{
+	const s = withTurn(SCHEMA);
+	s.properties.image.properties.lens = { type: 'string', enum: ['a', 'b'], title: 'Lens',
+		'x-enum-titles': { a: 'Wide', b: 'Narrow' } };
+	const t = build(s);
+	check('any described choice in an absorbed section is lifted',
+		t.pressApplied('image.lens') && leafOf(t, 'image.lens').join() === 'live');
+	const u = withTurn(SCHEMA);
+	u.properties.image.properties.rotate['x-enum-titles'] = { 0: 'Upright' };
+	const tu = build(u);
+	check('a choice not every value of which is named stays an ordinary field',
+		!tu.pressApplied('image.rotate') && leafOf(tu, 'image.rotate').join() === 'isp');
+	const v = withTurn(SCHEMA);
+	const ispKey = Object.keys(v.properties.isp.properties).find(k =>
+		Array.isArray(v.properties.isp.properties[k].enum));
+	v.properties.isp.properties[ispKey]['x-enum-titles'] = Object.fromEntries(
+		v.properties.isp.properties[ispKey].enum.map(x => [String(x), 'Named ' + x]));
+	v.properties.isp.properties.someLive = { type: 'boolean', title: 'Some', 'x-live': true };
+	const tv = build(v);
+	check('a described choice in a section that is not absorbed keeps its page',
+		!tv.pressApplied('isp.' + ispKey) && leafOf(tv, 'isp.' + ispKey).join() === 'isp');
+	// Majority-live and still not absorbed, because its leftovers have no
+	// home: today's daemon marks 28 of 53 isp keys live, and its titled HDR
+	// and cinema choices stay on ISP / Exposure.
+	const w = withTurn(SCHEMA);
+	const ip = w.properties.isp.properties;
+	const choice = Object.keys(ip).find(k => Array.isArray(ip[k].enum));
+	ip[choice]['x-enum-titles'] = Object.fromEntries(ip[choice].enum.map(x => [String(x), 'Named ' + x]));
+	const keys = Object.keys(ip).filter(k => k !== choice && ip[k].type !== 'object');
+	keys.slice(0, Math.ceil(keys.length / 2) + 2).forEach(k => { ip[k]['x-live'] = true; });
+	const tw = build(w);
+	check('a majority-live section with no home keeps its choices',
+		!tw.pressApplied('isp.' + choice) && leafOf(tw, 'isp.' + choice).join() === 'isp');
+	check('and the quarter turn is still lifted', tw.pressApplied('image.rotate'));
+	everyKeyOnce('described choice', t, s);
 }
 
 group('autofocus can move to a synthetic Motors category');
@@ -127,28 +207,33 @@ group('autofocus can move to a synthetic Motors category');
 // The Live leaf is "adjust and watch": every row on it changes the picture as
 // it is touched. A key there that waits for Save and a pipeline reload reads
 // as a control that does nothing -- the quarter turn beside the Orientation
-// pad was exactly that (#583). So the leaf may draw lifted keys and nothing
-// else, on any schema, and a leftover with nowhere to go keeps its section's
-// page rather than landing here.
+// pad was exactly that (#583). So the leaf draws live keys and press-applied
+// ones, whose control saves and applies on the press, and nothing else, on
+// any schema; a leftover with nowhere to go keeps its section's page rather
+// than landing here.
 group('the Live leaf draws only live keys');
 {
 	for (const [name, schema] of [['shipped schema', SCHEMA], ['current daemon', (() => {
-		const s = clone(SCHEMA);
+		const s = withTurn(SCHEMA);
 		s.properties.image.properties.tuning['x-live'] = true;
 		return s;
 	})()]]) {
 		const t = build(schema);
-		const notLive = t.leafFields('live').filter(f => !t.lifted().has(f.dot)).map(f => f.dot);
-		check(name + ': every row on the Live leaf is live', !notLive.length, notLive.join(', '));
+		const notLive = t.leafFields('live')
+			.filter(f => !f.sub['x-live'] && !t.pressApplied(f.dot)).map(f => f.dot);
+		check(name + ': every row on the Live leaf is live or press-applied',
+			!notLive.length, notLive.join(', '));
 	}
-	const s = clone(SCHEMA);
+	const s = withTurn(SCHEMA);
 	s.properties.image.properties.tuning['x-live'] = true;
 	const t = build(s);
-	check('current daemon: Rotate is the one image key sent home',
-		t.homedAt('isp').join() === 'image' &&
-		t.sectionFields('image').map(f => f.dot).join() === 'image.rotate');
+	check('current daemon: image has nothing left to send home',
+		!t.sectionFields('image').length && !t.homedAt('isp').length);
 	// A section whose leftovers have no home is not absorbed: it keeps a page.
+	// image leaves nothing on today's daemon, so a key that is neither live
+	// nor press-applied is added to have something to leave.
 	const u = clone(s);
+	u.properties.image.properties.extra = { type: 'integer', title: 'Extra' };
 	u.properties.isp = undefined;
 	delete u.properties.isp;
 	const tu = build(u);
@@ -246,7 +331,7 @@ group('an excluded key is drawn nowhere, lifted or not');
 {
 	const ex = ['image.rotate', 'image.mirror', 'video0.bitrate'];
 	const t = build(SCHEMA, ex);
-	check('an excluded leftover is not drawn', leafOf(t, 'image.rotate').length === 0);
+	check('an excluded press-applied key is not drawn', leafOf(t, 'image.rotate').length === 0);
 	check('an excluded live key is not lifted', !t.lifted().has('image.mirror'));
 	check('an excluded ordinary key is not drawn', leafOf(t, 'video0.bitrate').length === 0);
 	check('image is still absorbed on what remains', t.absorbed('image'));
