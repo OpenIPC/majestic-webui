@@ -29,6 +29,16 @@ const SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'sche
 const ORDER = ['luminance', 'contrast', 'saturation', 'hue', 'mirror', 'flip', 'rotate'];
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
+// The fixture predates majestic describing the quarter turn: today's daemon
+// says its values are degrees and names each (OpenIPC/majestic#383).
+const withTurn = (schema) => {
+	const s = clone(schema);
+	Object.assign(s.properties.image.properties.rotate, {
+		'x-unit': '°',
+		'x-enum-titles': { 0: 'Upright', 90: '90° clockwise', 270: '270° clockwise' },
+	});
+	return s;
+};
 const build = (schema, exclude) => TREE.build(schema, { exclude: exclude || [], liveOrder: ORDER, liveId: 'live' });
 const leaves = (t) => t.groups().reduce((acc, g) => acc.concat(t.leafIds(g)), []);
 // Every leaf that draws a given key — the answer should always be one.
@@ -82,7 +92,7 @@ group('a live-flagged key outside the owner group is drawn on its own section');
 
 group('the image section is absorbed onto the Live leaf');
 {
-	const t = build(SCHEMA);
+	const t = build(withTurn(SCHEMA));
 	check('image is absorbed', t.absorbed('image'));
 	check('image has no leaf of its own', !leaves(t).includes('image'));
 	check('the image group leads with the Live leaf', t.leafIds(t.groups()[0]).join() === 'live,isp,nightMode');
@@ -105,7 +115,33 @@ group('the image section is absorbed onto the Live leaf');
 	check('asked with the lifted keys in, image is all eight', t.sectionFields('image', true).length === 8);
 	check('ISP / Exposure draws it after its own keys',
 		t.leafFields('isp').slice(-1).map(f => f.dot).join() === 'image.tuning');
+	everyKeyOnce('annotated turn', t, withTurn(SCHEMA));
+}
+
+// The Turn row is drawn from what the schema says about the key: without the
+// unit and the names, there is nothing to draw it from, so the key is not
+// lifted into a row that would hide it -- it stays an ordinary field.
+group('an undescribed quarter turn stays an ordinary field');
+{
+	const t = build(SCHEMA);
+	check('Rotate is not lifted', !t.lifted().has('image.rotate'));
+	check('Rotate is drawn on ISP / Exposure', leafOf(t, 'image.rotate').join() === 'isp');
+	check('the Live leaf is the six knobs', t.leafFields('live').length === 6);
 	everyKeyOnce('shipped schema', t, SCHEMA);
+}
+
+// Lifted only beside a live key of its own section: a press-applied key never
+// makes a section look live that is not.
+group('a quarter turn rides along, it does not own');
+{
+	const s = withTurn(SCHEMA);
+	for (const k of Object.keys(s.properties.image.properties))
+		delete s.properties.image.properties[k]['x-live'];
+	const t = build(s);
+	check('with nothing live in image, Rotate is not lifted', !t.lifted().has('image.rotate'));
+	check('and is drawn where image is', leafOf(t, 'image.rotate').length === 1 &&
+		leafOf(t, 'image.rotate')[0] !== 'live');
+	everyKeyOnce('image not live', t, s);
 }
 
 group('autofocus can move to a synthetic Motors category');
@@ -139,7 +175,7 @@ group('autofocus can move to a synthetic Motors category');
 group('the Live leaf draws only live keys');
 {
 	for (const [name, schema] of [['shipped schema', SCHEMA], ['current daemon', (() => {
-		const s = clone(SCHEMA);
+		const s = withTurn(SCHEMA);
 		s.properties.image.properties.tuning['x-live'] = true;
 		return s;
 	})()]]) {
@@ -149,7 +185,7 @@ group('the Live leaf draws only live keys');
 		check(name + ': every row on the Live leaf is live or press-applied',
 			!notLive.length, notLive.join(', '));
 	}
-	const s = clone(SCHEMA);
+	const s = withTurn(SCHEMA);
 	s.properties.image.properties.tuning['x-live'] = true;
 	const t = build(s);
 	check('current daemon: image has nothing left to send home',

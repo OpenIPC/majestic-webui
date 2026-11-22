@@ -65,7 +65,17 @@
 	// applies them on the spot: the quarter turn rebuilds the stream, and the
 	// Turn row says so and does it. A key belongs here only if its control
 	// does that; one that would stage a value for Save does not (#583).
+	//
+	// The list says WHERE such a key goes, which is this page's call; WHAT
+	// control it gets is read from the schema. A press-applied key is lifted
+	// only when the schema describes it fully enough to draw that control --
+	// an enum, the unit its values are in, and a name for each -- and only
+	// beside a live key of its own section, so it never makes a section look
+	// live that is not. Otherwise it stays a leftover, drawn as an ordinary
+	// field where its section's other keys are.
 	const PRESS_APPLIED = new Set(['image.rotate']);
+	const pressShape = (sub) => !!sub && Array.isArray(sub.enum) && sub.enum.length > 1 &&
+		!!sub['x-unit'] && !!sub['x-enum-titles'];
 
 	// The types the form's renderField actually draws — an object falls
 	// through its dispatch and returns nothing, so it must not make a section
@@ -142,9 +152,12 @@
 			if (!group) return out;
 			for (const section of group.sections) {
 				const sp = (props[section] || {}).properties || {};
+				const anyLive = Object.keys(sp).some(k => sp[k] && sp[k]['x-live'] &&
+					!exclude.has(section + '.' + k));
 				for (const key of Object.keys(sp)) {
 					if (!sp[key]) continue;
-					if (!sp[key]['x-live'] && !PRESS_APPLIED.has(section + '.' + key)) continue;
+					if (!sp[key]['x-live'] && !(anyLive && PRESS_APPLIED.has(section + '.' + key) &&
+						pressShape(sp[key]))) continue;
 					if (exclude.has(section + '.' + key)) continue;
 					out.push({ section, key, sub: sp[key], dot: section + '.' + key });
 				}

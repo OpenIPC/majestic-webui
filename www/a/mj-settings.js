@@ -2725,30 +2725,29 @@
 	// A cell that only staged the value for Save is what got it taken off this
 	// leaf before (#583), so a press does the whole thing: it saves the one
 	// key, has the camera rebuild if the save did not already, and reloads the
-	// page once the camera answers, so the picture comes back turned. Other
-	// unsaved edits on the page would be lost to that reload, so the press
-	// asks first when there are any.
+	// page once the rebuild is seen, so the picture comes back turned. Other
+	// unsaved edits would be lost to that reload, so the press asks first.
 	//
-	// The field stays real and hidden like mirror and flip; the cells are the
-	// schema's own values, so a camera offering fewer turns shows fewer.
-	const TURN = {
-		'0':   { label: 'Upright', title: 'Not turned' },
-		'90':  { label: '90°',     title: 'Turned a quarter clockwise: a 16:9 sensor gives a 9:16 picture' },
-		'270': { label: '270°',    title: 'Turned a quarter counter-clockwise' },
-	};
+	// Drawn from the schema: a cell per value of the enum, labelled by
+	// x-enum-titles. mj-tree.js lifts the key only when the schema carries
+	// both and a unit, so a field reaching here always has them. The glyph
+	// turns the frame by the value where the unit says degrees, and is the
+	// upright frame otherwise. The field stays real and hidden like mirror
+	// and flip.
 	function renderTurn(body, rotField) {
-		const offered = (rotField.schema.enum || Object.keys(TURN)).map(String)
-			.filter(v => TURN[v]);
-		if (offered.length < 2) return;
+		const sub = rotField.schema;
+		const offered = sub.enum.map(String);
+		const titles = sub['x-enum-titles'];
 		const row = el('div', 'mj-geo-row');
-		const note = el('p', 'mj-live-hint');
-		note.textContent = 'A turn restarts the video streams: every viewer reconnects, ' +
+		const NOTE = 'A turn restarts the video streams: every viewer reconnects, ' +
 			'and this page reloads.';
+		const note = el('p', 'mj-live-hint');
+		note.textContent = NOTE;
 		const btns = offered.map((v) => {
-			const b = el('button', 'mj-geo' + (v === '0' ? ' mj-geo-home' : ''));
+			const b = el('button', 'mj-geo' + (v === String(sub.default) ? ' mj-geo-home' : ''));
 			b.type = 'button';
-			b.title = TURN[v].title;
-			b.innerHTML = turnSvg(Number(v)) + '<span>' + esc(TURN[v].label) + '</span>';
+			b.title = titles[v] || (v + sub['x-unit']);
+			b.innerHTML = turnSvg(sub['x-unit'] === '°' ? (Number(v) || 0) : 0) + '<span>' + esc(titles[v] || (v + sub['x-unit'])) + '</span>';
 			b.addEventListener('click', () => turnTo(v));
 			row.appendChild(b);
 			return b;
@@ -2756,7 +2755,12 @@
 		body.appendChild(row);
 		body.appendChild(note);
 
-		const current = () => String(rotField.getValue() || '0');
+		// What the camera holds, or null when it has not said: no cell is lit
+		// then, rather than Upright by default.
+		const current = () => {
+			const v = rotField.getValue();
+			return v === undefined || v === null || v === '' ? null : String(v);
+		};
 		const sync = () => {
 			const cur = current();
 			offered.forEach((v, i) => {
@@ -2767,6 +2771,12 @@
 		state.liveSync.push(sync);
 		sync();
 
+		const fail = (msg) => {
+			showError(msg);
+			note.textContent = NOTE;
+			btns.forEach(b => { b.disabled = false; });
+		};
+
 		async function turnTo(v) {
 			if (v === current()) return;
 			if (hasDirty() && !confirm('Turning the picture reloads this page, and your ' +
@@ -2774,42 +2784,63 @@
 			btns.forEach(b => { b.disabled = true; });
 			note.textContent = 'Turning the picture… the video streams are restarting.';
 			clearError();
-			stopLivePreview();
 			const before = await pipelineRebuilds();
+			let res;
 			try {
-				const body = {};
-				setDotted(body, rotField.dot, v);
-				const res = await apiFetch('/api/v1/config', {
+				const doc = {};
+				setDotted(doc, rotField.dot, v);
+				res = await apiFetch('/api/v1/config', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					credentials: 'same-origin',
-					body: JSON.stringify(body),
+					body: JSON.stringify(doc),
 				});
-				if (!res.ok) {
-					showError('The camera did not take the turn (HTTP ' + res.status + '). ' +
-						await safeText(res));
-					btns.forEach(b => { b.disabled = false; });
-					return;
-				}
-				// A camera whose save already rebuilt the pipeline is done; one
-				// that did not is sent the same reload Apply sends.
-				if (!(await rebuiltSince(before))) {
-					try {
-						await apiFetch('j/mj-apply.cgi', { credentials: 'same-origin' });
-					} catch (e) { /* the reload may sever this request */ }
-				}
 			} catch (e) {
-				showError('The turn could not be sent: ' + e.message);
-				btns.forEach(b => { b.disabled = false; });
+				fail('The turn could not be sent: ' + e.message + '. The picture was not turned.');
 				return;
 			}
-			if (await pollUp(30000)) {
+			if (!res.ok) {
+				fail('The camera did not take the turn (HTTP ' + res.status + '). ' +
+					await safeText(res));
+				return;
+			}
+			// Only now is the leaf going away. Discarded live edits are put back
+			// through the live queue and waited for, so the reload cannot cut
+			// the revert off behind an edit still on the wire.
+			if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+			if (state.fields.length && liveDrift()) await postKnobs(liveDocOf(null));
+			stopLivePreview();
+
+			// A camera whose save already rebuilt the pipeline is done. One that
+			// did not is sent the reload Apply sends, and the page waits to SEE
+			// the rebuild counter move: Apply answers before it signals, so the
+			// camera answering again proves nothing on its own. Where the counter
+			// cannot be read at all, coming back is the most there is to go on,
+			// as for Apply itself.
+			let done = await rebuiltSince(before);
+			if (!done) {
+				let applied = true;
+				try {
+					const r = await apiFetch('j/mj-apply.cgi', { credentials: 'same-origin' });
+					applied = r.ok;
+				} catch (e) { /* the rebuild may sever this request */ }
+				if (!applied) {
+					state.applyPending = true;
+					fail('The turn is saved, but the camera did not take the restart. ' +
+						'Press Apply now to bring it into force.');
+					return;
+				}
+				const up = await pollUp(30000);
+				done = before === null ? up : up && await rebuiltSince(before);
+			}
+			if (done) {
 				state.applyPending = false;
 				location.reload();
 				return;
 			}
-			note.textContent = 'The camera is taking longer than expected to come back; ' +
-				'reload this page in a moment.';
+			state.applyPending = true;
+			fail('The turn is saved, but the camera has not confirmed restarting the ' +
+				'video streams. Reload this page in a moment, or press Apply now.');
 		}
 	}
 
@@ -8783,7 +8814,8 @@
 	// description of the page it was on — and a description naming six settings
 	// the page did not have (#316).
 	function liftedNote(sec) {
-		const mine = liveFields().filter(f => f.section === sec);
+		// Press-applied keys are not dragged: the Turn row says what it does.
+		const mine = liveFields().filter(f => f.section === sec && !treeOf().pressApplied(f.dot));
 		if (!mine.length) return null;
 		const names = mine.map(f => liveLabel(f.key, f.sub).toLowerCase());
 		const list = names.length > 1
