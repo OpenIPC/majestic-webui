@@ -994,6 +994,65 @@ const tick = () => new Promise((r) => setTimeout(r, 1700));
 			env.el('mj-served-why').textContent);
 	}
 
+	// Closing the disclosure is remembered by this browser, so the next page
+	// load does not raise it again (#736). The worse news — that software
+	// decoding cannot keep up — was never dismissed and still shows.
+	group('a dismissed software-decode disclosure stays dismissed after a reload');
+	{
+		const store = {};
+		const soft = async (stats) => {
+			const env = load('mse', { 'jpeg.enabled': true }, 0, true,
+				undefined, undefined, store);
+			await tick();
+			env.made[0].say('mjpeg', 'undecodable h265');
+			const wasm = env.made[1];
+			wasm.say('playing');
+			wasm.opts.onStats(Object.assign({ transport: 'wasm', width: 1920,
+				height: 1080, framesDecoded: 100, framesDropped: 0, queuedMs: 50 },
+			stats || {}));
+			return env;
+		};
+		const shown = (env) => env.el('mj-served').hidden === false &&
+			/decoding it in software/.test(env.el('mj-served-why').textContent);
+
+		const first = await soft();
+		check('the first load says it', shown(first));
+		first.el('mj-served').fire('click');
+		check('a click closes it', first.el('mj-served').hidden === true);
+
+		const second = await soft();
+		check('the next load does not say it again', !shown(second),
+			second.el('mj-served-why').textContent);
+
+		const behind = await soft({ queuedMs: 900 });
+		check('but "cannot keep up" was never dismissed, and shows',
+			shown(behind) &&
+				/cannot keep up/.test(behind.el('mj-served-why').textContent),
+			behind.el('mj-served-why').textContent);
+		behind.el('mj-served').fire('click');
+
+		// "Cannot keep up" is about the stream being decoded at the time, so
+		// closing it lasts the page load. On a later load that keeps up, the
+		// plain fact stays closed; on one that falls behind, it is said again.
+		const keeps = await soft();
+		check('closing "cannot keep up" does not bring the plain note back',
+			!shown(keeps), keeps.el('mj-served-why').textContent);
+		const behindAgain = await soft({ queuedMs: 900 });
+		check('and falling behind on a later load is said again',
+			shown(behindAgain) &&
+				/cannot keep up/.test(behindAgain.el('mj-served-why').textContent),
+			behindAgain.el('mj-served-why').textContent);
+
+		// A browser with nothing stored is still told.
+		const fresh = load('mse', { 'jpeg.enabled': true }, 0, true);
+		await tick();
+		fresh.made[0].say('mjpeg', 'undecodable h265');
+		fresh.made[1].say('playing');
+		fresh.made[1].opts.onStats({ transport: 'wasm', width: 1920, height: 1080,
+			framesDecoded: 100, framesDropped: 0, queuedMs: 50 });
+		check('and a browser that never closed it is still told', shown(fresh));
+	}
+
 	// A channel change can change the codec, and the failure that put us on the
 	// software rung was about the channel we just left. An H.264 substream
 	// plays natively, so falling to MJPEG there would hand the viewer the worst

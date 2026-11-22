@@ -914,6 +914,33 @@
 	// camera we are, never achieved-versus-configured fps: a VBR encoder on a
 	// quiet scene legitimately sends 12 frames where 30 were configured, and
 	// grading on that would accuse the client of a fault the camera committed.
+	//
+	// Closing the plain note is REMEMBERED (#736). It states a fact about this
+	// browser — it cannot decode H.265 — that is just as true on the next page
+	// load, so a note that comes back on every reload after being closed is
+	// not dismissible, it is a nag with a button on it: the same finding as
+	// the Dashboard's legacy notice (#325). Kept in localStorage, beside the
+	// transport and channel choices, which makes it per browser AND per
+	// camera: storage belongs to the camera's address, so a browser opening a
+	// second camera is told once more there.
+	//
+	// Only the plain note. "Cannot keep up at this size" is about the stream
+	// being decoded right now — another channel, another resolution, a faster
+	// machine are all different answers — so closing it hides it for this
+	// page load and no longer. Closing it does say the viewer has read the
+	// plain fact it extends, so that much is remembered.
+	//
+	// The whole note is the close target, as the handler below says, and a
+	// tap on it is not passed on to the stage, so it is a tap aimed at the
+	// note rather than one meant for the control bar.
+	const SW_NOTE_KEY = 'mj-preview-sw-note-dismissed';
+	function swDismissed() {
+		try { return localStorage.getItem(SW_NOTE_KEY) !== null; }
+		catch (e) { return false; }
+	}
+	function rememberSwDismiss() {
+		try { localStorage.setItem(SW_NOTE_KEY, 'plain'); } catch (e) {}
+	}
 	let swNoteKey = '';
 	function softwareNote(s) {
 		// A PROPORTION, and a standing delay — not "has ever dropped a frame".
@@ -929,6 +956,7 @@
 		// actually changed — going from coping to not coping is news.
 		if (swNoteKey && key === 'plain') return;
 		swNoteKey = key;
+		if (key === 'plain' && swDismissed()) return;
 		showStageMsg('software',
 			behind
 				? 'This browser can’t decode H.265, so the page is decoding it in ' +
@@ -2252,6 +2280,7 @@
 		// Whatever is in the slot, not just a served message: the fallback
 		// borrows the same element and a dismissal that checked the owner
 		// would leave its sentence stuck on the picture for good.
+		if (msgOwner === 'software') rememberSwDismiss();
 		hideStageMsg();
 	});
 
