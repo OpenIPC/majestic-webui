@@ -176,26 +176,28 @@ silently:
 **Where a key is drawn is `mj-tree.js`'s decision, and `x-live` does not make
 it.** Three rules, pinned by `tests/tree.test.js`: the first group with any
 `x-live` key *owns* the synthetic **Picture** leaf, and those keys are
-**lifted** onto it beside the picture, with the few in `PRESS_APPLIED`
-(`image.rotate`); a section the leaf lifts more of than it leaves is
-**absorbed** and has no page of its own, its leftovers drawn under a heading on
-a **home** leaf (`LEFTOVER_HOME`: `image`'s on ISP / Exposure, which today
-receives nothing); a section it lifts less of, or whose leftovers have no home,
-keeps its page and says where the rest went.
+**lifted** onto it beside the picture; a section the leaf lifts more of than it
+leaves is **absorbed** and has no page of its own, its leftovers drawn under a
+heading on a **home** leaf (`LEFTOVER_HOME`: `image`'s on ISP / Exposure, which
+today receives nothing); a section it lifts less of, or whose leftovers have no
+home, keeps its page and says where the rest went.
 
 **The Live leaf draws only what a press applies.** Leftovers are by definition
-what the camera cannot apply live, so they are never drawn there. A control on
-this leaf that waits for Save and a pipeline reload reads as a control that
-does nothing: the Orientation pad's 90° cells staged a quarter turn the picture
-did not show until Save and "Apply now", beside a second Rotate select for the
-same key (#583). Moving it to ISP / Exposure put it where nobody looking for
-the picture's orientation found it (OpenIPC/majestic#383), so the quarter turn
-is back in the Orientation group as a **Turn row** whose press does the whole
-job: it saves `image.rotate` alone, sends the reload Apply sends if the save
-did not already rebuild the pipeline, and reloads the page when the camera
-answers, asking first if other edits are unsaved. The pad above it offers the
-four orientations mirror and flip reach. `tests/tree.test.js` asserts every row
-on the leaf is `x-live` or press-applied. `x-live` is
+what the camera cannot apply live, so a plain one is never drawn there. A
+control on this leaf that waits for Save and a pipeline reload reads as a
+control that does nothing: the Orientation pad's 90° cells staged a quarter turn
+the picture did not show until Save and "Apply now", beside a second Rotate
+select for the same key (#583). Moving it to ISP / Exposure put it where nobody
+looking for the picture's orientation found it (OpenIPC/majestic#383). So one
+kind of leftover of an absorbed section stays on the leaf: a **choice the schema
+names every value of** (`enum` + `x-enum-titles`), drawn as a row of cells whose
+press does the whole job — it saves that key alone, sends the reload Apply sends
+if the save did not already rebuild the pipeline, and reloads the page once the
+rebuild counter is seen to move, asking first if other edits are unsaved. It is
+chosen by that shape, never by the key's name; a choice in degrees (`x-unit:
+"°"`) joins the Orientation group as the **Turn row**, any other gets a group of
+its own. On today's daemon that is `image.rotate`. `tests/tree.test.js` asserts
+every row on the leaf is `x-live` or press-applied. `x-live` is
 the daemon's word for *what the camera can do*; where a control is drawn is this
 page's. Treating the flag as a placement rule silently dropped the Bitrate row
 from Main stream and Sub stream when majestic began flagging

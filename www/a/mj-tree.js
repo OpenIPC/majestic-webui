@@ -17,8 +17,7 @@
 //      schema actually carries. A section in no group is on no leaf (#176).
 //   2. The first group with any `x-live` key OWNS the Live leaf, and those
 //      keys — from every section of that group — are LIFTED onto it, beside
-//      the picture, with the few keys in PRESS_APPLIED, which the leaf gives
-//      a control that saves and applies on the press itself. That set is the only thing the flag decides. The flag
+//      the picture. That set is the only thing the flag decides. The flag
 //      itself is the daemon's word for "a save applies this without a
 //      rebuild", and majestic puts it on every key it can apply that way; a
 //      bitrate and the overlay's placement carry it and are drawn on their own
@@ -35,10 +34,13 @@
 //      (#316), its 90° cells staged a value the picture did not show until
 //      Save and "Apply now" (#583). Sending it to ISP / Exposure instead put
 //      it where nobody looking for the picture's orientation would find it
-//      (OpenIPC/majestic#383), so it is now lifted as a press-applied key:
-//      beside the pad, and a press turns the picture. `image` is absorbed
-//      with nothing left over; a key it gains that is neither live nor
-//      press-applied goes to ISP / Exposure. A section
+//      (OpenIPC/majestic#383). So one kind of leftover stays: a CHOICE, an
+//      enum the schema names every value of (x-enum-titles), is lifted as
+//      PRESS-APPLIED and drawn as a row of cells whose press saves it and
+//      has the camera rebuild, so it too changes the picture when pressed.
+//      Decided by the schema's shape, never by the key's name; on today's
+//      daemon that is `image`'s Rotate, and `image` is absorbed with nothing
+//      left over. Any other leftover goes home. A section
 //      with leftovers and no home is not absorbed: it keeps its page, which
 //      is the safe answer for a key a daemon adds tomorrow. A section the
 //      leaf lifts LESS of keeps its page too, and says where the rest went:
@@ -60,22 +62,13 @@
 		image: { home: 'isp', label: 'Picture' },
 	};
 
-	// Keys the camera cannot apply live but the Live leaf draws anyway (rule
-	// 2), because they belong beside the picture and a press there saves and
-	// applies them on the spot: the quarter turn rebuilds the stream, and the
-	// Turn row says so and does it. A key belongs here only if its control
-	// does that; one that would stage a value for Save does not (#583).
-	//
-	// The list says WHERE such a key goes, which is this page's call; WHAT
-	// control it gets is read from the schema. A press-applied key is lifted
-	// only when the schema describes it fully enough to draw that control --
-	// an enum, the unit its values are in, and a name for each -- and only
-	// beside a live key of its own section, so it never makes a section look
-	// live that is not. Otherwise it stays a leftover, drawn as an ordinary
-	// field where its section's other keys are.
-	const PRESS_APPLIED = new Set(['image.rotate']);
-	const pressShape = (sub) => !!sub && Array.isArray(sub.enum) && sub.enum.length > 1 &&
-		!!sub['x-unit'] && !!sub['x-enum-titles'];
+	// A leftover the Live leaf can still draw (rule 3): a choice the schema
+	// names every value of, so the page can offer it as a row of labelled
+	// cells whose press saves and applies it. Anything less described stays
+	// an ordinary field where its section's other keys are.
+	const pressShape = (sub) => !!sub && !sub['x-live'] && Array.isArray(sub.enum) &&
+		sub.enum.length > 1 && !!sub['x-enum-titles'] &&
+		sub.enum.every(v => sub['x-enum-titles'][String(v)]);
 
 	// The types the form's renderField actually draws — an object falls
 	// through its dispatch and returns nothing, so it must not make a section
@@ -152,12 +145,8 @@
 			if (!group) return out;
 			for (const section of group.sections) {
 				const sp = (props[section] || {}).properties || {};
-				const anyLive = Object.keys(sp).some(k => sp[k] && sp[k]['x-live'] &&
-					!exclude.has(section + '.' + k));
 				for (const key of Object.keys(sp)) {
-					if (!sp[key]) continue;
-					if (!sp[key]['x-live'] && !(anyLive && PRESS_APPLIED.has(section + '.' + key) &&
-						pressShape(sp[key]))) continue;
+					if (!sp[key] || !sp[key]['x-live']) continue;
 					if (exclude.has(section + '.' + key)) continue;
 					out.push({ section, key, sub: sp[key], dot: section + '.' + key });
 				}
@@ -172,16 +161,49 @@
 		// Only the first such group owns the leaf: the tree keys on section id,
 		// and two "Picture" entries would collide.
 		function owner() {
-			// Owned by a live key only. A press-applied one rides along on a
-			// leaf that exists for live keys; on its own it would make a
-			// Picture leaf of a camera that has nothing to adjust live.
-			return memo('\0owner', () => groups().find(g =>
-				groupLiveFields(g).some(f => f.sub['x-live'])) || null);
+			return memo('\0owner', () => groups().find(g => groupLiveFields(g).length) || null);
 		}
 
+		// Rule 3's press-applied keys: the described choices among the
+		// leftovers of a section the live keys alone absorb -- MORE of it
+		// live than not. Asked of the live keys only, so a choice never tips
+		// a section into absorption, and never makes a section live that is
+		// not: thirty exposure controls with one live keep their enums.
+		function pressFields() {
+			return memo('\0press', () => {
+				const o = owner();
+				const out = [];
+				if (!o) return out;
+				for (const section of o.sections) {
+					const all = sectionFields(section, true);
+					const live = all.filter(f => f.sub['x-live']).length;
+					const rest = all.filter(f => !f.sub['x-live']);
+					if (!live || live <= rest.length) continue;
+					// Rule 3's own test: a section is absorbed only where what
+					// it leaves has somewhere to go. A majority-live section
+					// with no home keeps its page, and its choices with it --
+					// lifting them would empty a page that is still drawn.
+					if (rest.some(f => !pressShape(f.sub)) && !leftoverHome(section)) continue;
+					for (const f of rest) {
+						if (pressShape(f.sub))
+							out.push({ section, key: f.key, sub: f.sub, dot: f.dot });
+					}
+				}
+				return out;
+			});
+		}
+
+		// What the Live leaf mounts: the live keys and the press-applied ones,
+		// in the deck's order.
 		function liveFields() {
 			const o = owner();
-			return o ? groupLiveFields(o) : [];
+			if (!o) return [];
+			const out = groupLiveFields(o).concat(pressFields());
+			out.sort((a, b) => {
+				const ia = order.indexOf(a.key), ib = order.indexOf(b.key);
+				return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+			});
+			return out;
 		}
 
 		// The dots the Live leaf mounts — rule 2.
@@ -300,7 +322,7 @@
 			groups, groupLiveFields, owner, liveFields, lifted, sectionFields,
 			absorbed, absorbedSections, leafFields, leafIds, liveId,
 			leftoverHome, homedAt,
-			pressApplied: (dot) => PRESS_APPLIED.has(dot),
+			pressApplied: (dot) => pressFields().some(f => f.dot === dot),
 			custom: () => custom,
 		};
 	}

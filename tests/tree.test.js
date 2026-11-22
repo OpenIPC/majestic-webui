@@ -144,6 +144,45 @@ group('a quarter turn rides along, it does not own');
 	everyKeyOnce('image not live', t, s);
 }
 
+// Rule 3 lifts a described choice by its shape alone: no key is named.
+group('a press-applied choice is chosen by the schema, not by name');
+{
+	const s = withTurn(SCHEMA);
+	s.properties.image.properties.lens = { type: 'string', enum: ['a', 'b'], title: 'Lens',
+		'x-enum-titles': { a: 'Wide', b: 'Narrow' } };
+	const t = build(s);
+	check('any described choice in an absorbed section is lifted',
+		t.pressApplied('image.lens') && leafOf(t, 'image.lens').join() === 'live');
+	const u = withTurn(SCHEMA);
+	u.properties.image.properties.rotate['x-enum-titles'] = { 0: 'Upright' };
+	const tu = build(u);
+	check('a choice not every value of which is named stays an ordinary field',
+		!tu.pressApplied('image.rotate') && leafOf(tu, 'image.rotate').join() === 'isp');
+	const v = withTurn(SCHEMA);
+	const ispKey = Object.keys(v.properties.isp.properties).find(k =>
+		Array.isArray(v.properties.isp.properties[k].enum));
+	v.properties.isp.properties[ispKey]['x-enum-titles'] = Object.fromEntries(
+		v.properties.isp.properties[ispKey].enum.map(x => [String(x), 'Named ' + x]));
+	v.properties.isp.properties.someLive = { type: 'boolean', title: 'Some', 'x-live': true };
+	const tv = build(v);
+	check('a described choice in a section that is not absorbed keeps its page',
+		!tv.pressApplied('isp.' + ispKey) && leafOf(tv, 'isp.' + ispKey).join() === 'isp');
+	// Majority-live and still not absorbed, because its leftovers have no
+	// home: today's daemon marks 28 of 53 isp keys live, and its titled HDR
+	// and cinema choices stay on ISP / Exposure.
+	const w = withTurn(SCHEMA);
+	const ip = w.properties.isp.properties;
+	const choice = Object.keys(ip).find(k => Array.isArray(ip[k].enum));
+	ip[choice]['x-enum-titles'] = Object.fromEntries(ip[choice].enum.map(x => [String(x), 'Named ' + x]));
+	const keys = Object.keys(ip).filter(k => k !== choice && ip[k].type !== 'object');
+	keys.slice(0, Math.ceil(keys.length / 2) + 2).forEach(k => { ip[k]['x-live'] = true; });
+	const tw = build(w);
+	check('a majority-live section with no home keeps its choices',
+		!tw.pressApplied('isp.' + choice) && leafOf(tw, 'isp.' + choice).join() === 'isp');
+	check('and the quarter turn is still lifted', tw.pressApplied('image.rotate'));
+	everyKeyOnce('described choice', t, s);
+}
+
 group('autofocus can move to a synthetic Motors category');
 {
 	const t = TREE.build(SCHEMA, {
