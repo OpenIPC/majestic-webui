@@ -3315,7 +3315,11 @@
 		// before Save.
 		{
 			let cap = p.querySelector(':scope > .mj-ceiling-note');
-			const show = !other && EXP.pinnedAtCeiling(control.value, v, m);
+			// The mode itself, not the row's name: the sensor digital gain has
+			// no other name in manual, and a row that cannot say which mode it
+			// is in must not talk about automatic exposure.
+			const show = siblingValue('aeMode') === 'auto' &&
+				EXP.pinnedAtCeiling(control.value, v, m);
 			if (show && !cap) {
 				cap = el('div', 'hint mj-ceiling-note');
 				cap.textContent = 'Automatic exposure has reached this limit, so ' +
@@ -3672,7 +3676,7 @@
 				if (modeF.getValue() === 'auto') {
 					for (const dot of ['isp.exposure', 'isp.aGain', 'isp.ispGain']) {
 						const f = state.fields.find(x => x.dot === dot);
-						if (!f || EXP.isAuto(f.getValue())) continue;
+						if (!f || String(f.getValue()) === '') continue;
 						setLive(f, '');
 					}
 					return;

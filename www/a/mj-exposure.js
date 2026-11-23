@@ -167,15 +167,24 @@
 	// metering knobs) is never a ceiling. A reading may sit a little over the
 	// figure it was capped at -- the ISP gain read 1184 against 1126 on that
 	// camera -- so the test is "reached", not "equal".
+	//
+	// And the box has to be the limit the camera reports. An edit not yet in
+	// force, or a value past what the sensor can do (which the camera cuts to
+	// its own maximum), is not why the picture is dark, and emptying it would
+	// change nothing. Agreement allows for the row's own rounding: a gain is
+	// printed to a tenth, so 1.1 in the box is 1126 reported.
 	const PINNED_SLACK = 0.98;
 	function pinnedAtCeiling(value, v, metric) {
 		if (isAuto(value)) return false;
+		const set = Number(value);
+		if (!isNum(set)) return false;
 		if (!v || !isNum(v.isp_exposureismax) || !(v.isp_exposureismax > 0)) return false;
 		const m = metric || {};
 		if (!m.now || !m.inForce) return false;
 		const now = reading(v, m.now, m.scale);
 		const max = reading(v, m.inForce, m.scale);
 		if (now === null || max === null || !(max > 0)) return false;
+		if (Math.abs(set - max) > Math.max(max * 0.02, 0.05)) return false;
 		return now >= max * PINNED_SLACK;
 	}
 

@@ -180,6 +180,11 @@ group('a ceiling the picture is pressed against (#742)');
 	})());
 	check('at maximum but short of this ceiling, another limit is the reason',
 		!EXP.pinnedAtCeiling('8', Object.assign({}, DUSK, { isp_again: 600 }), M('aGain')));
+	check('an edit not yet in force is not the limit reported',
+		!EXP.pinnedAtCeiling('8', DUSK, M('exposure')));
+	check('a value past the sensor\'s own maximum is not the reason',
+		!EXP.pinnedAtCeiling('64', Object.assign({}, DUSK, { isp_again: 32381, isp_again_max: 32381 }), M('aGain')));
+	check('text that is not a number says nothing', !EXP.pinnedAtCeiling('abc', DUSK, M('exposure')));
 	check('a metering knob is never a ceiling',
 		!EXP.pinnedAtCeiling(64, Object.assign({ isp_ae_speed: 64 }, DUSK), M('aeSpeed')));
 }
