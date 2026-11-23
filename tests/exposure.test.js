@@ -148,4 +148,45 @@ check('a decimal with no step is a box', sl({ type: 'number', minimum: 0, maximu
 check('a whole number with no maximum is a box', sl({ type: 'integer', minimum: 0 }) === null);
 check('text is never a slider', sl({ type: 'string', maximum: 5 }) === null);
 
+group('a ceiling the picture is pressed against (#742)');
+{
+	// The reporter's camera at dusk: automatic, with 7.04 ms, 1x and 1.1x
+	// left in the boxes, and every reading up against them.
+	const DUSK = {
+		isp_exposureismax: 1,
+		isp_exptime: 7037, isp_exptime_max: 7040,
+		isp_again: 1024, isp_again_max: 1024,
+		isp_ispdgain: 1184, isp_ispdgain_max: 1126,
+	};
+	const M = (k) => ISP[k]['x-metric'];
+	check('a short exposure ceiling at maximum is pinned',
+		EXP.pinnedAtCeiling('7.04', DUSK, M('exposure')));
+	check('a 1x analog gain ceiling at maximum is pinned',
+		EXP.pinnedAtCeiling(1, DUSK, M('aGain')));
+	check('a reading a little over its ceiling still counts as reached',
+		EXP.pinnedAtCeiling('1.1', DUSK, M('ispGain')));
+	check('an empty box is never a ceiling', !EXP.pinnedAtCeiling('', DUSK, M('exposure')));
+	check('a stored 0 is Auto, not a ceiling', !EXP.pinnedAtCeiling(0, DUSK, M('aGain')));
+	check('not at maximum is not pinned',
+		!EXP.pinnedAtCeiling('7.04', Object.assign({}, DUSK, { isp_exposureismax: 0 }), M('exposure')));
+	check('an absent maximum flag cannot say, so says nothing', (() => {
+		const v = Object.assign({}, DUSK); delete v.isp_exposureismax;
+		return !EXP.pinnedAtCeiling('7.04', v, M('exposure'));
+	})());
+	check('no sample says nothing', !EXP.pinnedAtCeiling('7.04', null, M('exposure')));
+	check('a missing gauge says nothing', (() => {
+		const v = Object.assign({}, DUSK); delete v.isp_exptime;
+		return !EXP.pinnedAtCeiling('7.04', v, M('exposure'));
+	})());
+	check('at maximum but short of this ceiling, another limit is the reason',
+		!EXP.pinnedAtCeiling('8', Object.assign({}, DUSK, { isp_again: 600 }), M('aGain')));
+	check('an edit not yet in force is not the limit reported',
+		!EXP.pinnedAtCeiling('8', DUSK, M('exposure')));
+	check('a value past the sensor\'s own maximum is not the reason',
+		!EXP.pinnedAtCeiling('64', Object.assign({}, DUSK, { isp_again: 32381, isp_again_max: 32381 }), M('aGain')));
+	check('text that is not a number says nothing', !EXP.pinnedAtCeiling('abc', DUSK, M('exposure')));
+	check('a metering knob is never a ceiling',
+		!EXP.pinnedAtCeiling(64, Object.assign({ isp_ae_speed: 64 }, DUSK), M('aeSpeed')));
+}
+
 done();

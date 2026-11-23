@@ -372,6 +372,17 @@ could tell.
   changed nothing visible, because auto-exposure moved the empty gain to
   cancel it. While the analog gain is empty in manual, the Exposure time row
   says so.
+- **Picking Automatic** empties the same three again, also as an ordinary edit.
+  In automatic the very same numbers are ceilings. A manual exposure taken in
+  daylight, often the one the step above wrote, went on holding a camera at
+  7 ms and 1x after dark (#742). Discard puts back a ceiling that was meant.
+  The sensor digital gain is left alone, because it is a ceiling in both modes.
+- **A ceiling the picture is pressed against** gets a line under its row while
+  Exposure mode is Automatic: the box holds a value that agrees with the
+  figure in force, `isp_exposureismax` is set, and the reading has reached that
+  figure (`EXP.pinnedAtCeiling`). Only when all three
+  are known; a missing gauge draws nothing. It reads the box, not the saved
+  config, so emptying the box removes the line before Save.
 
 ## The Live leaf's tone mode
 

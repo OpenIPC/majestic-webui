@@ -155,6 +155,39 @@
 		return { min: min, max: sub.maximum, step: step };
 	}
 
+	// Whether auto-exposure is pressed against a limit somebody set on this
+	// row: the box holds a value, the camera says its exposure has run out,
+	// and the reading has reached the figure in force. That is the one state
+	// in which the number in the box, not the light, is why the picture is
+	// dark -- a 7 ms ceiling left over from a sunny afternoon held a camera
+	// at 7 ms and 1x all evening (#742), with every row looking ordinary.
+	//
+	// Known only: no sample, no maximum flag or a missing gauge is "cannot
+	// say", and cannot-say draws nothing. A row with no `now` gauge (the
+	// metering knobs) is never a ceiling. A reading may sit a little over the
+	// figure it was capped at -- the ISP gain read 1184 against 1126 on that
+	// camera -- so the test is "reached", not "equal".
+	//
+	// And the box has to be the limit the camera reports. An edit not yet in
+	// force, or a value past what the sensor can do (which the camera cuts to
+	// its own maximum), is not why the picture is dark, and emptying it would
+	// change nothing. Agreement allows for the row's own rounding: a gain is
+	// printed to a tenth, so 1.1 in the box is 1126 reported.
+	const PINNED_SLACK = 0.98;
+	function pinnedAtCeiling(value, v, metric) {
+		if (isAuto(value)) return false;
+		const set = Number(value);
+		if (!isNum(set)) return false;
+		if (!v || !isNum(v.isp_exposureismax) || !(v.isp_exposureismax > 0)) return false;
+		const m = metric || {};
+		if (!m.now || !m.inForce) return false;
+		const now = reading(v, m.now, m.scale);
+		const max = reading(v, m.inForce, m.scale);
+		if (now === null || max === null || !(max > 0)) return false;
+		if (Math.abs(set - max) > Math.max(max * 0.02, 0.05)) return false;
+		return now >= max * PINNED_SLACK;
+	}
+
 	// The placeholder. The unit is not repeated: the row prints it beside the
 	// box, so "Auto · 32" sits next to "×".
 	function autoText(inForce, unit) {
@@ -179,7 +212,7 @@
 		return framesToSeconds(n, fps);
 	}
 
-	const api = { isAuto, delayText, matched, titleFor, reading, fmt, withUnit, rangeText, specialFor, specialsText, sliderOf, autoText, framesToSeconds };
+	const api = { isAuto, pinnedAtCeiling, delayText, matched, titleFor, reading, fmt, withUnit, rangeText, specialFor, specialsText, sliderOf, autoText, framesToSeconds };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticExposure = api;
 })();
