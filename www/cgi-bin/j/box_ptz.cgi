@@ -155,13 +155,14 @@ run_box_ptz() {
 	/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1
 	usleep 100000 2>/dev/null || true
 
-	if [ "$pms" -gt 0 ] && [ "$pdir" != "none" ]; then
-		ptz_drive_axis_ms "$pdir" "$pms" || return 1
-		usleep 120000 2>/dev/null || sleep 1
-	fi
-	if [ "$tms" -gt 0 ] && [ "$tdir" != "none" ]; then
-		ptz_drive_axis_ms "$tdir" "$tms" || return 1
-		usleep 120000 2>/dev/null || sleep 1
+	_dpan=0; _dtilt=0
+	[ "$pms" -gt 0 ] && [ "$pdir" = "right" ] && _dpan="$pms"
+	[ "$pms" -gt 0 ] && [ "$pdir" = "left" ] && _dpan=$((0 - pms))
+	[ "$tms" -gt 0 ] && [ "$tdir" = "up" ] && _dtilt="$tms"
+	[ "$tms" -gt 0 ] && [ "$tdir" = "down" ] && _dtilt=$((0 - tms))
+	if [ "$_dpan" -ne 0 ] || [ "$_dtilt" -ne 0 ]; then
+		ptz_drive_pan_tilt_ms "$_dpan" "$_dtilt" || return 1
+		usleep 80000 2>/dev/null || true
 	fi
 
 	# Closed-loop optical zoom toward target_mag (supports both tele & wide)
