@@ -176,3 +176,80 @@ ptz_drive_axis_ms() {
 	done
 	return 0
 }
+
+# Drive Pan and Tilt simultaneously via motors-cli diagonal action when both axes
+# need >=30 ms, then finish any remaining single-axis delta; falls back to
+# sequential ptz_drive_axis_ms if diagonal move is unsupported.
+ptz_drive_pan_tilt_ms() {
+	_dp_in="${1:-0}"
+	_dt_in="${2:-0}"
+	_role="${3:-}"
+	_dp=0; _dt=0; _rem_p=0; _rem_t=0
+	if [ "$_dp_in" -gt 0 ] 2>/dev/null; then _dp=1; _rem_p="$_dp_in"; _pdir="right"
+	elif [ "$_dp_in" -lt 0 ] 2>/dev/null; then _dp=-1; _rem_p=$((0 - _dp_in)); _pdir="left"; fi
+	if [ "$_dt_in" -gt 0 ] 2>/dev/null; then _dt=1; _rem_t="$_dt_in"; _tdir="up"
+	elif [ "$_dt_in" -lt 0 ] 2>/dev/null; then _dt=-1; _rem_t=$((0 - _dt_in)); _tdir="down"; fi
+
+	_diag_ok=1
+	while [ "$_rem_p" -ge 30 ] && [ "$_rem_t" -ge 30 ] && [ "$_diag_ok" -eq 1 ]; do
+		[ -f /tmp/ptz_job.cancel ] && return 1
+		_chunk="$_rem_p"
+		[ "$_rem_t" -lt "$_chunk" ] && _chunk="$_rem_t"
+		[ "$_chunk" -gt 3500 ] && _chunk=3500
+
+		_diag_dir="${_tdir}${_pdir}"
+		ptz_read_pos
+		_t0=$(ptz_now_ms)
+		printf "BASE_PAN=%s\nBASE_TILT=%s\nBASE_FOCUS=%s\nDP=%s\nDT=%s\nDF=0\nSTART_MS=%s\nEND_MS=%s\nMOVING=1\n" \
+			"$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$_dp" "$_dt" "$_t0" "$((_t0 + _chunk))" > /tmp/ptz_live.conf.tmp && \
+			mv /tmp/ptz_live.conf.tmp /tmp/ptz_live.conf
+
+		if [ -n "$_role" ]; then
+			_cli_cmd="/usr/bin/motors-cli --socket /run/motorsd.sock --role $_role $_diag_dir $_chunk"
+		else
+			_cli_cmd="/usr/bin/motors-cli --socket /run/motorsd.sock $_diag_dir $_chunk"
+		fi
+		_rc=0
+		$_cli_cmd >/dev/null 2>&1 || _rc=$?
+		rm -f /tmp/ptz_live.conf
+
+		_t1=$(ptz_now_ms)
+		_el=$((_t1 - _t0))
+		[ "$_el" -lt 0 ] && _el=0
+		[ "$_el" -gt "$_chunk" ] && _el="$_chunk"
+		# A fast (<30 ms) non-zero exit without cancel can be either an older
+		# motors-cli/driver without diagonal support or a `busy` lease rejection;
+		# falling through to ptz_drive_axis_ms handles older drivers cleanly and
+		# fails identically on `busy`.
+		if [ "$_rc" -ne 0 ] && [ "$_el" -lt 30 ] && [ ! -f /tmp/ptz_job.cancel ]; then
+			_diag_ok=0
+			break
+		fi
+		_short=0
+		[ "$_chunk" -ge 300 ] && [ "$_el" -lt $((_chunk - 180)) ] && _short=1
+		if [ "$_rc" -ne 0 ] || [ -f /tmp/ptz_job.cancel ] || [ "$_short" -eq 1 ]; then
+			if [ "$_el" -ge 20 ]; then
+				ptz_read_pos
+				ptz_write_pos $((PAN_MS + _dp * _el)) $((TILT_MS + _dt * _el)) "$FOCUS_MS" 1
+			fi
+			return 1
+		fi
+		ptz_read_pos
+		ptz_write_pos $((PAN_MS + _dp * _chunk)) $((TILT_MS + _dt * _chunk)) "$FOCUS_MS" 0
+		_rem_p=$((_rem_p - _chunk))
+		_rem_t=$((_rem_t - _chunk))
+		if [ "$_rem_p" -ge 30 ] || [ "$_rem_t" -ge 30 ]; then
+			usleep 40000 2>/dev/null || true
+		fi
+	done
+
+	if [ "$_rem_p" -ge 30 ]; then
+		ptz_drive_axis_ms "$_pdir" "$_rem_p" "$_role" || return 1
+		usleep 80000 2>/dev/null || true
+	fi
+	if [ "$_rem_t" -ge 30 ]; then
+		ptz_drive_axis_ms "$_tdir" "$_rem_t" "$_role" || return 1
+		usleep 80000 2>/dev/null || true
+	fi
+	return 0
+}

@@ -64,34 +64,9 @@ restore_zoom_and_af() {
 	/usr/bin/motors-cli --socket /run/motorsd.sock stop >/dev/null 2>&1
 	usleep 120000 2>/dev/null || true
 
-	# 1. Drive Pan delta if needed
-	if [ -n "$dpan" ] && [ "$dpan" -ne 0 ] 2>/dev/null; then
-		if [ "$dpan" -gt 0 ]; then
-			pdir="right"
-			pabs="$dpan"
-		else
-			pdir="left"
-			pabs=$((0 - dpan))
-		fi
-		if [ "$pabs" -ge 30 ]; then
-			ptz_drive_axis_ms "$pdir" "$pabs" automation || return 1
-			usleep 120000 2>/dev/null || true
-		fi
-	fi
-
-	# 2. Drive Tilt delta if needed
-	if [ -n "$dtilt" ] && [ "$dtilt" -ne 0 ] 2>/dev/null; then
-		if [ "$dtilt" -gt 0 ]; then
-			tdir="up"
-			tabs="$dtilt"
-		else
-			tdir="down"
-			tabs=$((0 - dtilt))
-		fi
-		if [ "$tabs" -ge 30 ]; then
-			ptz_drive_axis_ms "$tdir" "$tabs" automation || return 1
-			usleep 120000 2>/dev/null || true
-		fi
+	# 1-2. Drive Pan and Tilt deltas (diagonally when both >= 30ms)
+	if [ -n "$dpan" ] || [ -n "$dtilt" ]; then
+		ptz_drive_pan_tilt_ms "${dpan:-0}" "${dtilt:-0}" automation || return 1
 	fi
 
 	# 3. Closed-loop optical zoom restoration
