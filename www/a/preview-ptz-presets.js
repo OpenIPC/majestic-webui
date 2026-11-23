@@ -99,12 +99,11 @@
 		'        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:5px">' +
 		'          <select class="mj-pr-select" data-pr="refpreset" style="padding:3px 6px;font-size:.74rem;max-width:150px" title="Select a preset (or click its dot on the map)"></select>' +
 		'          <button type="button" class="mj-pr-btn primary" data-pr="goref" style="padding:4px 8px;font-size:.73rem" title="Move camera to the selected preset">Go to</button>' +
+		'          <button type="button" class="mj-pr-btn" data-pr="setref" style="padding:4px 8px;font-size:.73rem;border-color:#ffc107;color:#ffe69c" title="Update the selected preset with the camera\'s current Pan/Tilt, Focus, and Zoom">Set Here</button>' +
 		'          <button type="button" class="mj-pr-btn active" data-pr="makerefhome" style="padding:4px 8px;font-size:.73rem" title="Set the selected preset as your ★ Home preset">★ Make Home</button>' +
 		'          <button type="button" class="mj-pr-btn" data-pr="syncref" style="padding:4px 8px;font-size:.73rem;border-color:#0dcaf0;color:#9eeaf9" title="If camera drifted: point camera at the selected preset landmark, then click this to align all presets to it">Calibrate to Preset</button>' +
 		'        </div>' +
 		'        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding-top:2px;border-top:1px solid rgba(255,255,255,.08)">' +
-		'          <input type="text" class="mj-pr-input" data-pr="homename" maxlength="28" placeholder="Home title" style="width:96px;padding:3px 7px;font-size:.73rem">' +
-		'          <button type="button" class="mj-pr-btn" data-pr="sethome" style="padding:3px 8px;font-size:.72rem" title="Save current camera view as the ★ Home preset">Save View as Home</button>' +
 		'          <button type="button" class="mj-pr-btn" data-pr="capbg" style="padding:3px 8px;font-size:.72rem" title="Use a snapshot of the current camera view as the map background. It is not aligned to the dots: drag the map to line them up">📷 Snap BG</button>' +
 		'          <button type="button" class="mj-pr-btn" data-pr="zero" style="padding:3px 7px;font-size:.71rem;opacity:.8" title="Set current view as (0,0) and shift all saved presets by the same offset">Zero (0,0)</button>' +
 		'        </div>' +
@@ -179,7 +178,7 @@
 		'  <select class="mj-pr-select" data-pm="ref" style="padding:3px 6px;font-size:.73rem;max-width:145px"></select>' +
 		'  <span style="display:inline-flex;gap:4px;flex-wrap:wrap">' +
 		'    <button type="button" class="mj-pr-btn primary" data-pm="go" style="padding:3px 8px;font-size:.72rem">Go to</button>' +
-		'    <button type="button" class="mj-pr-btn active" data-pm="home" style="padding:3px 8px;font-size:.72rem" title="Set selected preset as ★ Home">★ Make Home</button>' +
+		'    <button type="button" class="mj-pr-btn" data-pm="set" style="padding:3px 8px;font-size:.72rem;border-color:#ffc107;color:#ffe69c" title="Update the selected preset with the camera\'s current Pan/Tilt, Focus, and Zoom">Set Here</button>' +
 		'    <button type="button" class="mj-pr-btn" data-pm="sync" style="padding:3px 8px;font-size:.72rem;border-color:#0dcaf0;color:#9eeaf9" title="If camera drifted: point camera at the selected preset landmark, then click this to align all presets to it">Calibrate Here</button>' +
 		'  </span>' +
 		'</div>';
@@ -281,13 +280,29 @@
 		return presets.find(p => Number(p.id) === Number(bootHomeId)) || null;
 	}
 
-	// A tap on a dot only selects it. The dots are a few pixels across and
-	// sit inside a surface that is dragged, so a stray tap must not send the
-	// head on a move -- or, since a new move replaces a running one, cut a
-	// move short. Moving is the Go to button's job.
+	// A tap on a dot only selects it (for Go to, Set Here, or Calibrate).
+	// Double-tapping/double-clicking the same dot within 450 ms moves there
+	// (tracked by timestamp because renderList() rebuilds the dot DOM).
+	let lastDotTapId = null;
+	let lastDotTapMs = 0;
 	function selectOnMap(p) {
+		const now = Date.now();
+		if (lastDotTapId === Number(p.id) && (now - lastDotTapMs) < 450) {
+			lastDotTapId = null;
+			lastDotTapMs = 0;
+			goOnMap(p);
+			return;
+		}
+		lastDotTapId = Number(p.id);
+		lastDotTapMs = now;
 		selectedMapPresetId = Number(p.id);
-		renderList('Selected ' + p.name + ' (#' + p.id + '). Go to moves the camera there.');
+		renderList('Selected ' + p.name + ' (#' + p.id + '). Click Go to or double-click dot to move.');
+	}
+	function goOnMap(p) {
+		selectedMapPresetId = Number(p.id);
+		stopTour();
+		callPreset(p, null, true);
+		renderList('Moving to ' + p.name + ' (#' + p.id + ')...');
 	}
 
 	function populateMapCanvas(targetEl, isLarge, homePreset, magStr) {
@@ -352,8 +367,9 @@
 				color: isSel ? '#51cf66' : '#f1f3f5',
 				size: isSel ? (isLarge ? 11 : 9) : (isLarge ? 9 : 7),
 				label: isLarge ? ('#' + p.id + ' ' + p.name) : (isSel ? ('#' + p.id + ' ' + p.name) : ('#' + p.id)),
-				title: 'Click to select: ' + p.name + ' (#' + p.id + ' · ' + fmtAxis('Pan', p.pan_ms) + ' · ' + fmtAxis('Tilt', p.tilt_ms) + ')',
+				title: 'Click to select, double-click to move: ' + p.name + ' (#' + p.id + ' · ' + fmtAxis('Pan', p.pan_ms) + ' · ' + fmtAxis('Tilt', p.tilt_ms) + ')',
 				onClick: () => selectOnMap(p),
+				onDblClick: () => goOnMap(p),
 				zIdx: isSel ? 14 : 11,
 				ring: isSel ? 'rgba(81,207,102,.45)' : 'rgba(0,0,0,.5)',
 				prio: isSel ? 3 : 1
@@ -370,8 +386,9 @@
 				color: '#ffd43b',
 				size: isLarge ? 12 : 9,
 				label: isLarge ? ('★ ' + homePreset.name) : '★',
-				title: 'Home: ' + homePreset.name + ' (#' + homePreset.id + ') — click to select',
+				title: 'Home: ' + homePreset.name + ' (#' + homePreset.id + ') — click to select, double-click to move',
 				onClick: () => selectOnMap(homePreset),
+				onDblClick: () => goOnMap(homePreset),
 				zIdx: 15,
 				ring: isSel ? 'rgba(255,212,59,.5)' : 'rgba(0,0,0,.55)',
 				prio: 4
@@ -461,6 +478,7 @@
 			dot.style.cssText = 'position:absolute;left:' + m.xPct.toFixed(1) + '%;top:' + m.yPct.toFixed(1) + '%;transform:translate(-50%,-50%);width:' + m.size + 'px;height:' + m.size + 'px;border-radius:50%;background:' + m.color + ';border:1.5px solid #0b0e14;box-shadow:0 0 0 2.5px ' + m.ring + ';z-index:' + m.zIdx + (m.onClick ? ';cursor:pointer' : ';pointer-events:none');
 			if (m.title) dot.title = m.title;
 			if (m.onClick) dot.addEventListener('click', m.onClick);
+			if (m.onDblClick) dot.addEventListener('dblclick', m.onDblClick);
 			if (m.isLive) targetEl._liveDot = dot;
 			targetEl.appendChild(dot);
 
@@ -483,6 +501,7 @@
 				if (m.title) lbl.title = m.title;
 				lbl.style.cssText = 'position:absolute;left:' + m.box.x1.toFixed(1) + 'px;top:' + m.box.y1.toFixed(1) + 'px;height:' + m.box.lh + 'px;line-height:' + (m.box.lh - 2) + 'px;font-size:' + (isLarge ? '10px' : '8.5px') + ';font-weight:600;color:' + m.color + ';background:rgba(10,13,18,.84);border:1px solid rgba(255,255,255,.16);padding:0 ' + (isLarge ? '4px' : '3px') + ';border-radius:4px;white-space:nowrap;z-index:' + (m.zIdx - 5) + (m.onClick ? ';cursor:pointer' : '');
 				if (m.onClick) lbl.addEventListener('click', m.onClick);
+				if (m.onDblClick) lbl.addEventListener('dblclick', m.onDblClick);
 				targetEl.appendChild(lbl);
 			}
 		});
@@ -490,12 +509,15 @@
 
 	function renderHomeAndMap(magStr) {
 		const homeEl = modal.querySelector('[data-pr="homelabel"]');
-		const homeNameInp = modal.querySelector('[data-pr="homename"]');
 		const refSelect = modal.querySelector('[data-pr="refpreset"]');
 		const pmRefSelect = popMap.querySelector('[data-pm="ref"]');
 		const goRefBtn = modal.querySelector('[data-pr="goref"]');
+		const setRefBtn = modal.querySelector('[data-pr="setref"]');
 		const makeRefHomeBtn = modal.querySelector('[data-pr="makerefhome"]');
 		const syncRefBtn = modal.querySelector('[data-pr="syncref"]');
+		const pmGoBtn = popMap.querySelector('[data-pm="go"]');
+		const pmSetBtn = popMap.querySelector('[data-pm="set"]');
+		const pmSyncBtn = popMap.querySelector('[data-pm="sync"]');
 		const mapEl = modal.querySelector('[data-pr="map"]');
 		const pmCanvasEl = popMap.querySelector('[data-pm="canvas"]');
 		const homePreset = findHomePreset();
@@ -519,7 +541,7 @@
 			}
 		});
 		const hasRef = selectedMapPresetId !== null && presets.length > 0;
-		[goRefBtn, makeRefHomeBtn, syncRefBtn].forEach(b => {
+		[goRefBtn, setRefBtn, makeRefHomeBtn, syncRefBtn, pmGoBtn, pmSetBtn, pmSyncBtn].forEach(b => {
 			if (b) {
 				b.disabled = !hasRef;
 				b.style.opacity = hasRef ? '1' : '0.45';
@@ -533,11 +555,8 @@
 					homePreset.name.replace(/</g, '&lt;') + '</strong> <span style="opacity:.85">(#' + homePreset.id + ' · ' +
 					fmtAxis('Pan', homePreset.pan_ms) + ' · ' + fmtAxis('Tilt', homePreset.tilt_ms) + hMag + ')</span>';
 			} else {
-				homeEl.innerHTML = 'Home: <strong style="color:#ffd43b">Origin (0, 0)</strong> <span style="opacity:.8">(select a preset or click <em>Save View as Home</em>)</span>';
+				homeEl.innerHTML = 'Home: <strong style="color:#ffd43b">Origin (0, 0)</strong> <span style="opacity:.8">(select a preset and click <em>★ Make Home</em>)</span>';
 			}
-		}
-		if (homeNameInp && document.activeElement !== homeNameInp) {
-			homeNameInp.value = homePreset ? homePreset.name : 'Home';
 		}
 
 		populateMapCanvas(mapEl, false, homePreset, magStr);
@@ -587,6 +606,7 @@
 				'  <span class="mj-pr-name"></span>' +
 				'  <span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0">' +
 				'    <button type="button" class="mj-pr-btn mj-pr-icon-btn" data-ren="' + p.id + '" title="Rename preset"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5a1.4 1.4 0 0 1 2 2L5 13l-3 1 1-3 8.5-8.5z"/></svg></button>' +
+				'    <button type="button" class="mj-pr-btn mj-pr-icon-btn" data-dup="' + p.id + '" title="Duplicate preset"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M3.5 10.5H3a1.2 1.2 0 0 1-1.2-1.2V3A1.2 1.2 0 0 1 3 1.8h6.3A1.2 1.2 0 0 1 10.5 3v.5"/></svg></button>' +
 				'    <button type="button" class="mj-pr-btn mj-pr-icon-btn" data-mvup="' + p.id + '" title="Move up"' + (idx === 0 ? ' disabled' : '') + '><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5L6 4l3.5 3.5"/></svg></button>' +
 				'    <button type="button" class="mj-pr-btn mj-pr-icon-btn" data-mvdn="' + p.id + '" title="Move down"' + (idx === presets.length - 1 ? ' disabled' : '') + '><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5L6 8l3.5-3.5"/></svg></button>' +
 				'    <span class="mj-pr-meta" style="line-height:22px;margin-left:2px">#' + p.id + '</span>' +
@@ -632,6 +652,7 @@
 				inp.addEventListener('blur', () => finish(true));
 			};
 			card.querySelector('[data-ren]').addEventListener('click', startRename);
+			card.querySelector('[data-dup]').addEventListener('click', () => duplicatePreset(p));
 			card.querySelector('[data-mvup]').addEventListener('click', () => movePreset(p.id, 'up'));
 			card.querySelector('[data-mvdn]').addEventListener('click', () => movePreset(p.id, 'down'));
 
@@ -744,6 +765,35 @@
 		apiFetch('/cgi-bin/j/ptz_presets.cgi?' + q, { method: 'POST', credentials: 'same-origin' })
 			.then(r => r.ok ? r.json() : null)
 			.then(d => applyData(d, false))
+			.catch(() => {})
+			.finally(() => { busy = false; });
+	}
+
+	function duplicatePreset(p) {
+		if (busy || !p) return;
+		const used = new Set(presets.map(x => Number(x.id)));
+		let slot = 0;
+		for (let i = 1; i <= 32; i++) {
+			if (!used.has(i)) { slot = i; break; }
+		}
+		if (!slot) {
+			showMessage('All 32 preset slots are full.');
+			return;
+		}
+		const base = (p.name || ('Preset ' + p.id)).replace(/\s+Copy(\s+\d+)?$/, '').slice(0, 23).trim();
+		const copyName = (base || ('Preset ' + p.id)) + ' Copy';
+		busy = true;
+		let q = 'act=save&id=' + encodeURIComponent(slot) +
+			'&name=' + encodeURIComponent(copyName) +
+			'&zoom_restore=' + (p.zoom_restore ? '1' : '0') +
+			'&run_af=' + (p.run_af ? '1' : '0');
+		if (typeof p.pan_ms === 'number' && Number.isFinite(p.pan_ms)) q += '&pan_ms=' + encodeURIComponent(p.pan_ms);
+		if (typeof p.tilt_ms === 'number' && Number.isFinite(p.tilt_ms)) q += '&tilt_ms=' + encodeURIComponent(p.tilt_ms);
+		if (typeof p.focus_ms === 'number' && Number.isFinite(p.focus_ms)) q += '&focus_ms=' + encodeURIComponent(p.focus_ms);
+		if (typeof p.mag === 'number' && Number.isFinite(p.mag)) q += '&mag=' + encodeURIComponent(p.mag);
+		apiFetch('/cgi-bin/j/ptz_presets.cgi?' + q, { method: 'POST', credentials: 'same-origin' })
+			.then(r => r.ok ? r.json() : null)
+			.then(d => applyData(d, true))
 			.catch(() => {})
 			.finally(() => { busy = false; });
 	}
@@ -921,6 +971,8 @@
 	let posWatchRunning = false;
 	let liveMove = null;
 	let liveAnimTimer = 0;
+	let localMoveActive = false;
+	let suppressPosSyncUntil = 0;
 
 	function stopLiveAnim() {
 		if (liveAnimTimer) {
@@ -1016,17 +1068,28 @@
 			.then(d => {
 				if (!posWatchRunning || (popMap.hidden && modal.hidden)) return;
 				if (d && d.ok) {
-					const changed = d.pan_ms !== currentPan || d.tilt_ms !== currentTilt ||
+					const ignoreStale = localMoveActive || (!d.moving && Date.now() < suppressPosSyncUntil);
+					const changed = !ignoreStale && (d.pan_ms !== currentPan || d.tilt_ms !== currentTilt ||
 						d.focus_ms !== currentFocus ||
-						(typeof d.current_mag === 'number' && d.current_mag !== currentMag);
-					if (typeof d.pan_ms === 'number') currentPan = d.pan_ms;
-					if (typeof d.tilt_ms === 'number') currentTilt = d.tilt_ms;
-					if (typeof d.focus_ms === 'number') currentFocus = d.focus_ms;
-					if (typeof d.current_mag === 'number') currentMag = d.current_mag;
-					if (d.moving) {
-						startLiveAnim(d.dp || 0, d.dt || 0, 0, 1, 0);
-					} else if (liveMove && !liveMove.endMs) {
-						stopLiveAnim();
+						(typeof d.current_mag === 'number' && d.current_mag !== currentMag));
+					if (!ignoreStale) {
+						const sameLiveDir = d.moving && liveMove &&
+							liveMove.dp === (d.dp || 0) && liveMove.dt === (d.dt || 0);
+						if (!sameLiveDir || Math.abs((d.pan_ms || 0) - currentPan) > 400) {
+							if (typeof d.pan_ms === 'number') currentPan = d.pan_ms;
+						}
+						if (!sameLiveDir || Math.abs((d.tilt_ms || 0) - currentTilt) > 400) {
+							if (typeof d.tilt_ms === 'number') currentTilt = d.tilt_ms;
+						}
+						if (typeof d.focus_ms === 'number') currentFocus = d.focus_ms;
+						if (typeof d.current_mag === 'number') currentMag = d.current_mag;
+						if (d.moving) {
+							startLiveAnim(d.dp || 0, d.dt || 0, 0, 1, 0);
+						} else if (liveMove && !liveMove.endMs) {
+							stopLiveAnim();
+						}
+					} else if (typeof d.current_mag === 'number') {
+						currentMag = d.current_mag;
 					}
 					if (changed) {
 						if (d.moving) updateLiveMarker();
@@ -1056,13 +1119,17 @@
 	window.addEventListener('mj:ptz-moving', e => {
 		const det = (e && e.detail) || {};
 		if (det.stop) {
+			localMoveActive = false;
+			suppressPosSyncUntil = Date.now() + 450;
 			stopLiveAnim();
 			if (!popMap.hidden || !modal.hidden) {
 				clearTimeout(pmRefreshTimer);
-				pmRefreshTimer = setTimeout(() => loadPresets(false), 180);
+				pmRefreshTimer = setTimeout(() => loadPresets(false), 450);
 			}
 			return;
 		}
+		localMoveActive = det.durationMs ? false : true;
+		if (det.durationMs) suppressPosSyncUntil = Date.now() + det.durationMs + 450;
 		startLiveAnim(det.dp, det.dt, det.df, det.scale, det.durationMs);
 	});
 
@@ -1095,21 +1162,6 @@
 		renderList();
 		loadPresets(true).then(syncPosWatch);
 	});
-	function setHomeHere() {
-		if (busy) return;
-		const homeNameInp = modal.querySelector('[data-pr="homename"]');
-		const name = (homeNameInp ? homeNameInp.value.trim() : '') || 'Home';
-		busy = true;
-		apiFetch('/cgi-bin/j/ptz_presets.cgi?act=set_home_here&name=' + encodeURIComponent(name), {
-			method: 'POST',
-			credentials: 'same-origin'
-		})
-			.then(r => r.ok ? r.json() : null)
-			.then(d => applyData(d, true))
-			.catch(() => {})
-			.finally(() => { busy = false; });
-	}
-
 	function syncPosToPreset(id) {
 		if (busy || !id) return;
 		busy = true;
@@ -1242,18 +1294,15 @@
 			renderList('Moving to ' + p.name + ' (#' + p.id + ')...');
 		}
 	});
-	popMap.querySelector('[data-pm="home"]').addEventListener('click', () => {
-		if (selectedMapPresetId !== null) setBootHome(selectedMapPresetId);
+	popMap.querySelector('[data-pm="set"]').addEventListener('click', () => {
+		const p = presets.find(x => Number(x.id) === Number(selectedMapPresetId));
+		if (p) updatePresetHere(p);
 	});
 	popMap.querySelector('[data-pm="sync"]').addEventListener('click', () => {
 		if (selectedMapPresetId !== null) syncPosToPreset(selectedMapPresetId);
 	});
 	modal.querySelector('[data-pr="close"]').addEventListener('click', () => { modal.hidden = true; syncPosWatch(); });
 	modal.querySelector('[data-pr="save"]').addEventListener('click', savePreset);
-	modal.querySelector('[data-pr="sethome"]').addEventListener('click', setHomeHere);
-	modal.querySelector('[data-pr="homename"]').addEventListener('keydown', e => {
-		if (e.key === 'Enter') { e.preventDefault(); setHomeHere(); }
-	});
 	modal.querySelector('[data-pr="refpreset"]').addEventListener('change', e => {
 		selectedMapPresetId = Number(e.target.value) || null;
 		renderList();
@@ -1265,6 +1314,10 @@
 			callPreset(p, null, true);
 			renderList('Moving to ' + p.name + ' (#' + p.id + ')...');
 		}
+	});
+	modal.querySelector('[data-pr="setref"]').addEventListener('click', () => {
+		const p = presets.find(x => Number(x.id) === Number(selectedMapPresetId));
+		if (p) updatePresetHere(p);
 	});
 	modal.querySelector('[data-pr="makerefhome"]').addEventListener('click', () => {
 		if (selectedMapPresetId !== null) setBootHome(selectedMapPresetId);

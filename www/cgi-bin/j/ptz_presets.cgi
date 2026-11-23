@@ -252,6 +252,7 @@ ZOOM_RESTORE="1"
 IN_PAN=""
 IN_TILT=""
 IN_FOCUS=""
+IN_MAG=""
 PERSIST="0"
 
 for param in $(echo "$RAW_QS" | tr '&' ' '); do
@@ -265,6 +266,7 @@ for param in $(echo "$RAW_QS" | tr '&' ' '); do
 		pan_ms=*) IN_PAN=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		tilt_ms=*) IN_TILT=$(echo "${param#*=}" | tr -cd '0-9-') ;;
 		focus_ms=*) IN_FOCUS=$(echo "${param#*=}" | tr -cd '0-9-') ;;
+		mag=*) IN_MAG=$(echo "${param#*=}" | tr -cd '0-9.') ;;
 		persist=1) PERSIST="1" ;;
 	esac
 done
@@ -350,6 +352,9 @@ case "$ACT" in
 		[ -z "$ZOOM_RESTORE" ] && ZOOM_RESTORE="1"
 
 		CUR_MAG=$(get_current_mag)
+		if [ -n "$IN_MAG" ]; then
+			case "$IN_MAG" in ''|*[!0-9.]*) ;; *) CUR_MAG="$IN_MAG" ;; esac
+		fi
 		ptz_read_pos
 		SAVE_PAN="$PAN_MS"
 		SAVE_TILT="$TILT_MS"
