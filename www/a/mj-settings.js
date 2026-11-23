@@ -3309,6 +3309,22 @@
 		}
 		const m = sub['x-metric'] || {};
 		const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
+		// In automatic mode a value here is a ceiling, and nothing else on the
+		// row says when it is the reason the picture is dark (#742). Read from
+		// the box, not the saved config, so emptying it takes the note away
+		// before Save.
+		{
+			let cap = p.querySelector(':scope > .mj-ceiling-note');
+			const show = !other && EXP.pinnedAtCeiling(control.value, v, m);
+			if (show && !cap) {
+				cap = el('div', 'hint mj-ceiling-note');
+				cap.textContent = 'Automatic exposure has reached this limit, so ' +
+					'the picture cannot get any brighter. Empty the box to let the ' +
+					'camera use its full range.';
+				p.appendChild(cap);
+			}
+			if (cap) cap.hidden = !show;
+		}
 		const inForce = other ? null : EXP.reading(v, m.inForce, m.scale);
 		control.placeholder = EXP.autoText(inForce, unit);
 
@@ -3642,9 +3658,25 @@
 		// Save keeps it or Discard drops it. On the user's change only -- a
 		// refresh or a leaf drawn in manual leaves the boxes as saved. The
 		// sensor digital gain is not among them: manual pins it at 1x.
+		//
+		// Picking Automatic again empties the same three, for the reverse
+		// reason. In manual they are the exposure; in automatic the very same
+		// numbers are ceilings, so a manual setting taken in daylight -- often
+		// the one this handler wrote -- went on capping the camera at 7 ms
+		// and 1x after dark (#742). Also an ordinary edit, so Discard puts a
+		// ceiling that was meant back. The sensor digital gain is left: it is
+		// a ceiling in both modes, never a value.
 		const modeF = state.fields.find(f => f.dot === 'isp.aeMode');
 		if (modeF && EXP) {
 			modeF.control.addEventListener('change', () => {
+				if (modeF.getValue() === 'auto') {
+					for (const dot of ['isp.exposure', 'isp.aGain', 'isp.ispGain']) {
+						const f = state.fields.find(x => x.dot === dot);
+						if (!f || EXP.isAuto(f.getValue())) continue;
+						setLive(f, '');
+					}
+					return;
+				}
 				if (modeF.getValue() !== 'manual') return;
 				const v = expSample && expSample.ok && expSample.m ? expSample.m.v : null;
 				for (const dot of ['isp.exposure', 'isp.aGain', 'isp.ispGain']) {
