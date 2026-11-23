@@ -369,7 +369,6 @@
 				label: isLarge ? ('#' + p.id + ' ' + p.name) : (isSel ? ('#' + p.id + ' ' + p.name) : ('#' + p.id)),
 				title: 'Click to select, double-click to move: ' + p.name + ' (#' + p.id + ' · ' + fmtAxis('Pan', p.pan_ms) + ' · ' + fmtAxis('Tilt', p.tilt_ms) + ')',
 				onClick: () => selectOnMap(p),
-				onDblClick: () => goOnMap(p),
 				zIdx: isSel ? 14 : 11,
 				ring: isSel ? 'rgba(81,207,102,.45)' : 'rgba(0,0,0,.5)',
 				prio: isSel ? 3 : 1
@@ -388,7 +387,6 @@
 				label: isLarge ? ('★ ' + homePreset.name) : '★',
 				title: 'Home: ' + homePreset.name + ' (#' + homePreset.id + ') — click to select, double-click to move',
 				onClick: () => selectOnMap(homePreset),
-				onDblClick: () => goOnMap(homePreset),
 				zIdx: 15,
 				ring: isSel ? 'rgba(255,212,59,.5)' : 'rgba(0,0,0,.55)',
 				prio: 4
@@ -478,7 +476,6 @@
 			dot.style.cssText = 'position:absolute;left:' + m.xPct.toFixed(1) + '%;top:' + m.yPct.toFixed(1) + '%;transform:translate(-50%,-50%);width:' + m.size + 'px;height:' + m.size + 'px;border-radius:50%;background:' + m.color + ';border:1.5px solid #0b0e14;box-shadow:0 0 0 2.5px ' + m.ring + ';z-index:' + m.zIdx + (m.onClick ? ';cursor:pointer' : ';pointer-events:none');
 			if (m.title) dot.title = m.title;
 			if (m.onClick) dot.addEventListener('click', m.onClick);
-			if (m.onDblClick) dot.addEventListener('dblclick', m.onDblClick);
 			if (m.isLive) targetEl._liveDot = dot;
 			targetEl.appendChild(dot);
 
@@ -501,7 +498,6 @@
 				if (m.title) lbl.title = m.title;
 				lbl.style.cssText = 'position:absolute;left:' + m.box.x1.toFixed(1) + 'px;top:' + m.box.y1.toFixed(1) + 'px;height:' + m.box.lh + 'px;line-height:' + (m.box.lh - 2) + 'px;font-size:' + (isLarge ? '10px' : '8.5px') + ';font-weight:600;color:' + m.color + ';background:rgba(10,13,18,.84);border:1px solid rgba(255,255,255,.16);padding:0 ' + (isLarge ? '4px' : '3px') + ';border-radius:4px;white-space:nowrap;z-index:' + (m.zIdx - 5) + (m.onClick ? ';cursor:pointer' : '');
 				if (m.onClick) lbl.addEventListener('click', m.onClick);
-				if (m.onDblClick) lbl.addEventListener('dblclick', m.onDblClick);
 				targetEl.appendChild(lbl);
 			}
 		});

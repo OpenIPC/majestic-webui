@@ -353,7 +353,10 @@ case "$ACT" in
 
 		CUR_MAG=$(get_current_mag)
 		if [ -n "$IN_MAG" ]; then
-			case "$IN_MAG" in ''|*[!0-9.]*) ;; *) CUR_MAG="$IN_MAG" ;; esac
+			case "$IN_MAG" in
+				*[!0-9.]*|.*|*.|*.*.*) ;;
+				[0-9]*) CUR_MAG="$IN_MAG" ;;
+			esac
 		fi
 		ptz_read_pos
 		SAVE_PAN="$PAN_MS"
