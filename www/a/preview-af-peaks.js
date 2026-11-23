@@ -139,18 +139,23 @@
 		if (span) span.textContent = count > 1 ? 'AF Peaks (' + count + ')' : 'AF Peaks';
 	}
 
-	function explainCandidate(c, byteRank, fvRank, minBytes, maxBytes, count) {
-		const pct = minBytes > 0 ? (((c.bytes - minBytes) / minBytes) * 100) : 0;
-		if (byteRank === 1 && fvRank === 1) {
-			return 'Highest JPEG detail & highest ISP FV — strongest overall focus.';
-		} else if (byteRank === 1) {
-			return 'Highest real edge detail (+' + pct.toFixed(1) + '% vs softest). Higher-FV peaks are likely glare or noise.';
-		} else if (c.bytes === minBytes) {
-			return 'Softest frame (smallest JPEG size due to out-of-focus blur).';
-		} else if (fvRank <= 2 && byteRank > Math.ceil(count / 2)) {
-			return 'High ISP FV spike, but softer JPEG edges — typical of streetlight glare/halos.';
+	function explainCandidate(c, rank, fvRank, minMetric, hasSharp, count) {
+		const val = hasSharp ? (typeof c.sharp === 'number' && c.sharp > 0 ? c.sharp : 0) : (c.bytes || 0);
+		if (hasSharp && val <= 0) {
+			return 'No edge sharpness score recorded for this candidate.';
 		}
-		return 'Focus shoulder (#' + byteRank + ' in edge detail, +' + pct.toFixed(1) + '% vs softest).';
+		const pct = minMetric > 0 ? (((val - minMetric) / minMetric) * 100) : 0;
+		const metricName = hasSharp ? 'edge sharpness' : 'JPEG detail';
+		if (rank === 1 && fvRank === 1) {
+			return 'Highest ' + metricName + ' & highest ISP FV — strongest overall focus.';
+		} else if (rank === 1) {
+			return 'Highest ' + metricName + ' (+' + pct.toFixed(0) + '% vs softest). Higher-FV peaks are likely glare or noise.';
+		} else if (val === minMetric) {
+			return 'Softest frame (lowest ' + metricName + ' due to out-of-focus blur).';
+		} else if (fvRank <= 2 && rank > Math.ceil(count / 2)) {
+			return 'High ISP FV spike, but softer edges — typical of streetlight glare/halos or sensor noise.';
+		}
+		return 'Focus shoulder (#' + rank + ' in ' + metricName + ', +' + pct.toFixed(0) + '% vs softest).';
 	}
 
 	function renderZoom() {
@@ -173,6 +178,7 @@
 		}
 		zoomBox.querySelector('[data-afp="zcap"]').textContent =
 			(zoomIndex + 1) + '/' + zoomItems.length + ' · Peak #' + item.byteRank +
+			(item.sharp ? ' · Sharp ' + item.sharp : '') +
 			' · JPEG ' + item.kb + ' · FV ' + item.fv + ' · ' + item.offsetText;
 
 		const prevBtn = zoomBox.querySelector('[data-afp="zprev"]');
@@ -181,12 +187,13 @@
 		nextBtn.disabled = zoomItems.length <= 1;
 
 		const useBtn = zoomBox.querySelector('[data-afp="zuse"]');
-		const isWinner = lastData && lastData.winner === item.id;
+		const manualOff = lastData && typeof lastData.manual_offset === 'number' ? lastData.manual_offset : 0;
+		const isWinner = lastData && !positionShifted && manualOff === 0 && lastData.winner === item.id;
 		const isMoving = busySelectId === item.id;
 		const curPos = lastData && typeof lastData.current_pos === 'number' ? lastData.current_pos : null;
 		useBtn.className = 'mj-afp-btn ' + (isWinner ? 'active' : 'primary');
 		useBtn.textContent = isMoving ? 'Moving lens…' : (isWinner ? 'Focused Here' : 'Use This Focus');
-		useBtn.disabled = positionShifted || busySelectId != null || curPos == null;
+		useBtn.disabled = busySelectId != null || curPos == null;
 	}
 
 	function openZoom(idx) {
@@ -216,26 +223,27 @@
 			if (!zoomBox.hidden) zoomBox.hidden = true;
 			return;
 		}
-		if (positionShifted) {
+		const manualOff = lastData && typeof lastData.manual_offset === 'number' ? lastData.manual_offset : 0;
+		if (positionShifted || manualOff !== 0) {
 			warn.hidden = false;
-			warn.textContent = 'Lens moved manually after the last AF scan — re-run AF before jumping to a saved peak.';
+			warn.textContent = 'Focus adjusted manually' + (manualOff ? ' (' + (manualOff > 0 ? '+' : '') + manualOff + ' ms)' : '') + ' — click any peak below to return to it.';
 		} else {
 			warn.hidden = true;
 		}
 
 		const cands = lastData.candidates.slice();
 		const numVal = v => (typeof v === 'number' && !Number.isNaN(v) ? v : -1);
-		const byBytes = cands.slice().sort((a, b) => numVal(b.bytes) - numVal(a.bytes));
+		const hasSharp = cands.some(c => typeof c.sharp === 'number' && c.sharp > 0);
+		const byBytes = cands.slice().sort((a, b) => hasSharp ? (numVal(b.sharp) - numVal(a.sharp)) : (numVal(b.bytes) - numVal(a.bytes)));
 		const byFv = cands.slice().sort((a, b) => numVal(b.fv) - numVal(a.fv));
-		const validBytes = cands.map(c => c.bytes).filter(v => typeof v === 'number' && v > 0);
-		const minBytes = validBytes.length ? Math.min(...validBytes) : 0;
-		const maxBytes = validBytes.length ? Math.max(...validBytes) : 0;
+		const validMetric = cands.map(c => hasSharp ? c.sharp : c.bytes).filter(v => typeof v === 'number' && v > 0);
+		const minMetric = validMetric.length ? Math.min(...validMetric) : 0;
 		const curPos = typeof lastData.current_pos === 'number' ? lastData.current_pos : null;
 
 		byBytes.forEach((c, idx) => {
 			const byteRank = idx + 1;
 			const fvRank = byFv.findIndex(x => x.id === c.id) + 1;
-			const isWinner = lastData.winner === c.id;
+			const isWinner = !positionShifted && manualOff === 0 && lastData.winner === c.id;
 			const isMoving = busySelectId === c.id;
 			const kb = c.bytes ? (c.bytes / 1024).toFixed(1) + ' KB' : 'n/a';
 			const delta = curPos != null ? c.pos - curPos : null;
@@ -245,8 +253,8 @@
 			card.className = 'mj-afp-card' + (isWinner ? ' winner' : '');
 
 			const imgUrl = '/cgi-bin/j/af_candidates.cgi?img=' + c.id + '&v=' + cacheBust;
-			const desc = explainCandidate(c, byteRank, fvRank, minBytes, maxBytes, cands.length);
-			zoomItems.push({ id: c.id, byteRank: byteRank, kb: kb, fv: c.fv, imgUrl: imgUrl, offsetText: offsetText });
+			const desc = explainCandidate(c, byteRank, fvRank, minMetric, hasSharp, cands.length);
+			zoomItems.push({ id: c.id, byteRank: byteRank, sharp: c.sharp || 0, kb: kb, fv: c.fv, imgUrl: imgUrl, offsetText: offsetText });
 
 			card.innerHTML =
 				'<div class="mj-afp-imgwrap" title="Click to inspect full size">' +
@@ -255,6 +263,7 @@
 				'</div>' +
 				'<div class="mj-afp-body">' +
 				'  <div class="mj-afp-stats">' +
+				(c.sharp ? '    <span><strong>Sharp:</strong> ' + c.sharp + '</span>' : '') +
 				'    <span><strong>JPEG:</strong> ' + kb + '</span>' +
 				'    <span><strong>FV:</strong> ' + c.fv + '</span>' +
 				'    <span><strong>Pos:</strong> ' + offsetText + '</span>' +
@@ -272,7 +281,7 @@
 			});
 
 			const selBtn = card.querySelector('[data-select]');
-			selBtn.disabled = positionShifted || busySelectId != null || curPos == null;
+			selBtn.disabled = busySelectId != null || curPos == null;
 			selBtn.addEventListener('click', e => {
 				e.stopPropagation();
 				selectPeak(c.id);
@@ -285,7 +294,7 @@
 	}
 
 	function selectPeak(id) {
-		if (busySelectId != null || positionShifted) return;
+		if (busySelectId != null) return;
 		busySelectId = id;
 		renderModal();
 		apiFetch('/cgi-bin/j/af_candidates.cgi?select=' + encodeURIComponent(id), {
@@ -296,6 +305,7 @@
 			.then(r => r.ok ? r.json() : Promise.reject())
 			.then(res => {
 				if (!res || !res.ok) throw new Error('select failed');
+				positionShifted = false;
 				return fetchCandidates(false);
 			})
 			.catch(() => {})
@@ -373,12 +383,25 @@
 		}).catch(() => {});
 	}
 
+	let manualRefreshTimer = 0;
+	let manualFocusDown = false;
+	function onManualFocusRelease() {
+		if (!manualFocusDown) return;
+		manualFocusDown = false;
+		clearTimeout(manualRefreshTimer);
+		manualRefreshTimer = setTimeout(() => {
+			if (lastData) fetchCandidates(false);
+		}, 350);
+	}
 	fn.querySelectorAll('[data-act="near"],[data-act="far"]').forEach(b => {
 		b.addEventListener('pointerdown', () => {
+			manualFocusDown = true;
 			positionShifted = true;
 			if (!modal.hidden) renderModal();
 		});
 	});
+	window.addEventListener('pointerup', onManualFocusRelease);
+	window.addEventListener('pointercancel', onManualFocusRelease);
 	fn.querySelectorAll('[data-act="wide"],[data-act="tele"]').forEach(b => {
 		b.addEventListener('pointerdown', clearPeaks);
 	});

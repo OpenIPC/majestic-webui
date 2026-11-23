@@ -4,6 +4,19 @@ JSON_FILE="/tmp/af_peaks.json"
 
 . "$(dirname "$0")/../p/ptz_common.sh"
 
+# Ensure /tmp/af_peaks.json records the FOCUS_MS baseline so manual near/far
+# tweaks can be tracked accurately and reversed back to any saved peak.
+ensure_focus_origin() {
+    [ -f "$JSON_FILE" ] || return 0
+    if ! grep -q '"focus_origin_ms":' "$JSON_FILE" 2>/dev/null; then
+        ptz_read_pos
+        awk -v orig="$FOCUS_MS" '{
+            sub(/"current_pos":[-0-9]+/, "&,\"focus_origin_ms\":" orig)
+            print
+        }' "$JSON_FILE" > "${JSON_FILE}.tmp" && mv "${JSON_FILE}.tmp" "$JSON_FILE"
+    fi
+}
+
 # Clear cached candidate peaks: POST ?clear=1
 if echo "$QUERY_STRING" | grep -q 'clear=1'; then
     if [ "$REQUEST_METHOD" != "POST" ]; then
@@ -63,15 +76,17 @@ if [ -n "$SELECT_ID" ]; then
         exit 0
     fi
 
+    ensure_focus_origin
     INFO=$(awk -v id="$SELECT_ID" '{
         s=$0; sub(/.*"current_pos":/, "", s); cur=s+0
+        s=$0; sub(/.*"focus_origin_ms":/, "", s); forig=s+0
         s=$0; sub(/.*"last_dir":/, "", s); ldir=s+0
         s=$0; sub(/.*"recovery_ms":/, "", s); rec=s+0
         pat="\"id\":" id ",\"pos\":"
         idx=index($0, pat)
         if (idx>0) {
             t=substr($0, idx+length(pat))+0
-            printf "%d %d %d %d\n", cur, ldir, rec, t
+            printf "%d %d %d %d %d\n", cur, forig, ldir, rec, t
         }
     }' "$JSON_FILE")
 
@@ -85,13 +100,23 @@ if [ -n "$SELECT_ID" ]; then
 
     set -- $INFO
     CUR=$1
-    LDIR=$2
-    REC=$3
-    TARGET=$4
-    DELTA=$((TARGET - CUR))
+    FORIG=$2
+    LDIR=$3
+    REC=$4
+    TARGET=$5
+    ptz_read_pos
+    MANUAL_DELTA=$((FOCUS_MS - FORIG))
+    EFFECTIVE_CUR=$((CUR + MANUAL_DELTA))
+    if [ "$MANUAL_DELTA" -gt 0 ]; then
+        LDIR=1
+    elif [ "$MANUAL_DELTA" -lt 0 ]; then
+        LDIR=-1
+    fi
+    DELTA=$((TARGET - EFFECTIVE_CUR))
     NEW_DIR=$LDIR
     DRIVE_MS=0
     CMD=""
+    NEW_FOCUS_MS="$FOCUS_MS"
 
     if [ "$DELTA" -ne 0 ]; then
         if [ "$DELTA" -gt 0 ]; then
@@ -127,12 +152,14 @@ if [ -n "$SELECT_ID" ]; then
                 exit 0
             fi
             ptz_read_pos
-            ptz_write_pos "$PAN_MS" "$TILT_MS" "$((FOCUS_MS + DELTA))" 1
+            NEW_FOCUS_MS=$((FOCUS_MS + DELTA))
+            ptz_write_pos "$PAN_MS" "$TILT_MS" "$NEW_FOCUS_MS" 1
         fi
     fi
 
-    awk -v tgt="$TARGET" -v ldir="$NEW_DIR" -v win="$SELECT_ID" '{
+    awk -v tgt="$TARGET" -v forig="$NEW_FOCUS_MS" -v ldir="$NEW_DIR" -v win="$SELECT_ID" '{
         sub(/"current_pos":[-0-9]+/, "\"current_pos\":" tgt)
+        sub(/"focus_origin_ms":[-0-9]+/, "\"focus_origin_ms\":" forig)
         sub(/"last_dir":[-0-9]+/, "\"last_dir\":" ldir)
         sub(/"winner":[-0-9]+/, "\"winner\":" win)
         print
@@ -146,13 +173,24 @@ if [ -n "$SELECT_ID" ]; then
     exit 0
 fi
 
-# Default GET: return candidate manifest
+# Default GET: return candidate manifest with live manual-focus offset applied
 echo "HTTP/1.1 200 OK"
 echo "Content-Type: application/json"
 echo "Cache-Control: no-store"
 echo ""
 if [ -f "$JSON_FILE" ]; then
-    cat "$JSON_FILE"
+    ptz_read_pos
+    awk -v fms="$FOCUS_MS" '{
+        s=$0; sub(/.*"current_pos":/, "", s); cur=s+0
+        s=$0; sub(/.*"focus_origin_ms":/, "", s); forig=s+0
+        md = fms - forig
+        eff = cur + md
+        sub(/"current_pos":[-0-9]+/, "\"current_pos\":" eff)
+        if (md != 0) {
+            sub(/"winner":[-0-9]+/, "\"winner\":-1,\"manual_offset\":" md)
+        }
+        print
+    }' "$JSON_FILE"
 else
     echo '{"count":0,"candidates":[]}'
 fi

@@ -1282,6 +1282,7 @@
 					setTimeout(fetchZoom, 800);
 				}
 			} else if (axis === 'focus') {
+				flushTrackPos();
 				setTimeout(pollAf, 300);
 				setTimeout(pollAf, 800);
 			} else if (axis === 'iris') {
