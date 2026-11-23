@@ -217,6 +217,10 @@ ptz_drive_pan_tilt_ms() {
 		_el=$((_t1 - _t0))
 		[ "$_el" -lt 0 ] && _el=0
 		[ "$_el" -gt "$_chunk" ] && _el="$_chunk"
+		# A fast (<30 ms) non-zero exit without cancel can be either an older
+		# motors-cli/driver without diagonal support or a `busy` lease rejection;
+		# falling through to ptz_drive_axis_ms handles older drivers cleanly and
+		# fails identically on `busy`.
 		if [ "$_rc" -ne 0 ] && [ "$_el" -lt 30 ] && [ ! -f /tmp/ptz_job.cancel ]; then
 			_diag_ok=0
 			break
