@@ -76,8 +76,41 @@ page_menu() {
 		printf '%s' "Camera" ;;
 	network|sms|time|access|update|backup|logs|console|files|sdcard)
 		printf '%s' "System" ;;
-	openwall|telegram|ntfy|max|vtun|wireguard|proxy)
+	openwall|telegram|ntfy|max|vtun|wireguard|proxy|plugin-*)
 		printf '%s' "Services" ;;
 	esac
+}
+
+# plugin_pages   the installed plugin pages, one name per line, in menu order
+#
+# A plugin is an application that is not part of this WebUI and ships its own
+# settings page under a reserved name, plugin-NAME. The file being there is the
+# whole registration: nothing here lists plugins, so a package adds or removes
+# its menu entry with the page itself. The shell sorts the glob.
+#
+# The name ends up in a URL and in markup, hence the strict alphabet.
+plugin_pages() {
+	local f n
+	for f in /var/www/cgi-bin/plugin-*.cgi; do
+		[ -f "$f" ] || continue
+		n=${f##*/}
+		n=${n%.cgi}
+		case "${n#plugin-}" in
+		""|*[!a-z0-9-]*) continue ;;
+		esac
+		printf '%s\n' "$n"
+	done
+}
+
+# plugin_label <pagename>   the page's own page_title="...", or its bare name
+#
+# Read out of the file, never run: the bar is drawn on every page, and a broken
+# plugin must not take them all down. Only a literal, double-quoted assignment
+# counts, so nothing in it is ever expanded; the caller escapes it.
+plugin_label() {
+	local t
+	t=$(sed -n '/^[[:space:]]*page_title="[^"$`\\]*"[[:space:]]*$/{s/^[^"]*"//;s/".*$//;p;q;}' \
+		"/var/www/cgi-bin/${1}.cgi" 2>/dev/null)
+	printf '%s' "${t:-${1#plugin-}}"
 }
 %>

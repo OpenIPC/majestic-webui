@@ -450,7 +450,7 @@ build_plan() {
 			done
 	done
 
-	# /var/www belongs to the WebUI alone, so anything left in the overlay
+	# /var/www belongs to the WebUI alone but for plugin pages, so anything left in the overlay
 	# that this release does not have is stale and goes. This is also what
 	# clears the whiteouts an older updatewebui left behind, which is why the
 	# search is for anything that is not a directory rather than for files.
@@ -460,6 +460,11 @@ build_plan() {
 		find "$upper/var/www" ! -type d | while read -r u; do
 			d=${u#$upper}
 			grep -qxF "$d" "$tmp/keep" && continue
+			# A plugin page belongs to the application that installed it,
+			# not to any WebUI release. Files only: a whiteout still goes.
+			case $d in
+			/var/www/cgi-bin/plugin-*.cgi) [ -f "$u" ] && continue ;;
+			esac
 			echo "$u" >>"$tmp/prune"
 			echo "$d" >>"$tmp/atrisk"
 			# A stale file that is not simply the firmware's own content

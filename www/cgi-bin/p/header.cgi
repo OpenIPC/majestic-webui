@@ -204,6 +204,15 @@ Pragma: no-cache
 							<li><a class="dropdown-item" href="vtun.cgi"><% page_label vtun %></a></li>
 							<li><a class="dropdown-item" href="wireguard.cgi"><% page_label wireguard %></a></li>
 							<li><a class="dropdown-item" href="proxy.cgi"><% page_label proxy %></a></li>
+							<%# Applications that bring their own settings page: one entry per
+							    plugin page found on this camera, and no heading without any. %>
+							<% plugins=$(plugin_pages)
+							   if [ -n "$plugins" ]; then %>
+								<li><h6 class="dropdown-header">Plugins</h6></li>
+								<% for plugin in $plugins; do %>
+									<li><a class="dropdown-item" href="<%= $plugin %>.cgi"><% esc "$(plugin_label "$plugin")" %></a></li>
+								<% done %>
+							<% fi %>
 						</ul>
 					</li>
 					<!-- Other OpenIPC cameras on this link. Hidden until
