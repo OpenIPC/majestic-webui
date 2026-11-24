@@ -181,13 +181,15 @@ echo ""
 if [ -f "$JSON_FILE" ]; then
     ptz_read_pos
     awk -v fms="$FOCUS_MS" '{
-        s=$0; sub(/.*"current_pos":/, "", s); cur=s+0
-        s=$0; sub(/.*"focus_origin_ms":/, "", s); forig=s+0
-        md = fms - forig
-        eff = cur + md
-        sub(/"current_pos":[-0-9]+/, "\"current_pos\":" eff)
-        if (md != 0) {
-            sub(/"winner":[-0-9]+/, "\"winner\":-1,\"manual_offset\":" md)
+        if (index($0, "\"focus_origin_ms\":") > 0) {
+            s=$0; sub(/.*"current_pos":/, "", s); cur=s+0
+            s=$0; sub(/.*"focus_origin_ms":/, "", s); forig=s+0
+            md = fms - forig
+            eff = cur + md
+            sub(/"current_pos":[-0-9]+/, "\"current_pos\":" eff)
+            if (md != 0) {
+                sub(/"winner":[-0-9]+/, "\"winner\":-1,\"manual_offset\":" md)
+            }
         }
         print
     }' "$JSON_FILE"
