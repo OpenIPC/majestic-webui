@@ -405,7 +405,11 @@ build_plan() {
 				www/a/preview-ptz.js | www/a/ptz-stick.js | www/a/ptz-centre.js | \
 				www/a/ptz-follow.js | www/a/ptz-speed.js | www/a/ptz-orient.js | \
 				www/a/af-state.js | \
-				www/cgi-bin/j/ptz.cgi)
+				www/a/preview-ptz-presets.js | www/a/preview-box-ptz.js | \
+				www/a/preview-af-peaks.js | \
+				www/cgi-bin/j/ptz.cgi | www/cgi-bin/j/ptz_presets.cgi | \
+				www/cgi-bin/j/box_ptz.cgi | www/cgi-bin/j/af_candidates.cgi | \
+				www/cgi-bin/j/af_triggers.cgi | www/cgi-bin/p/ptz_common.sh)
 					if [ "$ptz" != 1 ]; then
 						echo "$d" >>"$tmp/skipped"
 						continue

@@ -83,7 +83,9 @@ asks the image instead: they are installed only where `/rom/usr/sbin/modem-at`
 exists. A camera flashed before the option existed has none there, and loses
 the page on its next install until it is reflashed with an image that asks for
 it. The PTZ controls (`a/preview-ptz.js`, `a/ptz-{stick,centre,follow,speed}.js`,
-`a/af-state.js`, `j/ptz.cgi`, and `p/motor.cgi` — installed **empty** rather
+`a/af-state.js`, `a/preview-{ptz-presets,box-ptz,af-peaks}.js`,
+`j/{ptz,ptz_presets,box_ptz,af_candidates,af_triggers}.cgi`, `p/ptz_common.sh`,
+and `p/motor.cgi` — installed **empty** rather
 than skipped, since haserl's `<%in %>` fails on a missing file) work the same
 way with `BR2_PACKAGE_MAJESTIC_WEBUI_PTZ`, which defaults on wherever the image has a
 motor driver; the installer's witness is `/rom/usr/bin/gpio-motors`,
