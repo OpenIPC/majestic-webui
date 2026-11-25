@@ -191,7 +191,11 @@ group('a title is text, not markup');
 // copy, and lists what an install would do. So a tree in a scratch directory
 // is a whole camera to it. A whiteout is a device node, which takes root to
 // make; a fifo is the same thing to this code, an entry that is not a file.
-function plan(manifest) {
+//
+// plan_removals is the same for --restore, so both run on the same camera.
+const INSTALLER = read('sbin/updatewebui');
+
+function plan(step, manifest) {
 	const d = mktmp();
 	const put = (f, text) => {
 		fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true });
@@ -205,44 +209,69 @@ function plan(manifest) {
 	put(cgi + 'plugins.cgi', 'stale\n');
 	put(cgi + 'plugin-old.cgi.bak', 'stale\n');
 	put(cgi + 'p/plugin-inc.cgi', 'stale\n');
+	put(cgi + 'plugin-d/inc.cgi', 'stale\n');
 	put('upper/var/www/a/plugin-x.js', 'stale\n');
 	put('upper/var/www/plugin-x.cgi', 'stale\n');
 	for (const f of ['plugin-gone.cgi', 'restart.cgi'])
 		if (spawnSync('mkfifo', [path.join(d, cgi + f)]).status !== 0) throw new Error('mkfifo failed');
+	put('elsewhere.cgi', 'plugin\n');
+	fs.symlinkSync(path.join(d, 'elsewhere.cgi'), path.join(d, cgi + 'plugin-linked.cgi'));
 	fs.symlinkSync('/nowhere/at/all', path.join(d, cgi + 'plugin-dangling.cgi'));
 	fs.mkdirSync(path.join(d, 'tmp'));
-	if (manifest) put('manifest', manifest);
+	if (manifest !== null) put('manifest', manifest);
 
-	const r = sh(shellFn(read('sbin/updatewebui'), 'build_plan', 'sbin/updatewebui') + 'build_plan', {
+	const fns = ['plugin_page', step].map((f) => shellFn(INSTALLER, f, 'sbin/updatewebui')).join('');
+	const r = sh(fns + step, {
 		src: path.join(d, 'src'), upper: path.join(d, 'upper'), lower: '', tmp: path.join(d, 'tmp'),
 		MANIFEST: path.join(d, 'manifest'), PAYLOAD: 'www:/var/www', scr_name: 'updatewebui',
-		variant: '', sms: '0', fpv: '0', ptz: '0', counting: '0',
+		LEGACY_SHARED: '', variant: '', sms: '0', fpv: '0', ptz: '0', counting: '0',
 	});
-	const list = (f) => fs.readFileSync(path.join(d, 'tmp', f), 'utf8').split('\n').filter(Boolean)
+	const list = (f) => !fs.existsSync(path.join(d, 'tmp', f)) ? null :
+		fs.readFileSync(path.join(d, 'tmp', f), 'utf8').split('\n').filter(Boolean)
 		.map((l) => l.replace(path.join(d, 'upper'), '')).sort();
-	return { status: r.status, err: r.err, prune: list('prune'), atrisk: list('atrisk'), local: list('local') };
+	return { status: r.status, err: r.err, prune: list('prune'), atrisk: list('atrisk'), local: list('local'), kept: list('kept') };
 }
 
 for (const [name, manifest] of [
-	['an update leaves a plugin page alone', ''],
+	['an update leaves a plugin page alone', null],
 	['...and on a camera that has a manifest', '0123456789abcdef0123456789abcdef  /var/www/cgi-bin/nothing.cgi\n'],
 ]) {
 	group(name);
-	const p = plan(manifest);
+	const p = plan('build_plan', manifest);
 	const has = (l, f) => l.includes('/var/www/cgi-bin/' + f);
 	check('the plan is made (otherwise this tests nothing)', p.status === 0 && p.prune.length > 0, p.err);
 	check('the page is not removed', !has(p.prune, 'plugin-camex.cgi'), p.prune.join(' '));
+	check('nor one that is a link to a file', !has(p.prune, 'plugin-linked.cgi'), p.prune.join(' '));
 	check('nor counted as a customization to archive',
 		!has(p.local, 'plugin-camex.cgi') && !has(p.atrisk, 'plugin-camex.cgi'));
 	check('a whiteout of the same name goes', has(p.prune, 'plugin-gone.cgi'), p.prune.join(' '));
 	check('so does a link to nothing', has(p.prune, 'plugin-dangling.cgi'), p.prune.join(' '));
 	check('and any other whiteout', has(p.prune, 'restart.cgi'), p.prune.join(' '));
 	check('a stale page goes', has(p.prune, 'stale.cgi'), p.prune.join(' '));
-	for (const f of ['plugins.cgi', 'plugin-old.cgi.bak', 'p/plugin-inc.cgi'])
+	for (const f of ['plugins.cgi', 'plugin-old.cgi.bak', 'p/plugin-inc.cgi', 'plugin-d/inc.cgi'])
 		check(f + ' is not a plugin page and goes', has(p.prune, f), p.prune.join(' '));
 	check('only cgi-bin is reserved', p.prune.includes('/var/www/a/plugin-x.js') &&
 		p.prune.includes('/var/www/plugin-x.cgi'), p.prune.join(' '));
 	check('what the release ships stays', !has(p.prune, 'live.cgi'), p.prune.join(' '));
+}
+
+for (const [name, manifest, swept] of [
+	['--restore on a camera with no manifest leaves it too', null, true],
+	['...and with one', '0123456789abcdef0123456789abcdef  /var/www/cgi-bin/nothing.cgi\n', false],
+	['...and after an earlier --restore emptied it', '', false],
+]) {
+	group(name);
+	const p = plan('plan_removals', manifest);
+	const has = (l, f) => l.includes('/var/www/cgi-bin/' + f);
+	check('the plan is made (otherwise this tests nothing)', p.status === 0 && p.prune.length > 0, p.err);
+	check('the page is not removed', !has(p.prune, 'plugin-camex.cgi'), p.prune.join(' '));
+	check('nor one that is a link to a file', !has(p.prune, 'plugin-linked.cgi') && has(p.kept, 'plugin-linked.cgi'), p.prune.join(' '));
+	check('and is reported as left in place', has(p.kept, 'plugin-camex.cgi'), p.kept.join(' '));
+	for (const f of ['plugin-gone.cgi', 'plugin-dangling.cgi', 'restart.cgi'])
+		check(f + ', not a file, goes', has(p.prune, f), p.prune.join(' '));
+	// Without a record everything else still goes; with one, only what it names.
+	for (const f of ['live.cgi', 'stale.cgi', 'plugins.cgi', 'plugin-old.cgi.bak', 'p/plugin-inc.cgi', 'plugin-d/inc.cgi'])
+		check(f + (swept ? ' goes' : ' stays'), has(p.prune, f) === swept, p.prune.join(' '));
 }
 
 done();
