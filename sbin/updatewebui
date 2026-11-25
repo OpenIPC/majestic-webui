@@ -450,8 +450,9 @@ build_plan() {
 			done
 	done
 
-	# /var/www belongs to the WebUI alone but for plugin pages, so anything left in the overlay
-	# that this release does not have is stale and goes. This is also what
+	# /var/www belongs to the WebUI alone but for plugin pages, so anything
+	# else left in the overlay that this release does not have is stale and
+	# goes. This is also what
 	# clears the whiteouts an older updatewebui left behind, which is why the
 	# search is for anything that is not a directory rather than for files.
 	if [ -n "$upper" ] && [ -d "$upper/var/www" ]; then
