@@ -310,6 +310,18 @@ fetch_tree() {
 	return 0
 }
 
+# Is this path a plugin page in the overlay? Such a page belongs to the
+# application that installed it, not to any WebUI release, so neither an install
+# nor --restore may remove it. A file, or a link to one: a whiteout by that name
+# still goes.
+plugin_page() {
+	case $1 in
+	/var/www/cgi-bin/*/*) return 1 ;;
+	/var/www/cgi-bin/plugin-*.cgi) [ -f "$upper$1" ] ;;
+	*) return 1 ;;
+	esac
+}
+
 # write:  mode, source and destination of every file that has to be installed
 # drop:   overlay copies to delete because the firmware's own file is identical
 # prune:  overlay copies to delete because this release no longer has the file
@@ -450,16 +462,18 @@ build_plan() {
 			done
 	done
 
-	# /var/www belongs to the WebUI alone, so anything left in the overlay
-	# that this release does not have is stale and goes. This is also what
-	# clears the whiteouts an older updatewebui left behind, which is why the
-	# search is for anything that is not a directory rather than for files.
+	# /var/www belongs to the WebUI alone but for plugin pages, so anything
+	# else left in the overlay that this release does not have is stale and
+	# goes. This is also what clears the whiteouts an older updatewebui left
+	# behind, which is why the search is for anything that is not a directory
+	# rather than for files.
 	if [ -n "$upper" ] && [ -d "$upper/var/www" ]; then
 		[ -s "$MANIFEST" ] &&
 			sed 's/^[0-9a-f]*  //' "$MANIFEST" >"$tmp/manifest.paths"
 		find "$upper/var/www" ! -type d | while read -r u; do
 			d=${u#$upper}
 			grep -qxF "$d" "$tmp/keep" && continue
+			plugin_page "$d" && continue
 			echo "$u" >>"$tmp/prune"
 			echo "$d" >>"$tmp/atrisk"
 			# A stale file that is not simply the firmware's own content
@@ -935,8 +949,9 @@ offer_dir_cleanup() {
 #
 # Without a manifest there is nothing to consult: the camera was last updated by
 # a version of this script that recorded nothing, and /var/www belongs to the
-# WebUI alone, so all of it goes. That is the one path on which a local edit can
-# still be lost, and one install of this version closes it for good.
+# WebUI alone but for plugin pages, so all the rest of it goes. That is the one
+# path on which a local edit can still be lost, and one install of this version
+# closes it for good.
 plan_removals() {
 	: >"$tmp/prune"
 	: >"$tmp/kept"
@@ -956,7 +971,14 @@ plan_removals() {
 		# Nothing records the whiteouts an older version of this script
 		# wrote, and they still hide the firmware's own files.
 		if [ -d "$upper/var/www" ]; then
-			find "$upper/var/www" ! -type d ! -type f >>"$tmp/prune"
+			find "$upper/var/www" ! -type d ! -type f | while read -r u; do
+				d=${u#$upper}
+				if plugin_page "$d"; then
+					echo "$d" >>"$tmp/kept"
+				else
+					echo "$u" >>"$tmp/prune"
+				fi
+			done
 			# A file in the WebUI's own tree that no install ever put
 			# there is somebody's own doing. It is already safe - only
 			# what the manifest records is removed - but saying so is
@@ -969,7 +991,15 @@ plan_removals() {
 				done
 		fi
 	else
-		[ -d "$upper/var/www" ] && find "$upper/var/www" ! -type d >>"$tmp/prune"
+		[ -d "$upper/var/www" ] &&
+			find "$upper/var/www" ! -type d | while read -r u; do
+				d=${u#$upper}
+				if plugin_page "$d"; then
+					echo "$d" >>"$tmp/kept"
+				else
+					echo "$u" >>"$tmp/prune"
+				fi
+			done
 		# Nothing outside /var/www is recorded for a camera the
 		# manifest-less version of this script updated, and those are
 		# the ones with most to restore, so the fallback is this list of
