@@ -106,10 +106,12 @@ plugin_pages() {
 #
 # Read out of the file, never run: the bar is drawn on every page, and a broken
 # plugin must not take them all down. Only a literal, double-quoted assignment
-# counts, so nothing in it is ever expanded; the caller escapes it.
+# counts, so nothing in it is ever expanded; the caller escapes it. It has to be
+# in the first 50 lines, so that a long page costs no more than a short one.
 plugin_label() {
 	local t
-	t=$(sed -n '/^[[:space:]]*page_title="[^"$`\\]*"[[:space:]]*$/{s/^[^"]*"//;s/".*$//;p;q;}' \
+	t=$(sed -n '/^[[:space:]]*page_title="[^"$`\\]*"[[:space:]]*$/{s/^[^"]*"//;s/".*$//;p;q;}
+		50q' \
 		"/var/www/cgi-bin/${1}.cgi" 2>/dev/null)
 	printf '%s' "${t:-${1#plugin-}}"
 }

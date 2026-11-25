@@ -58,7 +58,8 @@ function menuFns(dir) {
 		if (!fn.includes(WWW)) throw new Error(name + ' no longer reads ' + WWW);
 		s += fn.split(WWW).join(dir + '/');
 	}
-	return s + shellFn(common, 'esc', 'p/common.cgi') + shellFn(pages, 'page_menu', 'p/pages.cgi');
+	return s + shellFn(common, 'esc', 'p/common.cgi') + shellFn(common, 'attr_escape', 'p/common.cgi') +
+		shellFn(pages, 'page_menu', 'p/pages.cgi');
 }
 
 // The group's own lines of header.cgi as the shell haserl makes of them: text
@@ -86,8 +87,8 @@ function cgiBin(files) {
 	return d;
 }
 
-function menu(dir, cwd) {
-	const r = sh(menuFns(dir) + menuBlock(), { INJECTED: 'expanded' }, cwd);
+function menu(dir, cwd, override) {
+	const r = sh(menuFns(dir) + (override || '') + menuBlock(), { INJECTED: 'expanded' }, cwd);
 	const entries = [];
 	const re = /<a class="dropdown-item" href="([^"]*)">([\s\S]*?)<\/a>/g;
 	let m;
@@ -183,6 +184,20 @@ group('a title is text, not markup');
 	const m = menu(cgiBin({ 'plugin-x.cgi': page('page_title="<script>alert(1)</script> & \'co\' %s *"') }));
 	check('it is escaped', m.entries.length === 1 &&
 		m.entries[0][1] === '&lt;script&gt;alert(1)&lt;/script&gt; &amp; \'co\' %s *', m.html);
+}
+
+group('a name that got past the alphabet would still be text');
+{
+	const m = menu(cgiBin({}), null, "plugin_pages() { printf '%s' 'plugin-a\"><b>&'; }\n");
+	check('the link is escaped', m.html.includes('href="plugin-a&quot;&gt;&lt;b&gt;&amp;.cgi"'), m.html);
+}
+
+group('only the first 50 lines are read for a title');
+{
+	const at = (n) => menu(cgiBin({ 'plugin-x.cgi': '\n'.repeat(n - 1) + 'page_title="Found"\n' })).entries[0][1];
+	check('line 1 counts', at(1) === 'Found');
+	check('line 50 counts', at(50) === 'Found');
+	check('line 51 does not', at(51) === 'x');
 }
 
 // --- the installer ------------------------------------------------------------

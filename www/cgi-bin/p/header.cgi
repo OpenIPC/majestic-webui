@@ -210,7 +210,7 @@ Pragma: no-cache
 							   if [ -n "$plugins" ]; then %>
 								<li><h6 class="dropdown-header">Plugins</h6></li>
 								<% for plugin in $plugins; do %>
-									<li><a class="dropdown-item" href="<%= $plugin %>.cgi"><% esc "$(plugin_label "$plugin")" %></a></li>
+									<li><a class="dropdown-item" href="<% attr_escape "$plugin" %>.cgi"><% esc "$(plugin_label "$plugin")" %></a></li>
 								<% done %>
 							<% fi %>
 						</ul>
