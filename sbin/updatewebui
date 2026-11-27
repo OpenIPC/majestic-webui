@@ -809,15 +809,37 @@ drop_sms_cron() {
 # it is what the owner chose, and it costs nothing without a job to read it.
 drop_af_triggers() {
 	[ "$ptz" = 1 ] && return 0
-	if grep -q '# af-triggers$' "$CRONTAB" 2>/dev/null; then
-		if ! sed -i '/# af-triggers$/d' "$CRONTAB"; then
-			echo "$scr_name: could not remove the autofocus schedule from $CRONTAB;" >&2
-			echo "$scr_name: delete the lines ending in \"# af-triggers\" by hand." >&2
+	# No crontab is no schedule. One that is there but cannot be read is not
+	# the same answer, and taking the watcher away on it could leave lines
+	# behind that run nothing.
+	if [ -e "$CRONTAB" ]; then
+		af_found=2
+		[ -f "$CRONTAB" ] && {
+			grep -q '# af-triggers$' "$CRONTAB" 2>/dev/null
+			af_found=$?
+		}
+		case $af_found in
+		0)
+			if ! sed -i '/# af-triggers$/d' "$CRONTAB"; then
+				echo "$scr_name: could not remove the autofocus schedule from $CRONTAB;" >&2
+				echo "$scr_name: delete the lines ending in \"# af-triggers\" by hand." >&2
+				return 1
+			fi
+			echo "Removed the autofocus schedule from root's crontab: this firmware has no motor driver"
+			;;
+		1) ;;
+		*)
+			echo "$scr_name: could not read $CRONTAB, so any autofocus schedule in it is still there," >&2
+			echo "$scr_name: and so is /usr/bin/af-trigger-check, which it would run." >&2
 			return 1
-		fi
-		echo "Removed the autofocus schedule from root's crontab: this firmware has no motor driver"
+			;;
+		esac
 	fi
-	rm -f "$upper/usr/bin/af-trigger-check"
+	# With the lines gone nothing runs it, so a copy that will not go is worth
+	# a word but not a failed install.
+	rm -f "$upper/usr/bin/af-trigger-check" 2>/dev/null
+	[ -e "$upper/usr/bin/af-trigger-check" ] &&
+		echo "$scr_name: could not remove /usr/bin/af-trigger-check; nothing runs it now, so delete it by hand." >&2
 	return 0
 }
 

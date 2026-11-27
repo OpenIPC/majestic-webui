@@ -131,6 +131,7 @@ function triggers(ptz, cron) {
 			if (r.error) throw r.error;
 			return { status: r.status, out: r.stdout, err: r.stderr };
 		},
+		crontabPath: crontab, watcherPath: env.CHECK_BIN,
 		cron: () => fs.existsSync(crontab) ? fs.readFileSync(crontab, 'utf8') : null,
 		watcher: () => fs.existsSync(env.CHECK_BIN),
 	};
@@ -159,6 +160,27 @@ group('the autofocus schedule on a camera with no motor driver');
 	const t = triggers('0', null);
 	const r = t.drop();
 	check('and a camera with no crontab gets none', r.status === 0 && t.cron() === null, r.err);
+}
+
+{
+	// A crontab that is there but cannot be read says nothing about what is
+	// in it, so the watcher its lines may run stays too. A directory is
+	// unreadable as a crontab to anyone, root included.
+	const t = triggers('0', null);
+	fs.mkdirSync(t.crontabPath);
+	t.schedule(); // writes the watcher; its crontab write fails
+	const r = t.drop();
+	check('a crontab that cannot be read fails the run', r.status !== 0 && /could not read/.test(r.err), r.err);
+	check('...and keeps the watcher', t.watcher());
+}
+{
+	const t = triggers('0', OTHER);
+	t.schedule();
+	fs.rmSync(t.watcherPath);
+	fs.mkdirSync(path.join(t.watcherPath, 'x'), { recursive: true });
+	const r = t.drop();
+	check('a watcher that will not go is reported, not failed on',
+		r.status === 0 && !/af-trigger/.test(t.cron()) && /delete it by hand/.test(r.err), r.err);
 }
 
 group('the autofocus schedule on a camera with one');
