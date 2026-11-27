@@ -40,6 +40,7 @@ for (const a of spawnSync(busybox, ['--list'], { encoding: 'utf8' }).stdout.spli
 }
 fs.writeFileSync(path.join(BB, 'curl'), [
 	'#!/bin/sh',
+	'printf "%s\\n" "$@" >"$CURL_LOG"',
 	'out=; prev=',
 	'for a in "$@"; do [ "$prev" = "-o" ] && out=$a; prev=$a; done',
 	'cat "$SERVE" >"$out"',
@@ -70,9 +71,11 @@ function fetch(archive, how, avail) {
 	fs.writeFileSync(zip, archive);
 	const meminfo = path.join(d, 'meminfo');
 	fs.writeFileSync(meminfo, 'MemTotal:  27796 kB\n' + (avail === null ? '' : 'MemAvailable: ' + avail + ' kB\n') + 'Cached: 1000 kB\n');
-	const r = spawnSync('busybox', ['sh', '-c', shellFn('die') + shellFn('fetch_tree') + 'fetch_tree && echo "SRC=$src"'], {
+	const curlLog = path.join(d, 'curl.args');
+	const fns = shellFn('die') + shellFn('mem_available_kb') + shellFn('fetch_tree');
+	const r = spawnSync('busybox', ['sh', '-c', fns + 'fetch_tree && echo "SRC=$src"'], {
 		env: {
-			PATH: BB, tmp: tmp, scr_name: 'updatewebui', REPO: 'openipc/majestic-webui', SERVE: zip,
+			PATH: BB, tmp: tmp, scr_name: 'updatewebui', REPO: 'openipc/majestic-webui', SERVE: zip, CURL_LOG: curlLog,
 			zip_url: how === 'file' ? 'file://' + zip : 'https://example.invalid/tree.zip',
 			MEMINFO: meminfo, MEM_RESERVE_KB: String(reserve),
 		},
@@ -81,7 +84,9 @@ function fetch(archive, how, avail) {
 	if (r.error) throw r.error;
 	const walk = (p) => fs.existsSync(p) ? fs.readdirSync(p) : [];
 	return { status: r.status, out: r.stdout, err: r.stderr, tmp: walk(tmp), top: walk(path.join(tmp, 'x', 'top')),
-		src: (/SRC=(.*)/.exec(r.stdout) || [])[1], zipKept: fs.existsSync(zip) };
+		x: walk(path.join(tmp, 'x')),
+		src: (/SRC=(.*)/.exec(r.stdout) || [])[1], zipKept: fs.existsSync(zip),
+		curl: fs.existsSync(curlLog) ? fs.readFileSync(curlLog, 'utf8').split('\n').filter(Boolean) : null };
 }
 
 const plenty = 200000;
@@ -109,6 +114,28 @@ group('the memory is asked for before it is taken');
 	check('one that can is not', ok.status === 0, ok.err);
 	const old = fetch(zipWith(TREE), 'file', null);
 	check('a kernel that cannot say goes ahead, as it always did', old.status === 0 && old.top.length === 3, old.err);
+}
+{
+	// GitHub sends an archive without its size, so the download can only be
+	// capped, and refused outright when not even the reserve is free.
+	const cap = (r) => { const i = (r.curl || []).indexOf('--max-filesize'); return i < 0 ? null : +r.curl[i + 1]; };
+	const r = fetch(zipWith(TREE), 'https', plenty);
+	check('a download is capped at what is free beyond the reserve', cap(r) === (plenty - reserve) * 1024,
+		JSON.stringify(r.curl));
+	const none = fetch(zipWith(TREE), 'https', reserve);
+	check('and not started when the reserve is all there is', none.status !== 0 && none.curl === null &&
+		/not enough free memory to download/.test(none.err), none.err);
+	const old = fetch(zipWith(TREE), 'https', null);
+	check('a kernel that cannot say downloads uncapped, as before', old.status === 0 && cap(old) === null,
+		JSON.stringify(old.curl));
+}
+
+group('the top directory is a name from the archive');
+{
+	const odd = 'tree [1] *';
+	const r = fetch(zipWith(TREE.map(([n, t]) => [n.replace(/^top\//, odd + '/'), t])), 'file', plenty);
+	check('one with a space, brackets and a star is unpacked as it is named', r.status === 0 &&
+		(r.src || '').endsWith('/x/' + odd), r.err + (r.src || ''));
 }
 
 group('what is not a release is still refused');

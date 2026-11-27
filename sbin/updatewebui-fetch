@@ -159,7 +159,11 @@ if [ -n "$url" ]; then
 	file://*) zip=${url#file://} ;;
 	*)
 		zip=$tmp/tree.zip
-		curl -fsSL --proto =https --proto-redir =https --connect-timeout 15 -m 300 -o "$zip" "$url" 2>/dev/null
+		# Capped at what is free beyond the installer's 4 MB reserve, as the
+		# installer caps its own download (#747); curl 8.4 and later hold an
+		# archive of unannounced size to it.
+		cap=$(awk '$1 == "MemAvailable:" && $2 > 4096 { print "--max-filesize", ($2 - 4096) * 1024 }' /proc/meminfo 2>/dev/null)
+		curl -fsSL --proto =https --proto-redir =https --connect-timeout 15 -m 300 $cap -o "$zip" "$url" 2>/dev/null
 		;;
 	esac
 	got=0
