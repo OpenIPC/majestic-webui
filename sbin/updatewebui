@@ -42,6 +42,11 @@ REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
 MANIFEST=$STATE_DIR/updatewebui.manifest
 CRONTAB=/etc/crontabs/root
+MEMINFO=/proc/meminfo
+# What stays free for the camera while a run holds its unpacked tree in /tmp,
+# which is RAM. The SSC325 in #747 had 11.7 MB available, a run took 9.8 MB of
+# it, and the 1.9 MB left was not enough: the kernel killed majestic.
+MEM_RESERVE_KB=4096
 DIRS=$STATE_DIR/updatewebui.dirs
 KEEP_BACKUPS=3
 
@@ -263,6 +268,11 @@ verify_view() {
 	return 0
 }
 
+# Empty, not 0, where the kernel is too old to say: that is "could not ask".
+mem_available_kb() {
+	awk '$1 == "MemAvailable:" { print $2 }' "$MEMINFO" 2>/dev/null
+}
+
 fetch_tree() {
 	if [ -n "$zip_url" ]; then
 		source_name=$zip_url
@@ -283,20 +293,83 @@ fetch_tree() {
 		source_name=$branch
 	fi
 	echo "Fetch $zip_url"
-	# The http refusal above holds through redirects too: https, or the
-	# file:// an offline camera is updated with, and a redirect only to https.
-	curl -fsSL --proto =https,file --proto-redir =https --connect-timeout 30 -o "$tmp/webui.zip" "$zip_url" ||
-		die "download failed, nothing has been changed"
-	# Unpacking into the scratch directory is the whole validation: it rejects
-	# what is not a zip and what is a truncated one, and it needs no option
-	# beyond the four busybox unzip has always had.
-	mkdir -p "$tmp/x"
-	unzip -qo -d "$tmp/x" "$tmp/webui.zip" >/dev/null 2>&1 ||
+	# A file:// archive is read where it lies rather than copied into /tmp,
+	# which is RAM -- it is often sitting in /tmp already -- and it is never
+	# removed: it is the caller's file. By hand, as the fetch stub does it, so
+	# whether this curl has the file protocol compiled in does not matter.
+	case $zip_url in
+	file://*)
+		zip=${zip_url#file://}
+		[ -f "$zip" ] || die "no archive at $zip, nothing has been changed"
+		;;
+	*)
+		zip=$tmp/webui.zip
+		# GitHub does not say how big an archive is before sending it, so
+		# what the download may take is capped instead: what is free beyond
+		# the reserve, and nothing at all when not even that is. curl 8.4
+		# and later hold an archive of unannounced size to the cap as it
+		# arrives; an older one lets it through, to the check below.
+		avail_kb=$(mem_available_kb)
+		cap=
+		if [ -n "$avail_kb" ]; then
+			[ "$avail_kb" -gt "$MEM_RESERVE_KB" ] ||
+				die "not enough free memory to download this release, nothing has been changed.
+${avail_kb} kB is available and ${MEM_RESERVE_KB} kB has to stay free for the camera.
+Stop majestic, or reboot, and run it again."
+			cap="--max-filesize $(((avail_kb - MEM_RESERVE_KB) * 1024))"
+		fi
+		# The http refusal above holds through redirects too: https only.
+		# shellcheck disable=SC2086 # $cap is two words or none
+		curl -fsSL --proto =https --proto-redir =https --connect-timeout 30 $cap -o "$zip" "$zip_url" ||
+			die "download failed, nothing has been changed"
+		;;
+	esac
+	# /tmp is RAM, and so is everything below. Only what gets installed is
+	# unpacked -- the source archive is the whole repository, tests and all,
+	# and the rest of it is a third of the tree -- and the archive goes as soon
+	# as it has been, so the two are never held at once beyond that (#747).
+	#
+	# The listing is the first check that this is a zip at all, and it says
+	# how much the unpacking will take before any of it is taken, so a camera
+	# that cannot spare it is told so instead of losing majestic to the OOM
+	# killer. A --dry-run unpacks the same tree to plan against, so it gets the
+	# same check. Before the download there was only the cap; this is the
+	# exact one.
+	unzip -l "$zip" >"$tmp/list" 2>/dev/null ||
 		die "downloaded file is not a usable zip archive, nothing has been changed"
-	set -- "$tmp/x"/*
-	{ [ $# -eq 1 ] && [ -d "$1" ]; } ||
+	# One value to a line, read back whole: the top directory is a name from
+	# the archive and may hold a space or a glob character.
+	awk '
+		/^ *[0-9]+ +[0-9-]+ +[0-9:]+ +[^ ]/ {
+			n = $0
+			sub(/^ *[0-9]+ +[0-9-]+ +[0-9:]+ +/, "", n)
+			t = n
+			sub(/\/.*/, "", t)
+			if (!(t in tops)) { tops[t] = 1; c++; top = t }
+			# tmpfs holds a file in whole 4 kB pages.
+			if (n ~ /^[^\/]+\/(www|sbin|bin)\//) kb += int(($1 + 4095) / 4096) * 4
+		}
+		END { print c + 0; print kb + 0; print top }' "$tmp/list" >"$tmp/sizes"
+	{ read -r tops; read -r need_kb; IFS= read -r top; } <"$tmp/sizes"
+	[ "$tops" = 1 ] ||
 		die "expected one directory in the archive, nothing has been changed"
-	src=$1
+	# unzip matches the names it is given as patterns.
+	pat=$(printf '%s' "$top" | sed 's/[][*?\\]/\\&/g')
+	# A kernel too old to report MemAvailable cannot be asked, and that is not
+	# the same as having nothing to spare: the run goes ahead as it always has.
+	avail_kb=$(mem_available_kb)
+	if [ -n "$avail_kb" ] && [ "$avail_kb" -lt $((need_kb + MEM_RESERVE_KB)) ]; then
+		die "not enough free memory to unpack this release, nothing has been changed.
+It needs ${need_kb} kB in /tmp and leaves ${MEM_RESERVE_KB} kB for the camera; ${avail_kb} kB is available.
+Stop majestic, or reboot, and run it again."
+	fi
+	# Unpacking is the rest of the validation: it rejects a truncated archive,
+	# and it needs no option beyond the four busybox unzip has always had.
+	mkdir -p "$tmp/x"
+	unzip -qo -d "$tmp/x" "$zip" "$pat/www/*" "$pat/sbin/*" "$pat/bin/*" >/dev/null 2>&1 ||
+		die "downloaded file is not a usable zip archive, nothing has been changed"
+	rm -f "$tmp/webui.zip" "$tmp/list" "$tmp/sizes"
+	src=$tmp/x/$top
 	[ -f "$src/www/cgi-bin/p/common.cgi" ] ||
 		die "the archive does not hold a WebUI tree, nothing has been changed"
 
