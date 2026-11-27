@@ -114,15 +114,20 @@ promote() {
 # Fed to a shell rather than executed, for the reason the installer gives about
 # its own staging: a mode that did not survive a copy, or a filesystem mounted
 # noexec, must not be what decides whether a camera can be updated.
+#
+# Run as a child, not exec'd, and its status passed on. exec replaced this
+# shell, and the EXIT trap above went with it, so every run left $tmp behind
+# in /tmp, which is RAM, until the next reboot (#748).
 run() {
 	_script=$1
 	shift
-	exec /bin/sh "$_script" "$@"
+	/bin/sh "$_script" "$@"
+	exit $?
 }
 
 run_staged() {
 	promote
-	exec /bin/sh "$staged" "$@"
+	run "$staged" "$@"
 }
 
 # --restore is the one mode the installer runs without a network, and a camera
@@ -149,18 +154,27 @@ if [ -n "$url" ]; then
 	# file:// by hand rather than through curl: it is the case that has to work
 	# on a camera with no route out, and whether this curl was built with the
 	# file protocol compiled in is not something to find out there.
+	# Read where it lies rather than copied: /tmp is RAM (#747).
 	case $url in
-	file://*) cp "${url#file://}" "$tmp/tree.zip" 2>/dev/null ;;
-	*) curl -fsSL --proto =https --proto-redir =https --connect-timeout 15 -m 300 -o "$tmp/tree.zip" "$url" 2>/dev/null ;;
+	file://*) zip=${url#file://} ;;
+	*)
+		zip=$tmp/tree.zip
+		curl -fsSL --proto =https --proto-redir =https --connect-timeout 15 -m 300 -o "$zip" "$url" 2>/dev/null
+		;;
 	esac
-	if [ -s "$tmp/tree.zip" ] &&
-		unzip -qo -d "$tmp/x" "$tmp/tree.zip" "*/sbin/$scr_name" >/dev/null 2>&1; then
+	got=0
+	if [ -s "$zip" ] && [ -f "$zip" ] &&
+		unzip -qo -d "$tmp/x" "$zip" "*/sbin/$scr_name" >/dev/null 2>&1; then
 		found=$(find "$tmp/x" -name "$scr_name" -type f 2>/dev/null | head -1)
 		if [ -n "$found" ] && usable "$found"; then
-			cp "$found" "$staged" && chmod +x "$staged" 2>/dev/null
-			run_staged "$@"
+			cp "$found" "$staged" && chmod +x "$staged" 2>/dev/null && got=1
 		fi
 	fi
+	# The installer reads the archive again for itself, so a downloaded copy
+	# would only sit in RAM beside that one for the whole run (#747, #748).
+	# Only ever $tmp's own: a file:// archive is the caller's.
+	rm -rf "$tmp/tree.zip" "$tmp/x"
+	[ "$got" = 1 ] && run_staged "$@"
 	# The archive could not supply one. A copy already here still knows how to
 	# unpack it, so that is better than stopping.
 	if [ -s "$CACHE" ]; then

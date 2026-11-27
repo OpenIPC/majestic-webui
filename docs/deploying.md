@@ -36,6 +36,17 @@ unpacked.** The version this replaced wiped `/var/www` *before* checking
 anything, so an unknown branch 404'd, unpacked nothing, and left the camera with
 no WebUI at all and whiteouts over the firmware's copies.
 
+**`/tmp` is RAM, and the download is unpacked there.** The archive is the whole
+repository, so only `www/`, `sbin/` and `bin/` are unpacked out of it, the
+archive goes as soon as they are, and a `file://` archive is read where it lies
+rather than copied. Before unpacking, the installer adds up what the payload
+will take, in tmpfs pages, and refuses when `MemAvailable` cannot cover it
+with 4 MB to spare; a `--dry-run` unpacks the same tree, so it is checked too.
+Unpacking everything beside the archive took 9.8 MB and got majestic killed on
+a 64 MB SSC325 (#747). The fetch stub runs the installer as a child rather than
+`exec`ing it, so its own cleanup trap still fires and nothing is left in `/tmp`
+(#748).
+
 **The put-back is planned before the removals.** Removing an overlay copy while
 something still holds the file open leaves a merged entry the kernel goes on
 serving for the removed inode, and nothing can `rename()` over one — it answers
