@@ -1339,7 +1339,11 @@
 			'Controls whether the AF candidate peaks gallery opens automatically after autofocus finishes.',
 			PREF.peaksAutoOpen,
 			[['manual', 'After AF button'], ['always', 'After any AF'], ['off', 'Disabled']], 'manual');
-		renderAfTriggers(form);
+		// Triggers, schedule and Run AF all need the PTZ endpoints, which a
+		// camera without a motor driver does not carry even where the schema
+		// has this section (#751). Only a definite "not installed" drops the
+		// card; a blob that says nothing keeps it.
+		if ((boot.motor || {}).triggers !== false) renderAfTriggers(form);
 	}
 
 	function renderAfTriggers(form) {

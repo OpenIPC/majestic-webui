@@ -41,6 +41,7 @@ scr_version=10
 REPO=openipc/majestic-webui
 STATE_DIR=/etc/webui
 MANIFEST=$STATE_DIR/updatewebui.manifest
+CRONTAB=/etc/crontabs/root
 DIRS=$STATE_DIR/updatewebui.dirs
 KEEP_BACKUPS=3
 
@@ -781,14 +782,65 @@ write_version() {
 # the script the line runs is already gone.
 drop_sms_cron() {
 	[ "$sms" = 1 ] && return 0
-	grep -qxF '* * * * * /usr/sbin/sms-forward' /etc/crontabs/root 2>/dev/null || return 0
-	if sed -i '/^\* \* \* \* \* \/usr\/sbin\/sms-forward$/d' /etc/crontabs/root; then
+	grep -qxF '* * * * * /usr/sbin/sms-forward' "$CRONTAB" 2>/dev/null || return 0
+	if sed -i '/^\* \* \* \* \* \/usr\/sbin\/sms-forward$/d' "$CRONTAB"; then
 		echo "Removed SMS forwarding from root's crontab: this firmware carries no SMS page"
 		return 0
 	fi
-	echo "$scr_name: could not remove the SMS forwarding line from /etc/crontabs/root;" >&2
+	echo "$scr_name: could not remove the SMS forwarding line from $CRONTAB;" >&2
 	echo "$scr_name: it now runs a script this firmware does not carry. Delete it by hand." >&2
 	return 1
+}
+
+# The autofocus triggers on the Settings page keep their schedule in root's
+# crontab, every line tagged "# af-triggers", and the lines run a watcher that
+# j/af_triggers.cgi wrote to /usr/bin/af-trigger-check. Neither is a file of
+# this release, so nothing above removes them, and on a camera without a motor
+# driver the endpoint itself is skipped -- which takes away the only switch
+# that turned them off. Left alone, cron runs the watcher every minute, and
+# it asks majestic for an autofocus pass at every Day/Night switch and every
+# scheduled refocus, on a camera with no motor to move (#751).
+#
+# The same rules as the SMS line: only the tagged lines, and only once the
+# install has gone through. The watcher goes after the lines, never before,
+# so a crontab that could not be edited is not left running a missing file.
+# No firmware ships the watcher, so it lives in the upper layer alone and is
+# removed there, never through the merged path. /etc/af_triggers.conf stays:
+# it is what the owner chose, and it costs nothing without a job to read it.
+drop_af_triggers() {
+	[ "$ptz" = 1 ] && return 0
+	# No crontab is no schedule. One that is there but cannot be read is not
+	# the same answer, and taking the watcher away on it could leave lines
+	# behind that run nothing.
+	if [ -e "$CRONTAB" ]; then
+		af_found=2
+		[ -f "$CRONTAB" ] && {
+			grep -q '# af-triggers$' "$CRONTAB" 2>/dev/null
+			af_found=$?
+		}
+		case $af_found in
+		0)
+			if ! sed -i '/# af-triggers$/d' "$CRONTAB"; then
+				echo "$scr_name: could not remove the autofocus schedule from $CRONTAB;" >&2
+				echo "$scr_name: delete the lines ending in \"# af-triggers\" by hand." >&2
+				return 1
+			fi
+			echo "Removed the autofocus schedule from root's crontab: this firmware has no motor driver"
+			;;
+		1) ;;
+		*)
+			echo "$scr_name: could not read $CRONTAB, so any autofocus schedule in it is still there," >&2
+			echo "$scr_name: and so is /usr/bin/af-trigger-check, which it would run." >&2
+			return 1
+			;;
+		esac
+	fi
+	# With the lines gone nothing runs it, so a copy that will not go is worth
+	# a word but not a failed install.
+	rm -f "$upper/usr/bin/af-trigger-check" 2>/dev/null
+	[ -e "$upper/usr/bin/af-trigger-check" ] &&
+		echo "$scr_name: could not remove /usr/bin/af-trigger-check; nothing runs it now, so delete it by hand." >&2
+	return 0
 }
 
 do_install() {
@@ -806,6 +858,7 @@ do_install() {
 		write_version
 		rm -f /tmp/webui/sysinfo.txt
 		drop_sms_cron || exit 1
+		drop_af_triggers || exit 1
 		return 0
 	fi
 	echo
@@ -839,6 +892,7 @@ do_install() {
 	done
 	verify_view "$tmp/want" "$tmp/gone"
 	drop_sms_cron || exit 1
+	drop_af_triggers || exit 1
 }
 
 # The one place a directory ever leaves the upper layer. rmdir there muddles

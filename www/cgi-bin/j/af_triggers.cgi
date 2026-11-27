@@ -90,6 +90,10 @@ EOF
 	mv "${CHECK_BIN}.tmp" "$CHECK_BIN"
 }
 
+# Every line this writes ends in "# af-triggers", and the tag is the contract:
+# it is how the next run finds its own lines, and how sbin/updatewebui finds
+# them to remove on a camera without a motor, where this endpoint is not
+# installed (tests/updatewebui-ptz.test.js runs both).
 sync_cron() {
 	install_watcher
 	mkdir -p /etc/crontabs
