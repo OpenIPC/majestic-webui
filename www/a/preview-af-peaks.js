@@ -256,15 +256,17 @@
 			const desc = explainCandidate(c, byteRank, fvRank, minMetric, hasSharp, cands.length);
 			zoomItems.push({ id: c.id, byteRank: byteRank, sharp: c.sharp || 0, kb: kb, fv: c.fv, imgUrl: imgUrl, offsetText: offsetText });
 
+			const hasImg = !!(c.bytes && c.bytes > 0);
 			card.innerHTML =
-				'<div class="mj-afp-imgwrap" title="Click to inspect full size">' +
+				(hasImg ? '<div class="mj-afp-imgwrap" title="Click to inspect full size">' +
 				'  <img src="' + imgUrl + '" loading="lazy" alt="Peak ' + c.id + '">' +
 				'  <span class="mj-afp-badge' + (isWinner ? ' win' : '') + '">#' + byteRank + ' Sharpness' + (isWinner ? ' · Active' : '') + '</span>' +
-				'</div>' +
+				'</div>' : '') +
 				'<div class="mj-afp-body">' +
+				(!hasImg ? '  <div><span class="mj-afp-badge' + (isWinner ? ' win' : '') + '" style="position:static;display:inline-block">#' + byteRank + ' Sharpness' + (isWinner ? ' · Active' : '') + '</span></div>' : '') +
 				'  <div class="mj-afp-stats">' +
 				(c.sharp ? '    <span><strong>Sharp:</strong> ' + c.sharp + '</span>' : '') +
-				'    <span><strong>JPEG:</strong> ' + kb + '</span>' +
+				(hasImg ? '    <span><strong>JPEG:</strong> ' + kb + '</span>' : '') +
 				'    <span><strong>FV:</strong> ' + c.fv + '</span>' +
 				'    <span><strong>Pos:</strong> ' + offsetText + '</span>' +
 				'  </div>' +
@@ -275,10 +277,13 @@
 				'</div>';
 
 			card.querySelector('.mj-afp-desc').textContent = desc;
-			card.querySelector('.mj-afp-imgwrap').addEventListener('click', e => {
-				e.stopPropagation();
-				openZoom(idx);
-			});
+			const imgWrap = card.querySelector('.mj-afp-imgwrap');
+			if (imgWrap) {
+				imgWrap.addEventListener('click', e => {
+					e.stopPropagation();
+					openZoom(idx);
+				});
+			}
 
 			const selBtn = card.querySelector('[data-select]');
 			selBtn.disabled = busySelectId != null || curPos == null;
