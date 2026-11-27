@@ -140,6 +140,9 @@ function mjHourCycle(locale, cycle, zone) {
 	if (cycle !== 'h11' && cycle !== 'h12') return 'h23';
 	const m = /^([a-z]{2,3})(?:-[A-Z][a-z]{3})?(?:-([A-Z]{2}|\d{3}))?(?:-|$)/.exec(locale || '');
 	if (!m) return 'h23';
+	// A locale that names its hour cycle (-u-hc-h12) was chosen, not defaulted
+	// to: some browsers carry the system's own 12/24 setting that way.
+	if (/-u(?:-[a-z0-9]{2,8})*?-hc-/.test(locale)) return cycle;
 	if (m[1] === 'en' && (!m[2] || m[2] === 'US') && !MJ_US_ZONE.test(zone || '')) return 'h23';
 	return cycle;
 }

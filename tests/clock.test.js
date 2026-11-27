@@ -38,6 +38,9 @@ for (const [locale, own, zone, want, why] of [
 	['ko-KR', 'h12', 'Asia/Seoul', 'h12', 'a 12-hour language'],
 	['zh-Hant-TW', 'h12', 'Asia/Taipei', 'h12', 'with a script subtag'],
 	['ja-JP', 'h11', 'Asia/Tokyo', 'h11', 'the language\'s own 12-hour cycle is kept'],
+	['en-u-hc-h12', 'h12', 'Europe/Berlin', 'h12', 'a 12-hour clock the reader asked for by name'],
+	['en-US-u-ca-gregory-hc-h11', 'h11', 'Europe/Berlin', 'h11', '...among other extensions'],
+	['en-US-u-ca-gregory', 'h12', 'Europe/Berlin', 'h23', 'an extension that is not the hour cycle'],
 	['', 'h12', 'America/New_York', 'h23', 'no locale to go by'],
 	['en-US', 'h12', undefined, 'h23', 'no zone to go by'],
 ]) {
