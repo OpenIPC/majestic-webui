@@ -37,7 +37,7 @@
 	const when = (iso) => {
 		if (!iso) return '';
 		const d = new Date(iso);
-		return isNaN(d) ? iso : d.toLocaleString();
+		return isNaN(d) ? iso : d.toLocaleString(undefined, mjTimeOpts());
 	};
 
 	// ---- inbox ----

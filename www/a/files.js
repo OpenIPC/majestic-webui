@@ -64,14 +64,14 @@
 	function fmtTime(s) {
 		const ms = s * 1000;
 		if (!ms) return '';
-		if (devIana) return new Date(ms).toLocaleString(undefined, { timeZone: devIana });
+		if (devIana) return new Date(ms).toLocaleString(undefined, mjTimeOpts({ timeZone: devIana }));
 		if (devOffsetMs !== null) return fmtDeviceTime(ms, devOffsetMs); // main.js
-		return new Date(ms).toLocaleString(); // pre-pulse
+		return new Date(ms).toLocaleString(undefined, mjTimeOpts()); // pre-pulse
 	}
 	function titleTime(s) {
 		const ms = s * 1000;
 		if (!ms || (devIana === null && devOffsetMs === null)) return '';
-		return attr(devZone + ' — ' + new Date(ms).toLocaleString() + ' your time');
+		return attr(devZone + ' — ' + new Date(ms).toLocaleString(undefined, mjTimeOpts()) + ' your time');
 	}
 
 	apiFetch('/cgi-bin/j/pulse.cgi', { credentials: 'same-origin' }).then(r => r.json()).then(j => {

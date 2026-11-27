@@ -74,7 +74,7 @@
 			ms = Date.UTC(year - 1, mon, +m[2], +m[3], +m[4], +m[5]) - tzOffsetMs;
 		// Only the stamp is replaced; host, facility.severity and the message stay
 		// exactly as syslogd wrote them.
-		return new Date(ms).toLocaleString() + ' ' + raw.slice(m[0].length);
+		return new Date(ms).toLocaleString(undefined, mjTimeOpts()) + ' ' + raw.slice(m[0].length);
 	}
 
 	apiFetch('/cgi-bin/j/logmeta.cgi', { credentials: 'same-origin' }).then(r => r.json()).then(meta => {
