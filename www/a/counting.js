@@ -23,6 +23,8 @@
 	let follows = null;
 	let hist = null;
 	let timer = null;
+	// What is on screen, as load() last drew it, or null for nothing.
+	let shown = null;
 
 	function el(tag, cls, text) {
 		const e = document.createElement(tag);
@@ -77,7 +79,12 @@
 
 	function paintState() {
 		const s = D.state(live);
-		$('#ct-main').hidden = s !== 'on';
+		// A poll the camera did not answer keeps the last figures on screen,
+		// under the note that says so, as a history that failed to load
+		// does: hiding them emptied the page and put the reader back at its
+		// top, to stay there once the camera answered again
+		// (OpenIPC/majestic-webui#749).
+		$('#ct-main').hidden = s !== 'on' && !(s === 'unknown' && shown);
 		if (s === 'unknown')
 			note('warn', 'The camera is not answering — retrying…');
 		else if (s === 'off')
@@ -103,8 +110,7 @@
 	}
 
 	function paintTiles(list) {
-		const box = $('#ct-kpis');
-		box.textContent = '';
+		const box = document.createDocumentFragment();
 		const lines = live.lines || [], zones = live.zones || [];
 		const tot = D.totals(list, lines.length, zones.length);
 		const step = hist && hist.step === 'day' ? 'day' : 'hour';
@@ -132,6 +138,7 @@
 			box.appendChild(tile(name + ' · typical stay', med || '–', '',
 				tot.known ? tot.zones[i].entered + ' visits ' + when : 'not counted ' + when));
 		});
+		$('#ct-kpis').replaceChildren(box);
 	}
 
 	// ── charts ───────────────────────────────────────────────────────────
@@ -158,10 +165,11 @@
 
 	// Grouped bars, one group per slot: `values(slot)` gives each series' value
 	// for a counted slot. A slot not counted is a hatched band with no bars; a
-	// slot counted for part of its length draws its bars faint.
-	function bars(host, list, step, series, values, fmt) {
-		host.textContent = '';
-		const W = Math.max(280, host.clientWidth || 600), H = 150, PAD_L = 30, PAD_B = 18, PAD_T = 8;
+	// slot counted for part of its length draws its bars faint. `width` is
+	// the panel's, measured by the caller before anything is taken off the
+	// page: `host` is not on it yet.
+	function bars(host, width, list, step, series, values, fmt) {
+		const W = Math.max(280, width || 600), H = 150, PAD_L = 30, PAD_B = 18, PAD_T = 8;
 		const plotW = W - PAD_L - 4, plotH = H - PAD_B - PAD_T;
 		let hi = 0;
 		for (const s of list) if (s.state !== 'none') for (const v of values(s)) hi = Math.max(hi, v);
@@ -265,35 +273,41 @@
 		const C3 = ink('--st-c3', '#c96a2e'), C4 = ink('--st-c4', '#8a5cd8');
 		const whole = (v) => String(Math.round(v));
 
+		// Measured while the panels still hold the last charts, and built off
+		// the page: emptying a panel and then asking for its width laid the
+		// page out a whole chart shorter, and the browser pulled the reader
+		// scrolled down there back up to the top, every poll
+		// (OpenIPC/majestic-webui#749).
 		$('#ct-lines-box').hidden = !lines.length;
-		const lbox = $('#ct-lines');
-		lbox.textContent = '';
+		const lbox = $('#ct-lines'), lw = lbox.clientWidth;
+		const lfrag = document.createDocumentFragment();
 		lines.forEach((l, i) => {
-			if (lines.length > 1) lbox.appendChild(el('div', 'small fw-semibold mt-2', word(l && l.name, 'line ' + (i + 1))));
+			if (lines.length > 1) lfrag.appendChild(el('div', 'small fw-semibold mt-2', word(l && l.name, 'line ' + (i + 1))));
 			const h = el('div');
-			lbox.appendChild(h);
-			bars(h, list, step, [{ name: 'in', color: C1 }, { name: 'out', color: C2 }],
+			lfrag.appendChild(h);
+			bars(h, lw, list, step, [{ name: 'in', color: C1 }, { name: 'out', color: C2 }],
 				(s) => [+(s.lines[i] || {}).in || 0, +(s.lines[i] || {}).out || 0], whole);
 		});
+		lbox.replaceChildren(lfrag);
 
 		$('#ct-zones-box').hidden = !zones.length;
-		const zbox = $('#ct-zones');
-		zbox.textContent = '';
+		const zbox = $('#ct-zones'), zw = zbox.clientWidth;
+		const zfrag = document.createDocumentFragment();
 		zones.forEach((z, i) => {
-			if (zones.length > 1) zbox.appendChild(el('div', 'small fw-semibold mt-2', word(z && z.name, 'zone ' + (i + 1))));
+			if (zones.length > 1) zfrag.appendChild(el('div', 'small fw-semibold mt-2', word(z && z.name, 'zone ' + (i + 1))));
 			const h = el('div');
-			zbox.appendChild(h);
-			bars(h, list, step, [{ name: 'on average', color: C3 }, { name: 'most at once', color: C4 }],
+			zfrag.appendChild(h);
+			bars(h, zw, list, step, [{ name: 'on average', color: C3 }, { name: 'most at once', color: C4 }],
 				(s) => [+(s.zones[i] || {}).mean || 0, +(s.zones[i] || {}).peak || 0],
 				(v) => (v < 10 && v % 1 ? v.toFixed(1) : String(Math.round(v))));
 		});
+		zbox.replaceChildren(zfrag);
 	}
 
 	function paintDwell(list) {
 		const zones = live.zones || [];
-		const box = $('#ct-dwell');
+		const box = document.createDocumentFragment();
 		$('#ct-dwell-box').hidden = !zones.length;
-		box.textContent = '';
 		const tot = D.totals(list, 0, zones.length);
 		const words = D.dwellBins(hist && hist.dwellEdges);
 		zones.forEach((z, i) => {
@@ -322,6 +336,7 @@
 			});
 			box.appendChild(tbl);
 		});
+		$('#ct-dwell').replaceChildren(box);
 	}
 
 	// ── the latest events ────────────────────────────────────────────────
@@ -348,16 +363,16 @@
 
 	function paintEvents() {
 		const box = $('#ct-events');
-		box.textContent = '';
 		if (!Array.isArray(live.events)) {
-			box.appendChild(el('li', 'small text-secondary', 'The camera did not say what happened lately.'));
+			box.replaceChildren(el('li', 'small text-secondary', 'The camera did not say what happened lately.'));
 			return;
 		}
 		const evs = live.events.slice(-12).reverse();
 		if (!evs.length) {
-			box.appendChild(el('li', 'small text-secondary', 'Nothing yet since the camera started counting.'));
+			box.replaceChildren(el('li', 'small text-secondary', 'Nothing yet since the camera started counting.'));
 			return;
 		}
+		const list = document.createDocumentFragment();
 		let shown = 0;
 		for (const e of evs) {
 			const w = eventWords(e);
@@ -372,10 +387,11 @@
 				: '–';
 			li.appendChild(el('span', 'ct-event-t text-secondary', at));
 			li.appendChild(el('span', e.kind === 'dwell' ? 'ct-event-w text-warning-emphasis' : 'ct-event-w', w));
-			box.appendChild(li);
+			list.appendChild(li);
 		}
 		// Events the page cannot read are not "nothing happened".
-		if (!shown) box.appendChild(el('li', 'small text-secondary', 'The latest events are of a kind this page cannot show.'));
+		if (!shown) list.appendChild(el('li', 'small text-secondary', 'The latest events are of a kind this page cannot show.'));
+		box.replaceChildren(list);
 	}
 
 	// ── the loop ─────────────────────────────────────────────────────────
@@ -423,11 +439,21 @@
 						? 'the lines or zones changed — waiting for their history'
 						: 'the camera does not say which lines this history was counted under');
 				} else {
-					const list = D.slots(hist, p.from, p.to, now);
-					paintTiles(list);
-					paintCharts(list);
-					paintDwell(list);
+					// Drawn again only when there is something new to draw --
+					// the counts, the period, the minute a partly counted slot
+					// is measured in, the width -- so a chart's tooltip or a
+					// selection is not taken away every five seconds.
+					const key = JSON.stringify([range, live, hist, Math.floor(now / 60), window.innerWidth]);
+					if (key !== shown) {
+						const list = D.slots(hist, p.from, p.to, now);
+						paintTiles(list);
+						paintCharts(list);
+						paintDwell(list);
+						paintEvents();
+						shown = key;
+					}
 					$('#ct-stamp').textContent = fresh ? 'updated ' + new Date().toLocaleTimeString(undefined, mjTimeOpts()) : 'history not updated — retrying';
+					return;
 				}
 				paintEvents();
 			}
@@ -440,6 +466,7 @@
 	// charts and coverage of another period, or of other lines, are not this
 	// one's.
 	function clearPeriod(msg) {
+		shown = null;
 		for (const id of ['#ct-kpis', '#ct-lines', '#ct-zones', '#ct-dwell']) $(id).textContent = '';
 		$('#ct-cover').hidden = true;
 		$('#ct-stamp').textContent = msg;
