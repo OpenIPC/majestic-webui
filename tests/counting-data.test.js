@@ -160,4 +160,28 @@ group('days are local days');
 	check('three or four days', s.length >= 3 && s.length <= 4);
 }
 
+group('the page draws again only when what it draws changes');
+{
+	const live = { enabled: true, rules: 'r', lines: [{ name: 'door', in: 1, out: 0 }], zones: [], events: [] };
+	const hist = { step: 'hour', rules: 'r', dwellEdges: [10, 30], buckets: [{ t: H, covered: 600, lines: [{ in: 1, out: 0 }], zones: [] }] };
+	const key = (lv, hs, now, range, width) => {
+		const list = D.slots(hs, H, now, now);
+		return D.drawKey(range || 'today', width || 900, lv, hs, list, D.coverage(list, 'hour', now));
+	};
+	// 9:05:00 and 9:05:05 on the same answers: the same picture.
+	const a = key(live, hist, H + 300);
+	check('a poll with nothing new is not drawn again', a === key(live, hist, H + 305));
+	check('a crossing more is', a !== key({ ...live, lines: [{ name: 'door', in: 2, out: 0 }] }, hist, H + 300));
+	check('another period is', a !== key(live, hist, H + 300, 'week'));
+	check('another width is', a !== key(live, hist, H + 300, 'today', 1200));
+	check('a new history is', a !== key(live, { ...hist, buckets: [{ t: H, covered: 600, lines: [{ in: 2, out: 0 }], zones: [] }] }, H + 300));
+	// 600 counted seconds is the whole (98% and more) of an hour 612 s old
+	// and part of one a second older: the slot changes class within one
+	// minute, with no new answer from the camera.
+	const s1 = D.slots(hist, H, H + 612, H + 612), s2 = D.slots(hist, H, H + 613, H + 613);
+	check('the slot does change class there', s1[0].state === 'full' && s2[0].state === 'part');
+	check('and that is drawn, though the minute is the same',
+		Math.floor((H + 612) / 60) === Math.floor((H + 613) / 60) && key(live, hist, H + 612) !== key(live, hist, H + 613));
+}
+
 done();

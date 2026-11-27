@@ -244,7 +244,19 @@
 		return track === true && !!F && F.offered(caps);
 	}
 
+	// What a redraw of the period would put on the page, as one string: the
+	// page draws again only when it differs from the one last drawn. It is
+	// made of what is drawn -- the slots as slots() classes them at this
+	// second, the coverage sentence, the live answer, the period and the
+	// width -- not of the clock: a slot that becomes partly counted in the
+	// middle of a minute is a new picture, and a poll that changes nothing
+	// on the page is not, so a chart's tooltip outlives it.
+	function drawKey(range, width, live, hist, list, cover) {
+		return JSON.stringify([range, width, live, hist ? [hist.step, hist.dwellEdges] : null, list, cover]);
+	}
+
 	const api = {
+		drawKey: drawKey,
 		slots: slots,
 		totals: totals,
 		dwellBins: dwellBins,
