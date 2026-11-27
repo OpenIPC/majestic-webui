@@ -84,6 +84,10 @@
 		// does: hiding them emptied the page and put the reader back at its
 		// top, to stay there once the camera answered again
 		// (OpenIPC/majestic-webui#749).
+		// Counting off, or nothing to count, is an answer: what was drawn
+		// before it is not this camera's figures any more, and a poll that
+		// fails after it must not bring them back.
+		if (s === 'off' || s === 'empty') shown = null;
 		$('#ct-main').hidden = s !== 'on' && !(s === 'unknown' && shown);
 		if (s === 'unknown')
 			note('warn', 'The camera is not answering — retrying…');
@@ -439,13 +443,13 @@
 						? 'the lines or zones changed — waiting for their history'
 						: 'the camera does not say which lines this history was counted under');
 				} else {
-					// Drawn again only when there is something new to draw --
-					// the counts, the period, the minute a partly counted slot
-					// is measured in, the width -- so a chart's tooltip or a
-					// selection is not taken away every five seconds.
-					const key = JSON.stringify([range, live, hist, Math.floor(now / 60), window.innerWidth]);
+					// Drawn again only when there is something new to draw
+					// (D.drawKey), so a chart's tooltip or a selection is not
+					// taken away every five seconds.
+					const list = D.slots(hist, p.from, p.to, now);
+					const cover = D.coverage(list, hist.step === 'day' ? 'day' : 'hour', now);
+					const key = D.drawKey(range, window.innerWidth, live, hist, list, cover);
 					if (key !== shown) {
-						const list = D.slots(hist, p.from, p.to, now);
 						paintTiles(list);
 						paintCharts(list);
 						paintDwell(list);
