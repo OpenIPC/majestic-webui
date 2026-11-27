@@ -149,7 +149,7 @@
 	function slotTitle(s, step) {
 		const d = new Date(s.t * 1000);
 		const when = step === 'hour'
-			? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+			? d.toLocaleTimeString(undefined, mjTimeOpts({ hour: '2-digit', minute: '2-digit' }))
 			: d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 		if (s.state === 'none') return when + ' — not counted';
 		if (s.state === 'part') return when + ' — counted for ' + Math.round(s.covered / 60) + ' min of it';
@@ -368,7 +368,7 @@
 			// /api/v1/counting reports it; one that is not a time gets none
 			// rather than 1970's.
 			const at = typeof e.t === 'number' && isFinite(e.t) && e.t > 0
-				? new Date(e.t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+				? new Date(e.t).toLocaleTimeString(undefined, mjTimeOpts({ hour: '2-digit', minute: '2-digit', second: '2-digit' }))
 				: '–';
 			li.appendChild(el('span', 'ct-event-t text-secondary', at));
 			li.appendChild(el('span', e.kind === 'dwell' ? 'ct-event-w text-warning-emphasis' : 'ct-event-w', w));
@@ -427,7 +427,7 @@
 					paintTiles(list);
 					paintCharts(list);
 					paintDwell(list);
-					$('#ct-stamp').textContent = fresh ? 'updated ' + new Date().toLocaleTimeString() : 'history not updated — retrying';
+					$('#ct-stamp').textContent = fresh ? 'updated ' + new Date().toLocaleTimeString(undefined, mjTimeOpts()) : 'history not updated — retrying';
 				}
 				paintEvents();
 			}

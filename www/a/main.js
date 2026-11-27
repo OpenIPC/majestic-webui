@@ -125,6 +125,42 @@ function mjGet(cfg, dot) {
 	return dot.split('.').reduce((o, k) => (o == null ? undefined : o[k]), cfg);
 }
 
+// Which clock every time on these pages is drawn on: 24-hour unless the reader
+// plainly uses the other one (#750). Left to the browser, a time follows its
+// language, and the language is a poor witness here: American English is the
+// default English across much of the world, so a camera owner in Europe or Asia got
+// "5:47:07 PM" on every page from a setting they never chose. Where the
+// language asks for a 12-hour clock and is not that default -- Korean, Hindi,
+// Australian English -- it is followed. American English is followed only
+// where the browser's own clock is also in a US time zone, since that is where
+// the person sitting at it is. The browser's zone, not the camera's: the
+// convention belongs to the reader, and the two often differ.
+const MJ_US_ZONE = /^(US\/|America\/(New_York|Detroit|Kentucky\/\w+|Louisville|Indiana\/\w+|Indianapolis|Fort_Wayne|Chicago|Menominee|North_Dakota\/\w+|Knox_IN|Denver|Boise|Shiprock|Phoenix|Los_Angeles|Anchorage|Juneau|Sitka|Metlakatla|Yakutat|Nome|Adak|Atka|Puerto_Rico|St_Thomas|Virgin)$|Pacific\/(Honolulu|Johnston|Guam|Saipan|Pago_Pago|Samoa|Midway)$)/;
+function mjHourCycle(locale, cycle, zone) {
+	if (cycle !== 'h11' && cycle !== 'h12') return 'h23';
+	const m = /^([a-z]{2,3})(?:-[A-Z][a-z]{3})?(?:-([A-Z]{2}|\d{3}))?(?:-|$)/.exec(locale || '');
+	if (!m) return 'h23';
+	// A locale that names its hour cycle (-u-hc-h12) was chosen, not defaulted
+	// to: some browsers carry the system's own 12/24 setting that way.
+	if (/-u(?:-[a-z0-9]{2,8})*?-hc-/.test(locale)) return cycle;
+	if (m[1] === 'en' && (!m[2] || m[2] === 'US') && !MJ_US_ZONE.test(zone || '')) return 'h23';
+	return cycle;
+}
+// Options for toLocaleString/toLocaleTimeString, with `extra` merged in. Any
+// call that shows an hour goes through this; a date alone does not need it.
+let _mjCycle;
+function mjTimeOpts(extra) {
+	if (!_mjCycle) {
+		try {
+			const r = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions();
+			_mjCycle = mjHourCycle(r.locale, r.hourCycle || (r.hour12 ? 'h12' : 'h23'), r.timeZone);
+		} catch (e) {
+			_mjCycle = 'h23';
+		}
+	}
+	return Object.assign({ hourCycle: _mjCycle }, extra);
+}
+
 // Camera wall clock. /etc/timezone is a display label, not an IANA name --
 // time.js writes it de-underscored ("America/New York"), which
 // Intl.DateTimeFormat rejects with a RangeError. So the camera's zone is applied
@@ -141,7 +177,7 @@ function parseTzOffsetMs(s) {
 }
 
 function fmtDeviceTime(epochMs, offsetMs) {
-	return new Date(epochMs + offsetMs).toLocaleString(undefined, { timeZone: 'UTC' });
+	return new Date(epochMs + offsetMs).toLocaleString(undefined, mjTimeOpts({ timeZone: 'UTC' }));
 }
 
 // ...and the reader's own clock, which is the one the signature bar shows. Not
@@ -154,7 +190,7 @@ function localClock() {
 	if (!el) return;
 	const tick = () => {
 		const d = new Date();
-		el.textContent = d.toLocaleTimeString();
+		el.textContent = d.toLocaleTimeString(undefined, mjTimeOpts());
 		el.dateTime = d.toISOString();
 		el.title = d.toLocaleDateString(undefined, {
 			weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
