@@ -8627,6 +8627,10 @@
 		const serialize = () => parts.map(p => p.id === 'text' ? p.text : p.fmt).join('');
 
 		function commit() {
+			// The board is drawn only at the start of the line, so adding it,
+			// choosing it or dragging it puts it there.
+			const led = OSD_CODES.leadBoard ? OSD_CODES.leadBoard(parts, open) : null;
+			if (led) { parts = led.parts; open = led.open; }
 			field.setValue(serialize());
 			updateDirty();
 			draw();
@@ -8661,6 +8665,12 @@
 				w.textContent = bad.join(', ') + (bad.length === 1 ? ' is not a code this camera knows' :
 					' are not codes this camera knows') +
 					' — ' + OSD_CODES.unknownEffect(DIALECT, bad.length > 1) + '.';
+				raw.appendChild(w);
+			}
+			if (OSD_CODES.boardMisplaced && OSD_CODES.boardMisplaced(t)) {
+				const w = el('p', 'mj-live-hint mj-md-warn');
+				w.textContent = '%{plates} draws the board only at the start of the line; ' +
+					'where it is now, the camera prints the newest plate as text.';
 				raw.appendChild(w);
 			}
 		}
@@ -10663,7 +10673,8 @@
 				const onVideo = el('p', 'mj-live-hint');
 				onVideo.innerHTML = 'To keep the plates in the video a recorder stores, put ' +
 					'<code>%{plates}</code> at the start of an overlay\'s template in ' +
-					'<a href="camera.cgi?tab=osd">' + esc(label('osd')) + '</a>: the last 8 ' +
+					'<a href="camera.cgi?tab=osd">' + esc(label('osd')) + '</a>, with its ' +
+					'<b>Enable</b> switch on: the last 8 ' +
 					'reads as a board, each character green or amber by how sure it was. ' +
 					'<code>%{plate:2}</code> puts a single read anywhere. Plates in the picture ' +
 					'reach everyone who sees the video, recordings and share links included.';

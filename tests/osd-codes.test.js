@@ -75,6 +75,25 @@ check('a board with a count and an age is known', C.unknownCodes('%{plates:8:30m
 check('a read counted back is known', C.unknownCodes('Before: %{plate:2}', PLATES).length === 0);
 check('a camera without plate reading flags them', C.unknownCodes('%{plates}', NEW).length === 1);
 
+group('the plate board starts its line');
+check('at the start it is in place', !C.boardMisplaced('%{plates} Gate 2'));
+check('after spaces too', !C.boardMisplaced('  %{plates:8:30m}'));
+check('after words it is not', C.boardMisplaced('Gate %{plates}'));
+check('escaped it is words, not a board', !C.boardMisplaced('Gate %%{plates}'));
+check('a single read is not a board', !C.boardMisplaced('Gate %{plate:2}'));
+check('no board, nothing to say', !C.boardMisplaced('%d.%m.%Y'));
+{
+	const parts = [{ id: 'time', fmt: '%H:%M' }, { id: 'gap', fmt: ' ' }, { id: 'plate', fmt: '%{plates}' }];
+	const led = C.leadBoard(parts, 2);
+	check('an added board goes to the front', led.parts[0].fmt === '%{plates}' && led.parts.length === 3);
+	check('and stays the open piece', led.open === 0);
+	check('the rest keep their order', led.parts[1].fmt === '%H:%M' && led.parts[2].fmt === ' ');
+	check('the open piece is followed', C.leadBoard(parts, 0).open === 1 && C.leadBoard(parts, -1).open === -1);
+	check('the pieces given are not changed', parts[2].fmt === '%{plates}');
+	const plain = [{ id: 'plate', fmt: '%{plate:2}' }, { id: 'time', fmt: '%H:%M' }];
+	check('without a board nothing moves', C.leadBoard(plain, 1).parts === plain);
+}
+
 group('the template as pieces');
 const KNOWN = [
 	{ id: 'time', fmt: '%H:%M' }, { id: 'time', fmt: '%H:%M:%S' },

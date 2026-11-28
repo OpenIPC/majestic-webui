@@ -84,7 +84,34 @@
 		return out;
 	}
 
-	const api = { CLOCK, dialect, unknownCodes, unknownEffect, parse };
+	// %{plates} draws the board of the last plates read only at the start of
+	// a line (after spaces); anywhere else the camera prints the newest read
+	// as text. A %% in front makes it words, as with every code.
+	const BOARD = /^%\{plates(?::[^}]*)?\}/;
+	function boardAt(t) {
+		const s = String(t);
+		for (let i = 0; i < s.length; i++) {
+			if (s.startsWith('%%', i)) { i++; continue; }
+			if (s[i] === '%' && BOARD.test(s.slice(i))) return i;
+		}
+		return -1;
+	}
+	// Whether a template has a board somewhere it cannot be one.
+	function boardMisplaced(t) {
+		const i = boardAt(t);
+		return i > 0 && String(t).slice(0, i).trim() !== '';
+	}
+	// The composer's pieces with a board piece moved to the front, where the
+	// camera draws it, and the open piece's index followed through the move.
+	function leadBoard(parts, open) {
+		const i = parts.findIndex(p => p && typeof p.fmt === 'string' && BOARD.test(p.fmt));
+		if (i <= 0) return { parts, open };
+		const out = parts.slice();
+		out.unshift(out.splice(i, 1)[0]);
+		return { parts: out, open: open === i ? 0 : open >= 0 && open < i ? open + 1 : open };
+	}
+
+	const api = { CLOCK, dialect, unknownCodes, unknownEffect, parse, boardMisplaced, leadBoard };
 	if (typeof module === 'object' && module.exports) module.exports = api;
 	if (typeof window === 'object') window.MajesticOsdCodes = api;
 })();
