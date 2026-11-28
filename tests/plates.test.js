@@ -51,6 +51,15 @@ group('the same read arriving twice is one read; the same plate later is another
 		s.offer(plate('A123BC77'), 1000 + P.SAME_MS + 1) === true);
 }
 
+group('two vehicles that read alike are two reads');
+{
+	const s = P.store();
+	s.offer(plate('A123BC77'), 1000);
+	check('the same text on another vehicle is kept',
+		s.offer(plate('A123BC77', { r: [[1, 1, 1, 1, 2, 80, 9]] }), 1500) === true);
+	check('and both are listed', s.reads().length === 2);
+}
+
 group('the list is capped');
 {
 	const s = P.store(3);
@@ -65,9 +74,12 @@ group('what plate reading is missing');
 		lpr: { enabled: true }, objectDetect: { enabled: true, vehicles: true } }) === null);
 	check('nothing to say while plate reading is off', P.missing({
 		lpr: { enabled: false }, objectDetect: { enabled: false } }) === null);
+	check('settings the camera did not send are not called off',
+		P.missing({ lpr: { enabled: true } }) === null &&
+		P.missing({ lpr: { enabled: true }, objectDetect: { enabled: true } }) === null);
 	const off = P.missing({ lpr: { enabled: true }, objectDetect: { enabled: false } });
 	check('detection off is said', off && off[0] === 'object detection is off');
-	const noVeh = P.missing({ lpr: { enabled: true }, objectDetect: { enabled: true } });
+	const noVeh = P.missing({ lpr: { enabled: true }, objectDetect: { enabled: true, vehicles: false } });
 	check('vehicles not asked for is said',
 		noVeh && noVeh[0] === 'object detection does not report vehicles');
 	check('a config with no sections at all does not throw', P.missing({}) === null);

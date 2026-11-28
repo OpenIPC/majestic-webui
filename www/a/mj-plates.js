@@ -19,8 +19,9 @@
 	'use strict';
 
 	const MAX = 20;
-	// The same plate again this soon is the same read reaching a page that
-	// reconnected, not a second car.
+	// The same plate, on the same vehicle, again this soon is the same read
+	// reaching a page that reconnected, not a second car. Two vehicles that
+	// read alike are two reads.
 	const SAME_MS = 5000;
 
 	// --- the store: no DOM, so the tests can reach it ---------------------
@@ -34,11 +35,13 @@
 				if (!ev || ev.src !== 'plate' || !ev.active) return false;
 				if (typeof ev.text !== 'string' || !ev.text) return false;
 				const text = ev.text.slice(0, 24);
-				const last = list[0];
-				if (last && last.text === text && now - last.at < SAME_MS) return false;
 				const b = Array.isArray(ev.r) && Array.isArray(ev.r[0]) ? ev.r[0] : [];
 				const score = typeof b[5] === 'number' ? b[5] : 0;
 				const id = typeof b[6] === 'number' ? b[6] : 0;
+				for (const r of list) {
+					if (now - r.at >= SAME_MS) break;
+					if (r.text === text && r.vehicle === id) return false;
+				}
 				list.unshift({ text: text, score: score, vehicle: id, at: now });
 				if (list.length > cap) list.length = cap;
 				return true;
@@ -50,14 +53,16 @@
 	// What the page tells someone about the settings plates depend on: they
 	// are read off the vehicles object detection reports, so with detection
 	// off, or vehicles not asked for, plate reading has nothing to read but
-	// what the motion fallback finds. Null when nothing is missing.
+	// what the motion fallback finds. Null when nothing is missing -- and
+	// only what the camera's config SAYS is missing: a key it did not send is
+	// not reported as off.
 	function missing(config) {
 		const od = (config && config.objectDetect) || {};
 		const lpr = (config && config.lpr) || {};
 		if (lpr.enabled !== true) return null;
 		const out = [];
-		if (od.enabled !== true) out.push('object detection is off');
-		else if (od.vehicles !== true) out.push('object detection does not report vehicles');
+		if (od.enabled === false) out.push('object detection is off');
+		else if (od.vehicles === false) out.push('object detection does not report vehicles');
 		return out.length ? out : null;
 	}
 

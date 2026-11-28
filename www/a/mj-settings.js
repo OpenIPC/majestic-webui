@@ -10614,16 +10614,22 @@
 			'<code>LicensePlateInfo</code>, in the system log, and in recordings with ' +
 			'<code>records.metadata</code> on.';
 		box.appendChild(what);
-		const need = P.missing(state.config);
-		if (need) {
-			const warn = el('div', 'alert alert-warning mj-plates-need');
+		// Drawn now and again after every save (refresh() runs liveSync), so
+		// it describes the config the camera holds, not the one at mount.
+		const warn = el('div', 'alert alert-warning mj-plates-need');
+		box.appendChild(warn);
+		const sayNeed = () => {
+			const need = P.missing(state.config);
+			warn.hidden = !need;
+			if (!need) return;
 			warn.innerHTML = 'No vehicles to read: ' + esc(need.join(', ')) + '. Turn on ' +
 				'<b>Enable</b> and <b>Vehicles</b> in <a href="camera.cgi?tab=objectDetect">' +
 				esc(label('objectDetect')) + '</a>.' +
-				(state.config.lpr && state.config.lpr.fallback !== false
-					? ' Until then only the fallback reads, where something moves.' : '');
-			box.appendChild(warn);
-		}
+				(state.config.lpr && state.config.lpr.fallback === false ? ''
+					: ' Until then only the fallback reads, where something moves.');
+		};
+		sayNeed();
+		(state.liveSync = state.liveSync || []).push(sayNeed);
 		const head = el('div', 'mj-live-grp-head');
 		head.innerHTML = '<span class="mj-cap">Plates read</span><span class="mj-live-rule"></span>';
 		box.appendChild(head);
