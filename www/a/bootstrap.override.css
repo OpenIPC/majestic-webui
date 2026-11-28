@@ -3758,6 +3758,11 @@ button.mj-osd-chip,
 	background: #c9a227;
 }
 
+/* A glyph the camera gave no confidence for: neither sure nor unsure. */
+.mj-plates-bar.mj-plates-unknown {
+	background: var(--bs-secondary-bg);
+}
+
 .mj-plates-doubt .mj-plates-meta {
 	color: #c9a227;
 }

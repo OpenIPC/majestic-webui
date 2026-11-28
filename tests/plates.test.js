@@ -79,10 +79,13 @@ group('each glyph keeps its own confidence, and the weakest one is found');
 	s.offer(plate('Ж1234ЛП', { chars: [90, 91, 92, 93, 94, 95, 96, 97, 98], read: 13 }), 2000);
 	check('glyphs, not bytes: a Cyrillic plate gets seven',
 		s.reads()[0].chars.length === 7);
-	s.offer(plate('X001XX799', { chars: ['x', -5, 300] }), 3000);
-	check('a value that is not a percentage counts as unsure, not as sure',
-		s.reads()[0].chars.join() === '0,0,0');
+	s.offer(plate('X001XX799', { chars: ['x', -5, 300, 88] }), 3000);
+	const odd = s.reads()[0].chars;
+	check('a value that is not a percentage is unknown, not 0% sure',
+		odd[0] === null && odd[1] === null && odd[2] === null && odd[3] === 88);
+	check('and the weakest ignores the unknown ones', P.weakest(s.reads()[0]) === 88);
 	check('a read with no per-glyph confidence has no weakest', P.weakest({ chars: [] }) === null);
+	check('nor one whose every value is unknown', P.weakest({ chars: [null, null] }) === null);
 }
 
 group('the camera\'s history and the live socket make one list');
@@ -99,6 +102,37 @@ group('the camera\'s history and the live socket make one list');
 	check('a new live read goes on top', s.offer(plate('B222BB22', { read: 8 }), 9000) === true &&
 		s.reads()[0].seq === 8);
 	check('a live read does not know about pictures', s.reads()[0].images === null);
+}
+
+group('a read seen live first takes the camera\'s account of it from history');
+{
+	const s = P.store();
+	s.offer(plate('X001XX799', { read: 9, chars: [] }), 7000);
+	check('it is listed', s.reads().length === 1 && s.reads()[0].images === null);
+	s.history({ reads: [{ seq: 9, t: 6500, text: 'X001XX799', conf: 97,
+		chars: [99, 99, 99, 99, 99, 99, 99, 99, 99], vehicle: 3, images: true }] });
+	const r = s.reads()[0];
+	check('still once', s.reads().length === 1);
+	check('with the camera\'s time, score, glyphs and pictures',
+		r.at === 6500 && r.score === 97 && r.chars.length === 9 && r.images === true);
+}
+
+group('reads the camera numbered differently are two reads, however alike');
+{
+	const s = P.store();
+	s.offer(plate('A123BC77', { read: 20 }), 1000);
+	check('a second numbered read of the same plate and vehicle is kept',
+		s.offer(plate('A123BC77', { read: 21 }), 1500) === true && s.reads().length === 2);
+}
+
+group('a read whose time is not known says so, and goes last');
+{
+	const s = P.store();
+	s.history({ reads: [
+		{ seq: 2, text: 'A123BC77', conf: 90, chars: [], vehicle: 0, images: false },
+		{ seq: 1, t: 1000, text: 'X001XX799', conf: 90, chars: [], vehicle: 0, images: false },
+	] });
+	check('no time is not the epoch', s.reads()[1].at === null && s.reads()[0].seq === 1);
 	check('a document that is not one is ignored', s.history({}) === false && s.history(null) === false);
 }
 

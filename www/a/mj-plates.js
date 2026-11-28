@@ -38,21 +38,40 @@
 		const cap = max || MAX;
 		const list = [];
 
+		// A value that is not a percentage is unknown, not "0% sure": the
+		// camera did not say, and saying it was unsure would be a claim.
 		function chars(a, n) {
 			if (!Array.isArray(a)) return [];
-			return a.slice(0, n).map(v => (typeof v === 'number' && v >= 0 && v <= 100) ? v : 0);
+			return a.slice(0, n).map(v => (typeof v === 'number' && v >= 0 && v <= 100) ? v : null);
 		}
 
-		function put(read) {
-			// A read the camera numbered is the same read however it arrived.
-			if (read.seq && list.some(r => r.seq === read.seq)) return false;
+		// Newest first; a read whose time is unknown goes last.
+		function order() {
+			list.sort((a, b) => (b.at === null ? -Infinity : b.at) - (a.at === null ? -Infinity : a.at));
+			if (list.length > cap) list.length = cap;
+		}
+
+		function put(read, authoritative) {
+			// A read the camera numbered is the same read however it arrived;
+			// what the camera keeps about it (its time, its score, whether it
+			// has pictures) is the better account of it than the socket's.
+			const same = read.seq ? list.find(r => r.seq === read.seq) : null;
+			if (same) {
+				if (!authoritative) return false;
+				Object.assign(same, read);
+				order();
+				return true;
+			}
+			// Two reads the camera numbered differently are two reads. An
+			// unnumbered one alike to another this soon is the same read
+			// reaching a page that reconnected.
 			for (const r of list) {
-				if (Math.abs(read.at - r.at) >= SAME_MS) continue;
+				if (read.seq && r.seq) continue;
+				if (read.at === null || r.at === null || Math.abs(read.at - r.at) >= SAME_MS) continue;
 				if (r.text === read.text && r.vehicle === read.vehicle) return false;
 			}
 			list.push(read);
-			list.sort((a, b) => b.at - a.at);
-			if (list.length > cap) list.length = cap;
+			order();
 			return true;
 		}
 
@@ -71,7 +90,7 @@
 					vehicle: typeof b[6] === 'number' ? b[6] : 0,
 					images: null, // not said on the socket: try, and hide on 404
 					at: now,
-				});
+				}, false);
 			},
 			// GET /api/v1/plates. True when it added any.
 			history: function (doc) {
@@ -87,8 +106,8 @@
 						score: typeof r.conf === 'number' ? r.conf : 0,
 						vehicle: typeof r.vehicle === 'number' ? r.vehicle : 0,
 						images: r.images === true,
-						at: typeof r.t === 'number' ? r.t : 0,
-					}) || any;
+						at: typeof r.t === 'number' && r.t > 0 ? r.t : null,
+					}, true) || any;
 				}
 				return any;
 			},
@@ -96,9 +115,11 @@
 		};
 	}
 
-	// The least sure glyph, or null without per-glyph confidence.
+	// The least sure glyph, or null without per-glyph confidence. A glyph
+	// the camera gave no value for is not counted either way.
 	function weakest(read) {
-		return read.chars && read.chars.length ? Math.min.apply(null, read.chars) : null;
+		const known = (read.chars || []).filter(v => v !== null);
+		return known.length ? Math.min.apply(null, known) : null;
 	}
 
 	// What the page tells someone about the settings plates depend on: they
@@ -120,6 +141,7 @@
 	// --- the mount: the DOM half -----------------------------------------
 
 	function clock(t) {
+		if (t === null) return 'time unknown';
 		const opts = typeof window === 'object' && window.mjTimeOpts ? window.mjTimeOpts() : {};
 		const d = new Date(t);
 		const today = new Date().toDateString() === d.toDateString();
@@ -146,8 +168,13 @@
 			const c = read.chars[i];
 			if (c !== undefined) {
 				const bar = node('span', 'mj-plates-bar');
-				if (c < FLOOR) bar.classList.add('mj-plates-low');
-				col.title = g + ': ' + c + '% sure';
+				if (c === null) {
+					bar.classList.add('mj-plates-unknown');
+					col.title = g + ': confidence not given';
+				} else {
+					if (c < FLOOR) bar.classList.add('mj-plates-low');
+					col.title = g + ': ' + c + '% sure';
+				}
 				col.appendChild(bar);
 			}
 			wrap.appendChild(col);
@@ -176,14 +203,27 @@
 		if (!box) return null;
 		const st = store();
 		const list = node('ol', 'mj-plates-list');
-		const empty = node('p', 'mj-plates-empty',
-			'No plates read yet. The camera keeps its last ' + MAX + ' reads; new ones appear here as they are made.');
+		const empty = node('p', 'mj-plates-empty');
+		// What the list can and cannot say: until the camera has answered
+		// for its earlier reads an empty list means nothing, and if it does
+		// not answer, the list holds only what arrived since.
+		const lost = node('p', 'mj-plates-empty',
+			'The camera\'s earlier reads could not be loaded; this list holds only the ones made since the page was opened.');
+		lost.hidden = true;
 		box.appendChild(empty);
+		box.appendChild(lost);
 		box.appendChild(list);
+		let history = 'loading'; // then 'ok' or 'failed'
 
 		function paint() {
 			const reads = st.reads();
 			empty.hidden = reads.length > 0;
+			empty.textContent = history === 'loading'
+				? 'Loading the camera\'s last reads…'
+				: history === 'ok'
+					? 'No plates read yet. The camera keeps its last ' + MAX + ' reads; new ones appear here as they are made.'
+					: 'No plates read since this page was opened.';
+			lost.hidden = history !== 'failed' || reads.length === 0;
 			while (list.firstChild) list.removeChild(list.firstChild);
 			const pics = opts.pictures ? opts.pictures() : false;
 			for (const r of reads) {
@@ -235,9 +275,18 @@
 		}
 
 		fetch('/api/v1/plates', { credentials: 'same-origin' })
-			.then(r => r.ok ? r.json() : null)
-			.then(doc => { if (!closed && st.history(doc)) paint(); })
-			.catch(() => {});
+			.then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+			.then(doc => {
+				if (closed) return;
+				history = doc && Array.isArray(doc.reads) ? 'ok' : 'failed';
+				st.history(doc);
+				paint();
+			})
+			.catch(() => {
+				if (closed) return;
+				history = 'failed';
+				paint();
+			});
 		open();
 		paint();
 
