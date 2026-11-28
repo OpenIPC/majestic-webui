@@ -643,6 +643,7 @@ EOF
 		PAN_MS=$((PAN_MS + IN_PAN))
 		TILT_MS=$((TILT_MS + IN_TILT))
 		FOCUS_MS=$((FOCUS_MS + IN_FOCUS))
+		[ "$IN_FOCUS" -ne 0 ] 2>/dev/null && ptz_af_track_focus "$IN_FOCUS"
 		# persist=1 is the page leaving with a move not yet committed: the
 		# last delta and the flash copy in one request, in that order.
 		ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$PERSIST"

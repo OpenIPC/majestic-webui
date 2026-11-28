@@ -15,7 +15,7 @@ if echo "$QUERY_STRING" | grep -q 'clear=1'; then
         exit 0
     fi
     ptz_reject_cross_site
-    rm -f "$JSON_FILE" /tmp/peak_*.jpg
+    rm -f "$JSON_FILE" /tmp/peak_*.jpg /tmp/af_peaks_track
     echo "HTTP/1.1 200 OK"
     echo "Content-Type: application/json"
     echo "Cache-Control: no-store"
@@ -63,6 +63,9 @@ if [ -n "$SELECT_ID" ]; then
         exit 0
     fi
 
+    # The manifest is read, never rewritten, until the lens has moved: the
+    # manual-nudge count is keyed to its content and inode (ptz_af_peaks_stamp),
+    # so rewriting it first would make the nudges since the scan read as 0.
     INFO=$(awk -v id="$SELECT_ID" '{
         s=$0; sub(/.*"current_pos":/, "", s); cur=s+0
         s=$0; sub(/.*"last_dir":/, "", s); ldir=s+0
@@ -88,10 +91,19 @@ if [ -n "$SELECT_ID" ]; then
     LDIR=$2
     REC=$3
     TARGET=$4
-    DELTA=$((TARGET - CUR))
+    ptz_read_pos
+    MANUAL_DELTA=$(ptz_af_manual_delta)
+    EFFECTIVE_CUR=$((CUR + MANUAL_DELTA))
+    if [ "$MANUAL_DELTA" -gt 0 ]; then
+        LDIR=1
+    elif [ "$MANUAL_DELTA" -lt 0 ]; then
+        LDIR=-1
+    fi
+    DELTA=$((TARGET - EFFECTIVE_CUR))
     NEW_DIR=$LDIR
     DRIVE_MS=0
     CMD=""
+    NEW_FOCUS_MS="$FOCUS_MS"
 
     if [ "$DELTA" -ne 0 ]; then
         if [ "$DELTA" -gt 0 ]; then
@@ -127,7 +139,8 @@ if [ -n "$SELECT_ID" ]; then
                 exit 0
             fi
             ptz_read_pos
-            ptz_write_pos "$PAN_MS" "$TILT_MS" "$((FOCUS_MS + DELTA))" 1
+            NEW_FOCUS_MS=$((FOCUS_MS + DELTA))
+            ptz_write_pos "$PAN_MS" "$TILT_MS" "$NEW_FOCUS_MS" 1
         fi
     fi
 
@@ -137,6 +150,7 @@ if [ -n "$SELECT_ID" ]; then
         sub(/"winner":[-0-9]+/, "\"winner\":" win)
         print
     }' "$JSON_FILE" > "${JSON_FILE}.tmp" && mv "${JSON_FILE}.tmp" "$JSON_FILE"
+    ptz_af_reset_track
 
     echo "HTTP/1.1 200 OK"
     echo "Content-Type: application/json"
@@ -146,13 +160,22 @@ if [ -n "$SELECT_ID" ]; then
     exit 0
 fi
 
-# Default GET: return candidate manifest
+# Default GET: return candidate manifest with live manual-focus offset applied
 echo "HTTP/1.1 200 OK"
 echo "Content-Type: application/json"
 echo "Cache-Control: no-store"
 echo ""
 if [ -f "$JSON_FILE" ]; then
-    cat "$JSON_FILE"
+    md=$(ptz_af_manual_delta)
+    awk -v md="$md" '{
+        if (md != 0) {
+            s=$0; sub(/.*"current_pos":/, "", s); cur=s+0
+            eff = cur + md
+            sub(/"current_pos":[-0-9]+/, "\"current_pos\":" eff)
+            sub(/"winner":[-0-9]+/, "\"winner\":-1,\"manual_offset\":" md)
+        }
+        print
+    }' "$JSON_FILE"
 else
     echo '{"count":0,"candidates":[]}'
 fi
