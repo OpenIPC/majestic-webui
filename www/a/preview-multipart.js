@@ -24,6 +24,8 @@
 // same picture in H.264 and there is no keyframe/delta structure to exploit. No
 // audio, no talkback, no seek, no statistics worth the name — every control the
 // bar can offer over this is off, and says so rather than sitting there dead.
+// On the Live page the sound and talkback come from a session beside the
+// picture instead (preview-sound.js, #760).
 window.MajesticMultipart = (function () {
 	'use strict';
 

@@ -53,6 +53,15 @@ window.MajesticWebRTC = (function () {
 	// path is a new session, as it always was.
 	const I = () => window.MajesticIce;
 
+	// Whether this browser will hand over a microphone at all: getUserMedia
+	// does not exist outside a secure context, so on a plain-HTTP camera this
+	// is false whatever the transport. One copy, because preview-sound.js asks
+	// it too, for a session it has not opened yet.
+	function micAvailable() {
+		return rtcOk && !!(navigator.mediaDevices &&
+			navigator.mediaDevices.getUserMedia);
+	}
+
 	function attach(video, opts) {
 		opts = opts || {};
 		const onStateOwn = opts.onState || function () {};
@@ -455,10 +464,7 @@ window.MajesticWebRTC = (function () {
 			wantMic = false;
 		}
 
-		function micSupported() {
-			return rtcOk && !!(navigator.mediaDevices &&
-				navigator.mediaDevices.getUserMedia);
-		}
+		function micSupported() { return micAvailable(); }
 
 		function setMic(on) {
 			on = !!on;
@@ -1022,5 +1028,5 @@ window.MajesticWebRTC = (function () {
 		};
 	}
 
-	return { attach: attach, available: rtcOk };
+	return { attach: attach, available: rtcOk, micAvailable: micAvailable };
 })();

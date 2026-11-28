@@ -150,9 +150,11 @@ window.MajesticWasm = (function () {
 		}
 
 		onState('connecting');
-		// This transport carries no audio: the fragments are muxed and splitting
-		// the audio track out to a separate MSE element, with our own A/V sync,
-		// is a second project. Say so once rather than leave a dead control.
+		// This player carries no audio: the socket asks for none, and the
+		// demuxer reads each mdat as video alone. Say so once rather than
+		// leave a dead control. On the Live page the sound comes from a
+		// session beside the picture instead (preview-sound.js, #760), which
+		// keeps this report to itself.
 		onAudio(null);
 
 		function die(reason) {

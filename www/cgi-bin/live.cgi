@@ -43,6 +43,7 @@ hide_title=1; full_bleed=1
 <script src="/a/preview-ice.js"></script>
 <script src="/a/preview-datachannel.js"></script>
 <script src="/a/preview-webrtc.js"></script>
+<script src="/a/preview-sound.js"></script>
 <script src="/a/preview-swap.js"></script>
 <script src="/a/preview-wasm.js"></script>
 <script src="/a/mj-sources.js"></script>
