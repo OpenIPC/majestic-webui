@@ -4,19 +4,6 @@ JSON_FILE="/tmp/af_peaks.json"
 
 . "$(dirname "$0")/../p/ptz_common.sh"
 
-# Ensure /tmp/af_peaks.json records the FOCUS_MS baseline so manual near/far
-# tweaks can be tracked accurately and reversed back to any saved peak.
-ensure_focus_origin() {
-    [ -f "$JSON_FILE" ] || return 0
-    if ! grep -q '"focus_origin_ms":' "$JSON_FILE" 2>/dev/null; then
-        ptz_read_pos
-        awk -v orig="$FOCUS_MS" '{
-            sub(/"current_pos":[-0-9]+/, "&,\"focus_origin_ms\":" orig)
-            print
-        }' "$JSON_FILE" > "${JSON_FILE}.tmp" && mv "${JSON_FILE}.tmp" "$JSON_FILE"
-    fi
-}
-
 # Clear cached candidate peaks: POST ?clear=1
 if echo "$QUERY_STRING" | grep -q 'clear=1'; then
     if [ "$REQUEST_METHOD" != "POST" ]; then
@@ -76,17 +63,18 @@ if [ -n "$SELECT_ID" ]; then
         exit 0
     fi
 
-    ensure_focus_origin
+    # The manifest is read, never rewritten, until the lens has moved: the
+    # manual-nudge count is keyed to its content and inode (ptz_af_peaks_stamp),
+    # so rewriting it first would make the nudges since the scan read as 0.
     INFO=$(awk -v id="$SELECT_ID" '{
         s=$0; sub(/.*"current_pos":/, "", s); cur=s+0
-        s=$0; sub(/.*"focus_origin_ms":/, "", s); forig=s+0
         s=$0; sub(/.*"last_dir":/, "", s); ldir=s+0
         s=$0; sub(/.*"recovery_ms":/, "", s); rec=s+0
         pat="\"id\":" id ",\"pos\":"
         idx=index($0, pat)
         if (idx>0) {
             t=substr($0, idx+length(pat))+0
-            printf "%d %d %d %d %d\n", cur, forig, ldir, rec, t
+            printf "%d %d %d %d\n", cur, ldir, rec, t
         }
     }' "$JSON_FILE")
 
@@ -100,10 +88,9 @@ if [ -n "$SELECT_ID" ]; then
 
     set -- $INFO
     CUR=$1
-    FORIG=$2
-    LDIR=$3
-    REC=$4
-    TARGET=$5
+    LDIR=$2
+    REC=$3
+    TARGET=$4
     ptz_read_pos
     MANUAL_DELTA=$(ptz_af_manual_delta)
     EFFECTIVE_CUR=$((CUR + MANUAL_DELTA))
@@ -157,9 +144,8 @@ if [ -n "$SELECT_ID" ]; then
         fi
     fi
 
-    awk -v tgt="$TARGET" -v forig="$NEW_FOCUS_MS" -v ldir="$NEW_DIR" -v win="$SELECT_ID" '{
+    awk -v tgt="$TARGET" -v ldir="$NEW_DIR" -v win="$SELECT_ID" '{
         sub(/"current_pos":[-0-9]+/, "\"current_pos\":" tgt)
-        sub(/"focus_origin_ms":[-0-9]+/, "\"focus_origin_ms\":" forig)
         sub(/"last_dir":[-0-9]+/, "\"last_dir\":" ldir)
         sub(/"winner":[-0-9]+/, "\"winner\":" win)
         print
