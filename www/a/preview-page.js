@@ -510,6 +510,9 @@
 	const talkTxt = $('#mj-talk-t') || talkLbl;
 	const statsCtl = $('#mj-stats-ctl'), statsBtn = $('#mj-stats-btn'), statsBox = $('#mj-stats');
 	const TALK_TITLE = talkLbl ? talkLbl.title : '';
+	const TALK_RELAY_TITLE = 'This page is plain HTTP, and a browser gives a microphone only to a secure page. ' +
+		'Talk opens a small window from talk.share.openipc.cloud that holds the microphone and sends your voice ' +
+		'straight to the camera on your network. Closing it stops talking.';
 	// The transport is a two-radio segmented picker, not a checkbox: the
 	// alternative deserves a name, and "unchecked" never said what it meant.
 	// The failure tooltip still lands on the WebRTC label (#mj-transport-lbl),
@@ -1053,6 +1056,18 @@
 	// microphone, and silently reopening it because the page rebuilt a player
 	// is not a thing to do on a user's behalf.
 	let talkbackConfigured = false;
+	// Talk through the talk window (preview-talk-relay.js), where the page is
+	// plain HTTP and no player can have a microphone. It belongs to the page,
+	// not to a player: it holds no picture, so a swap or a reattach leaves it
+	// alone. Turning Talk off, or leaving the page, ends it.
+	let talkRelay = null;
+	const relayTalk = () => !!(window.MajesticTalkRelay && window.MajesticTalkRelay.available());
+	// A source or channel the person picks is a new picture, and Talk does not
+	// follow them there unasked: its session is on the socket of the one being
+	// left. The player's Talk ends the same way, with its reattach. The
+	// automatic pick that follows the window's size is not the person's
+	// choice, and a microphone cut off for a resize would be.
+	const endRelayTalk = () => { if (talkRelay && talkRelay.active()) talkRelay.stop(); };
 	// Set once the Main/Sub control has been touched, so a slow config answer
 	// cannot undo it.
 	let userPickedStream = false;
@@ -1091,12 +1106,16 @@
 	// Talkback needs three things at once, and each of them can be absent on
 	// its own: the camera configured to play received audio, a transport that
 	// carries a direction MSE has no concept of, and a secure context — a
-	// browser hands over no microphone on plain HTTP, so the button would ask
-	// for something it can never get.
+	// browser hands over no microphone on plain HTTP. Where the page is plain
+	// HTTP, the talk window stands in for the last two (#762):
+	// preview-talk-relay.js.
 	function syncTalkCtl() {
 		if (!talkCtl) return;
-		const ok = talkbackConfigured && player && player.micSupported();
+		const ok = talkbackConfigured && player && (player.micSupported() || relayTalk());
 		talkCtl.hidden = !ok;
+		// The talk window's session is not the player's, and a new player
+		// changes nothing about it: the control keeps saying what it is doing.
+		if (talkRelay && talkRelay.active()) return;
 		// Put the control back to rest, every time. A player destroyed while
 		// its permission prompt was still up never reports an ending — the
 		// grant lands in a closed player, which releases it silently — so
@@ -1104,7 +1123,7 @@
 		// button stays disabled on "Asking…" until the page is reloaded.
 		if (talk) { talk.checked = false; talk.disabled = false; }
 		if (talkTxt) talkTxt.textContent = 'Talk';
-		if (talkLbl) talkLbl.title = TALK_TITLE;
+		if (talkLbl) talkLbl.title = player && !player.micSupported() ? TALK_RELAY_TITLE : TALK_TITLE;
 	}
 
 	// The stats panel follows the transport rather than the person: MSE has
@@ -1471,6 +1490,36 @@
 		setChip();
 	}
 
+	// What the Talk control says, for the player's microphone or the talk
+	// window's. The player's four states are explained at its onMic below.
+	// The talk window adds 'window': its own prompt, or its first-time
+	// question, is up. Unlike 'asking', that leaves the button usable, so
+	// turning Talk off can close the window.
+	function showMic(state, why, relayed) {
+		if (!talk) return;
+		talk.checked = state === 'on' || state === 'live' || state === 'window';
+		talk.disabled = state === 'asking';
+		if (talkTxt) {
+			talkTxt.textContent = state === 'asking' ? 'Asking…'
+				: state === 'window' ? 'Talk window'
+				: state === 'live' ? 'Connecting…'
+				: state === 'on' ? 'Talking' : 'Talk';
+		}
+		const title = relayed ? TALK_RELAY_TITLE : TALK_TITLE;
+		if (talkLbl) talkLbl.title = why ? why + '\n\n' + title : title;
+		// Only once the camera has accepted, and only over the player's own
+		// session. Talking opens the camera's audio too — it refuses a one-way
+		// audio section — so the listen control follows what was negotiated
+		// rather than what was asked for. The talk window plays the camera's
+		// half of its session nowhere, so through it nothing is heard.
+		if (!relayed && state === 'on' && mute && !mute.checked) {
+			mute.checked = true;
+			audioOn = true;
+			muteTxt.textContent = 'Listening';
+			if (volCtl) volCtl.disabled = false;
+		}
+	}
+
 	function handlersFor(id, onState) {
 		// "Is this attachment the one the page is showing" — which is not the
 		// same question as "has the swap made it live". A retry out of the
@@ -1566,25 +1615,8 @@
 			// microphone is running by then, and a control that cannot stop a
 			// running microphone is the wrong control.
 			onMic: (state, why) => {
-				if (!isLive() || !talk) return;
-				talk.checked = state === 'on' || state === 'live';
-				talk.disabled = state === 'asking';
-				if (talkTxt) {
-					talkTxt.textContent = state === 'asking' ? 'Asking…'
-						: state === 'live' ? 'Connecting…'
-						: state === 'on' ? 'Talking' : 'Talk';
-				}
-				if (talkLbl) talkLbl.title = why ? why + '\n\n' + TALK_TITLE : TALK_TITLE;
-				// Only once the camera has accepted. Talking opens its audio
-				// too — it refuses a one-way audio section — so the listen
-				// control follows what was negotiated rather than what was
-				// asked for.
-				if (state === 'on' && mute && !mute.checked) {
-					mute.checked = true;
-					audioOn = true;
-					muteTxt.textContent = 'Listening';
-					if (volCtl) volCtl.disabled = false;
-				}
+				if (!isLive()) return;
+				showMic(state, why, false);
 			},
 			onStats: (s) => {
 				// The buffered players may carry their bytes over a WebRTC
@@ -2186,7 +2218,7 @@
 			input.autocomplete = 'off';
 			input.__cam = src.camera;
 			input.checked = src.camera === camera;
-			input.addEventListener('change', () => goToSource(src.camera));
+			input.addEventListener('change', () => { endRelayTalk(); goToSource(src.camera); });
 
 			const label = document.createElement('label');
 			label.className = 'mj-seg-lbl';
@@ -2200,8 +2232,8 @@
 		sourceBox.hidden = false;
 	}
 
-	if (s0) s0.addEventListener('change', () => { autoOn = false; goToStream(0); });
-	if (s1) s1.addEventListener('change', () => { autoOn = false; goToStream(1); });
+	if (s0) s0.addEventListener('change', () => { autoOn = false; endRelayTalk(); goToStream(0); });
+	if (s1) s1.addEventListener('change', () => { autoOn = false; endRelayTalk(); goToStream(1); });
 	if (autoCtl) autoCtl.addEventListener('change', () => {
 		autoOn = autoCtl.checked;
 		if (!autoOn) return;
@@ -2349,6 +2381,23 @@
 			syncTalkCtl();
 		});
 		talk.addEventListener('change', () => {
+			// The talk window, where no player can capture. Opened here, in
+			// the click's own event, or the browser blocks it.
+			if (talkRelay && talkRelay.active()) {
+				if (!talk.checked) talkRelay.stop();
+				return;
+			}
+			if (player && !player.micSupported() && relayTalk()) {
+				if (!talk.checked) return;
+				talkRelay = window.MajesticTalkRelay.open({
+					stream: wireStream(),
+					// The name the navbar's Share item carries (p/header.cgi),
+					// for the window to say which camera it is talking to.
+					camera: ($('#nav-share') || { dataset: {} }).dataset.camera || location.host,
+					onMic: (state, why) => showMic(state, why, true),
+				});
+				return;
+			}
 			if (!player) { talk.checked = false; return; }
 			// The player owns the answer, not the checkbox: a refused
 			// permission or a camera that declines leaves this unchecked

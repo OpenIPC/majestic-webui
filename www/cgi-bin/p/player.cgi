@@ -429,10 +429,11 @@ printf '%s' \
 				<input type="range" id="mj-vol" min="0" max="100" value="100" class="mj-vol" disabled aria-label="Volume">
 			</span>
 
-			<!-- Talkback. Revealed only over WebRTC, only where the camera has
-			     audio.outputEnabled, and only in a secure context: a browser
-			     hands over no microphone on plain HTTP, so the button would be
-			     a dead end. -->
+			<!-- Talkback. Revealed only where the camera has
+			     audio.outputEnabled, and only where something can capture: the
+			     player's own WebRTC session in a secure context, or, on plain
+			     HTTP, where a browser hands over no microphone, the talk window
+			     (preview-talk-relay.js, #762). -->
 			<span class="mj-hud mj-tog-wrap" id="mj-talk-ctl" hidden>
 				<input type="checkbox" class="mj-tog-in" id="mj-talk" autocomplete="off">
 				<label class="mj-tog mj-tog-amber" for="mj-talk" id="mj-talk-lbl"
