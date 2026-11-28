@@ -1062,6 +1062,12 @@
 	// alone. Turning Talk off, or leaving the page, ends it.
 	let talkRelay = null;
 	const relayTalk = () => !!(window.MajesticTalkRelay && window.MajesticTalkRelay.available());
+	// A source or channel the person picks is a new picture, and Talk does not
+	// follow them there unasked: its session is on the socket of the one being
+	// left. The player's Talk ends the same way, with its reattach. The
+	// automatic pick that follows the window's size is not the person's
+	// choice, and a microphone cut off for a resize would be.
+	const endRelayTalk = () => { if (talkRelay && talkRelay.active()) talkRelay.stop(); };
 	// Set once the Main/Sub control has been touched, so a slow config answer
 	// cannot undo it.
 	let userPickedStream = false;
@@ -2212,7 +2218,7 @@
 			input.autocomplete = 'off';
 			input.__cam = src.camera;
 			input.checked = src.camera === camera;
-			input.addEventListener('change', () => goToSource(src.camera));
+			input.addEventListener('change', () => { endRelayTalk(); goToSource(src.camera); });
 
 			const label = document.createElement('label');
 			label.className = 'mj-seg-lbl';
@@ -2226,8 +2232,8 @@
 		sourceBox.hidden = false;
 	}
 
-	if (s0) s0.addEventListener('change', () => { autoOn = false; goToStream(0); });
-	if (s1) s1.addEventListener('change', () => { autoOn = false; goToStream(1); });
+	if (s0) s0.addEventListener('change', () => { autoOn = false; endRelayTalk(); goToStream(0); });
+	if (s1) s1.addEventListener('change', () => { autoOn = false; endRelayTalk(); goToStream(1); });
 	if (autoCtl) autoCtl.addEventListener('change', () => {
 		autoOn = autoCtl.checked;
 		if (!autoOn) return;
