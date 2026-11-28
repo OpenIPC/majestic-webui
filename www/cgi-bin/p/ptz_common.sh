@@ -16,6 +16,11 @@ ptz_af_peaks_stamp() {
 	stat -c '%i:%s:%Y' "$AF_PEAKS_JSON" 2>/dev/null
 }
 
+# Track post-scan manual focus nudges relative to /tmp/af_peaks.json.
+# Limitation: only sees focus moves made through the WebUI's CGIs
+# (ptz_presets.cgi?act=track and ptz_apply_axis_delta); focus moves from ONVIF
+# Imaging Move, DVRIP, or direct POST /ptz bypass this tracker because the
+# plugin does not yet expose a focus position ABI command.
 ptz_af_track_focus() {
 	_df="${1:-0}"
 	case "$_df" in ''|*[!0-9-]*) return 0 ;; esac

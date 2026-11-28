@@ -176,10 +176,11 @@
 			imgEl.src = item.imgUrl;
 			imgEl.setAttribute('data-src', item.imgUrl);
 		}
+		const fvLabel = (lastData && lastData.metric === 'zones') ? 'Zones' : 'FV';
 		zoomBox.querySelector('[data-afp="zcap"]').textContent =
 			(zoomIndex + 1) + '/' + zoomItems.length + ' · Peak #' + item.byteRank +
 			(item.sharp ? ' · Sharp ' + item.sharp : '') +
-			' · JPEG ' + item.kb + ' · FV ' + item.fv + ' · ' + item.offsetText;
+			' · JPEG ' + item.kb + ' · ' + fvLabel + ' ' + item.fv + ' · ' + item.offsetText;
 
 		const prevBtn = zoomBox.querySelector('[data-afp="zprev"]');
 		const nextBtn = zoomBox.querySelector('[data-afp="znext"]');
@@ -231,6 +232,7 @@
 			warn.hidden = true;
 		}
 
+		const fvLabel = (lastData && lastData.metric === 'zones') ? 'Zones' : 'FV';
 		const cands = lastData.candidates.slice();
 		const numVal = v => (typeof v === 'number' && !Number.isNaN(v) ? v : -1);
 		const hasSharp = cands.some(c => typeof c.sharp === 'number' && c.sharp > 0);
@@ -267,7 +269,7 @@
 				'  <div class="mj-afp-stats">' +
 				(c.sharp ? '    <span><strong>Sharp:</strong> ' + c.sharp + '</span>' : '') +
 				(hasImg ? '    <span><strong>JPEG:</strong> ' + kb + '</span>' : '') +
-				'    <span><strong>FV:</strong> ' + c.fv + '</span>' +
+				'    <span><strong>' + fvLabel + ':</strong> ' + c.fv + '</span>' +
 				'    <span><strong>Pos:</strong> ' + offsetText + '</span>' +
 				'  </div>' +
 				'  <div class="mj-afp-desc"></div>' +
