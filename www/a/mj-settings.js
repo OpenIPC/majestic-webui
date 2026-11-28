@@ -5727,6 +5727,16 @@
 			opts: [{ fmt: '%{ip}', shows: '203.0.113.10', token: 'ip' }] },
 		{ id: 'uptime', label: 'Uptime',
 			opts: [{ fmt: '%{uptime}', shows: '3d 04:12', token: 'uptime' }] },
+		// What a camera that reads plates read: one read as text, to be put
+		// anywhere, or at the start of a line the board of the last 8, each
+		// glyph coloured by how sure it was. In the picture they reach every
+		// viewer and recording, which the plates list does not.
+		{ id: 'plate', label: 'Licence plate',
+			opts: [
+				{ fmt: '%{plate}', shows: '12:31:05 A123BC77', token: 'plate' },
+				{ fmt: '%{plate:2}', shows: 'the read before it', token: 'plate' },
+				{ fmt: '%{plates}', shows: 'the last 8 as a board (start of a line)', token: 'plates' },
+			] },
 		// A value from outside: a file a script writes, or one sent over HTTP.
 		// The name is the owner's; the chip puts a placeholder in, and the
 		// raw line below is where it is changed.
@@ -8617,6 +8627,10 @@
 		const serialize = () => parts.map(p => p.id === 'text' ? p.text : p.fmt).join('');
 
 		function commit() {
+			// The board is drawn only at the start of the line, so adding it,
+			// choosing it or dragging it puts it there.
+			const led = OSD_CODES.leadBoard ? OSD_CODES.leadBoard(parts, open) : null;
+			if (led) { parts = led.parts; open = led.open; }
 			field.setValue(serialize());
 			updateDirty();
 			draw();
@@ -8651,6 +8665,12 @@
 				w.textContent = bad.join(', ') + (bad.length === 1 ? ' is not a code this camera knows' :
 					' are not codes this camera knows') +
 					' — ' + OSD_CODES.unknownEffect(DIALECT, bad.length > 1) + '.';
+				raw.appendChild(w);
+			}
+			if (OSD_CODES.boardMisplaced && OSD_CODES.boardMisplaced(t)) {
+				const w = el('p', 'mj-live-hint mj-md-warn');
+				w.textContent = '%{plates} draws the board only at the start of the line; ' +
+					'where it is now, the camera prints the newest plate as text.';
 				raw.appendChild(w);
 			}
 		}
@@ -10641,6 +10661,26 @@
 		const live = P.mount(list, {
 			pictures: () => !!(state.config.lpr && state.config.lpr.debug === true),
 		});
+		// For a recorder: the plates in the picture itself. Only where this
+		// camera's templates know the codes, which its schema says.
+		if (OSD_CODES && OSD_CODES.dialect) {
+			// Read off the schema, not the field tree: the tree holds the
+			// section on screen, and this one is not it.
+			const props = (state.schema && state.schema.properties) || {};
+			const osd = (props.osd && props.osd.properties) || {};
+			const d = osd.template ? OSD_CODES.dialect(osd.template) : null;
+			if (d && d.names.indexOf('plates') >= 0) {
+				const onVideo = el('p', 'mj-live-hint');
+				onVideo.innerHTML = 'To keep the plates in the video a recorder stores, put ' +
+					'<code>%{plates}</code> at the start of an overlay\'s template in ' +
+					'<a href="camera.cgi?tab=osd">' + esc(label('osd')) + '</a>, with its ' +
+					'<b>Enable</b> switch on: the last 8 ' +
+					'reads as a board, each character green or amber by how sure it was. ' +
+					'<code>%{plate:2}</code> puts a single read anywhere. Plates in the picture ' +
+					'reach everyone who sees the video, recordings and share links included.';
+				box.appendChild(onVideo);
+			}
+		}
 		if (live) {
 			state.liveCleanup.push(() => live.destroy());
 			state.liveSync.push(() => live.repaint());
