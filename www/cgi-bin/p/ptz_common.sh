@@ -3,6 +3,49 @@
 
 PTZ_POS_TMP="/tmp/ptz_pos.conf"
 PTZ_POS_ETC="/etc/ptz_pos.conf"
+AF_PEAKS_JSON="/tmp/af_peaks.json"
+AF_PEAKS_TRACK="/tmp/af_peaks_track"
+
+ptz_af_peaks_stamp() {
+	[ -f "$AF_PEAKS_JSON" ] || return 1
+	set -- $(md5sum "$AF_PEAKS_JSON" 2>/dev/null)
+	if [ -n "$1" ]; then
+		printf '%s:%s' "$1" "$(stat -c '%i:%Y' "$AF_PEAKS_JSON" 2>/dev/null || echo 0)"
+		return 0
+	fi
+	stat -c '%i:%s:%Y' "$AF_PEAKS_JSON" 2>/dev/null
+}
+
+ptz_af_track_focus() {
+	_df="${1:-0}"
+	case "$_df" in ''|*[!0-9-]*) return 0 ;; esac
+	[ "$_df" -ne 0 ] 2>/dev/null || return 0
+	_cur_stamp=$(ptz_af_peaks_stamp) || return 0
+	_cur_off=0
+	if [ -f "$AF_PEAKS_TRACK" ]; then
+		read -r _ts _to < "$AF_PEAKS_TRACK" 2>/dev/null || true
+		[ "$_ts" = "$_cur_stamp" ] && case "$_to" in ''|*[!0-9-]*) ;; *) _cur_off="$_to" ;; esac
+	fi
+	printf '%s %s\n' "$_cur_stamp" "$((_cur_off + _df))" > "${AF_PEAKS_TRACK}.tmp" && \
+		mv "${AF_PEAKS_TRACK}.tmp" "$AF_PEAKS_TRACK"
+}
+
+ptz_af_reset_track() {
+	_cur_stamp=$(ptz_af_peaks_stamp) || { rm -f "$AF_PEAKS_TRACK"; return 0; }
+	printf '%s 0\n' "$_cur_stamp" > "${AF_PEAKS_TRACK}.tmp" && \
+		mv "${AF_PEAKS_TRACK}.tmp" "$AF_PEAKS_TRACK"
+}
+
+ptz_af_manual_delta() {
+	_cur_stamp=$(ptz_af_peaks_stamp) || { echo 0; return 0; }
+	if [ -f "$AF_PEAKS_TRACK" ]; then
+		read -r _ts _to < "$AF_PEAKS_TRACK" 2>/dev/null || true
+		if [ "$_ts" = "$_cur_stamp" ]; then
+			case "$_to" in ''|*[!0-9-]*) ;; *) echo "$_to"; return 0 ;; esac
+		fi
+	fi
+	echo 0
+}
 
 # Refuse cross-site requests: a hostile page can auto-submit an HTML form
 # with cached Basic-auth credentials, so reject foreign Referers and form
@@ -115,8 +158,8 @@ ptz_apply_axis_delta() {
 		left)  PAN_MS=$((PAN_MS - _ms)) ;;
 		up)    TILT_MS=$((TILT_MS + _ms)) ;;
 		down)  TILT_MS=$((TILT_MS - _ms)) ;;
-		far)   FOCUS_MS=$((FOCUS_MS + _ms)) ;;
-		near)  FOCUS_MS=$((FOCUS_MS - _ms)) ;;
+		far)   FOCUS_MS=$((FOCUS_MS + _ms)); ptz_af_track_focus "$_ms" ;;
+		near)  FOCUS_MS=$((FOCUS_MS - _ms)); ptz_af_track_focus "$((-_ms))" ;;
 	esac
 	ptz_write_pos "$PAN_MS" "$TILT_MS" "$FOCUS_MS" "$_persist"
 }

@@ -28,7 +28,7 @@ if echo "$QUERY_STRING" | grep -q 'clear=1'; then
         exit 0
     fi
     ptz_reject_cross_site
-    rm -f "$JSON_FILE" /tmp/peak_*.jpg
+    rm -f "$JSON_FILE" /tmp/peak_*.jpg /tmp/af_peaks_track
     echo "HTTP/1.1 200 OK"
     echo "Content-Type: application/json"
     echo "Cache-Control: no-store"
@@ -105,7 +105,7 @@ if [ -n "$SELECT_ID" ]; then
     REC=$4
     TARGET=$5
     ptz_read_pos
-    MANUAL_DELTA=$((FOCUS_MS - FORIG))
+    MANUAL_DELTA=$(ptz_af_manual_delta)
     EFFECTIVE_CUR=$((CUR + MANUAL_DELTA))
     if [ "$MANUAL_DELTA" -gt 0 ]; then
         LDIR=1
@@ -164,6 +164,7 @@ if [ -n "$SELECT_ID" ]; then
         sub(/"winner":[-0-9]+/, "\"winner\":" win)
         print
     }' "$JSON_FILE" > "${JSON_FILE}.tmp" && mv "${JSON_FILE}.tmp" "$JSON_FILE"
+    ptz_af_reset_track
 
     echo "HTTP/1.1 200 OK"
     echo "Content-Type: application/json"
@@ -179,17 +180,13 @@ echo "Content-Type: application/json"
 echo "Cache-Control: no-store"
 echo ""
 if [ -f "$JSON_FILE" ]; then
-    ptz_read_pos
-    awk -v fms="$FOCUS_MS" '{
-        if (index($0, "\"focus_origin_ms\":") > 0) {
+    md=$(ptz_af_manual_delta)
+    awk -v md="$md" '{
+        if (md != 0) {
             s=$0; sub(/.*"current_pos":/, "", s); cur=s+0
-            s=$0; sub(/.*"focus_origin_ms":/, "", s); forig=s+0
-            md = fms - forig
             eff = cur + md
             sub(/"current_pos":[-0-9]+/, "\"current_pos\":" eff)
-            if (md != 0) {
-                sub(/"winner":[-0-9]+/, "\"winner\":-1,\"manual_offset\":" md)
-            }
+            sub(/"winner":[-0-9]+/, "\"winner\":-1,\"manual_offset\":" md)
         }
         print
     }' "$JSON_FILE"
