@@ -1816,6 +1816,10 @@
 			// bitrate are the fields they will change because of it.
 			const rcv = rcPanel(sec);
 			if (rcv) body.appendChild(rcv);
+			// Same placement: what plate reading needs and what it has read is
+			// what someone opening this section came to find out.
+			const plates = platesPanel(sec);
+			if (plates) body.appendChild(plates);
 			const cols = el('div', 'mj-cols');
 			cols.appendChild(el('div', 'mj-col'));
 			cols.appendChild(el('div', 'mj-col'));
@@ -10589,6 +10593,51 @@
 			rcSample = s.ok ? s : null;
 			paintRcFindings();
 		});
+	}
+
+	// Licence plates: what the feature does, what it needs, where its reads go,
+	// and the reads themselves as they arrive (mj-plates.js). The camera says
+	// none of this anywhere else a person would look: a plate is published once
+	// per vehicle on /ws/analytics, the ONVIF metadata track and the log, and
+	// reading needs object detection reporting vehicles, a setting on another
+	// page.
+	function platesPanel(sec) {
+		const P = window.MajesticPlates;
+		if (sec !== 'lpr' || !P) return null;
+		const box = el('div', 'mj-plates');
+		const what = el('p', 'mj-live-hint');
+		what.innerHTML = 'Reads the licence plate of each vehicle <a href="camera.cgi?tab=objectDetect">' +
+			esc(label('objectDetect')) + '</a> finds, once per vehicle, on the camera\'s NPU. ' +
+			'Russian and Soviet-era plates. A plate is reported when its reads agree: in the list ' +
+			'below, at <code>/api/v1/analytics</code> and <code>/ws/analytics</code> ' +
+			'(<code>"src":"plate"</code>), in the ONVIF metadata as the vehicle\'s ' +
+			'<code>LicensePlateInfo</code>, in the system log, and in recordings with ' +
+			'<code>records.metadata</code> on.';
+		box.appendChild(what);
+		// Drawn now and again after every save (refresh() runs liveSync), so
+		// it describes the config the camera holds, not the one at mount.
+		const warn = el('div', 'alert alert-warning mj-plates-need');
+		box.appendChild(warn);
+		const sayNeed = () => {
+			const need = P.missing(state.config);
+			warn.hidden = !need;
+			if (!need) return;
+			warn.innerHTML = 'No vehicles to read: ' + esc(need.join(', ')) + '. Turn on ' +
+				'<b>Enable</b> and <b>Vehicles</b> in <a href="camera.cgi?tab=objectDetect">' +
+				esc(label('objectDetect')) + '</a>.' +
+				(state.config.lpr && state.config.lpr.fallback === false ? ''
+					: ' Until then only the fallback reads, where something moves.');
+		};
+		sayNeed();
+		(state.liveSync = state.liveSync || []).push(sayNeed);
+		const head = el('div', 'mj-live-grp-head');
+		head.innerHTML = '<span class="mj-cap">Plates read</span><span class="mj-live-rule"></span>';
+		box.appendChild(head);
+		const list = el('div', 'mj-plates-box');
+		box.appendChild(list);
+		const live = P.mount(list);
+		if (live) state.liveCleanup.push(() => live.destroy());
+		return box;
 	}
 
 	function ircutPanel(sec) {

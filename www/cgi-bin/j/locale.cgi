@@ -7,6 +7,7 @@ mj_jpeg=MJPEG
 mj_motionDetect=Motion detection
 mj_faceDetect=Face detection
 mj_objectDetect=Object detection
+mj_lpr=Licence plates
 mj_audioDetect=Audio detection
 mj_netip=NETIP
 mj_nightMode=Day / Night

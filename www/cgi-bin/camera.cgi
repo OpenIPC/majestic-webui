@@ -240,6 +240,7 @@ has_cap focus && boot_motor_af=true || boot_motor_af=false
 %>
 <script src="/a/charts.js" defer></script>
 <script src="/a/mj-requires.js" defer></script>
+<script src="/a/mj-plates.js" defer></script>
 <%
 # The settings tree — which leaf every schema key is drawn on. Its own file so
 # tests/tree.test.js can ask it; mj-settings.js has no page without it.

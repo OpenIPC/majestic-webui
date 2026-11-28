@@ -59,10 +59,25 @@
 			// An event as /ws/analytics sends it. Later events from one source
 			// replace earlier ones: this is a "what is there now" display, not
 			// a log, and queueing them would only ever draw the past.
+			//
+			// Except plates: each is published once, for its own vehicle, and
+			// two cars read a moment apart are both still there. So a plate is
+			// held per vehicle, and the source's inactive event -- the camera
+			// taking its reads back -- clears them all.
 			offer: function (ev, now) {
 				if (!ev || typeof ev.src !== 'string') return false;
 				if (!Array.isArray(ev.r)) return false;
-				latest[ev.src] = { ev: ev, at: now };
+				let key = ev.src;
+				if (ev.src === 'plate') {
+					if (!ev.active) {
+						for (const k of Object.keys(latest))
+							if (k.indexOf('plate:') === 0) delete latest[k];
+					} else {
+						const b = Array.isArray(ev.r[0]) ? ev.r[0] : [];
+						key = 'plate:' + (b[6] || ev.text || '');
+					}
+				}
+				latest[key] = { ev: ev, at: now };
 				return true;
 			},
 
@@ -71,8 +86,9 @@
 			// can colour by detector.
 			boxes: function (now) {
 				const out = [];
-				for (const src in latest) {
-					const held = latest[src];
+				for (const key in latest) {
+					const held = latest[key];
+					const src = held.ev.src;
 					if (now - held.at > LINGER_MS) continue;
 					if (!held.ev.active) continue;
 					const r = held.ev.r;
@@ -90,6 +106,12 @@
 							// against the old measurement lands in the wrong
 							// place.
 							frame: { w: held.ev.w, h: held.ev.h },
+							// What a reading detector read off this box: a
+							// plate's number, on the vehicle it was read off.
+							// A string from the camera, so only ever drawn as
+							// text; empty for every other source.
+							text: src === 'plate' && typeof held.ev.text === 'string'
+								? held.ev.text.slice(0, 24) : '',
 						});
 					}
 				}
@@ -178,6 +200,12 @@
 				el.style.top = box.y.toFixed(1) + 'px';
 				el.style.width = box.w.toFixed(1) + 'px';
 				el.style.height = box.h.toFixed(1) + 'px';
+				if (b.text) {
+					const tag = document.createElement('span');
+					tag.className = 'mj-an-text';
+					tag.textContent = b.text;
+					el.appendChild(tag);
+				}
 				layer.appendChild(el);
 			}
 			if (opts.onNote) opts.onNote(st.note(now));

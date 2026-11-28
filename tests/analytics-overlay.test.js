@@ -162,4 +162,30 @@ group('nothing is drawn while the camera still owes an answer');
 	check('a fraction is not a class number', C(1.5) === '');
 }
 
+group('a plate is drawn with its number, and only a plate is');
+{
+	const s = A.store();
+	s.offer(ev({ src: 'plate', text: 'A123BC77', r: [[100, 100, 400, 300, 2, 90, 5]] }), 1000);
+	check('the plate box carries its text', s.boxes(1000)[0].text === 'A123BC77');
+	const o = A.store();
+	o.offer(ev({ src: 'object', text: 'injected', r: [[100, 100, 400, 300, 2, 90, 5]] }), 1000);
+	check('no other source draws text', o.boxes(1000)[0].text === '');
+	const n = A.store();
+	n.offer(ev({ src: 'plate', text: 7 }), 1000);
+	check('text that is not a string is not drawn', n.boxes(1000)[0].text === '');
+}
+
+group('two plates read a moment apart are both drawn, and taken back together');
+{
+	const s = A.store();
+	s.offer(ev({ src: 'plate', text: 'A123BC77', r: [[100, 100, 400, 300, 2, 90, 5]] }), 1000);
+	s.offer(ev({ src: 'plate', text: 'X001XX799', r: [[900, 100, 400, 300, 2, 95, 6]] }), 1100);
+	const texts = s.boxes(1100).map(b => b.text).sort();
+	check('both plates are drawn', texts.length === 2 && texts[0] === 'A123BC77' && texts[1] === 'X001XX799');
+	check('as plates', s.boxes(1100).every(b => b.src === 'plate'));
+	s.offer({ src: 'plate', active: false, w: 1920, h: 1080, r: [] }, 1200);
+	check('the inactive event clears them all', s.boxes(1200).length === 0);
+	check('and the lane says quiet, not stale', s.note(1200).state === 'quiet');
+}
+
 done();
