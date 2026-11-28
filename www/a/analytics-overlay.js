@@ -90,6 +90,12 @@
 							// against the old measurement lands in the wrong
 							// place.
 							frame: { w: held.ev.w, h: held.ev.h },
+							// What a reading detector read off this box: a
+							// plate's number, on the vehicle it was read off.
+							// A string from the camera, so only ever drawn as
+							// text; empty for every other source.
+							text: src === 'plate' && typeof held.ev.text === 'string'
+								? held.ev.text.slice(0, 24) : '',
 						});
 					}
 				}
@@ -178,6 +184,12 @@
 				el.style.top = box.y.toFixed(1) + 'px';
 				el.style.width = box.w.toFixed(1) + 'px';
 				el.style.height = box.h.toFixed(1) + 'px';
+				if (b.text) {
+					const tag = document.createElement('span');
+					tag.className = 'mj-an-text';
+					tag.textContent = b.text;
+					el.appendChild(tag);
+				}
 				layer.appendChild(el);
 			}
 			if (opts.onNote) opts.onNote(st.note(now));

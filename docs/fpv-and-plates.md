@@ -21,6 +21,26 @@ it can simply be absent. `wfb.cgi` is not linked from any navigation and is reac
 by URL — the FPV nav was never built, and the files that implied one were removed
 rather than left to suggest a code path that never existed. Git history has them.
 
+## Two plate features, and which is which
+
+They are easy to confuse, and people did:
+
+- **Licence plates** (Settings → Events, the `lpr` section): the camera reads
+  plates itself, on the NPU, beside object detection -- majestic's `lpr.*`
+  keys, infinity6c ultimate images with the plate models. `platesPanel()` in
+  `mj-settings.js` puts on that section what nothing else on the camera says:
+  what it needs (object detection with vehicles, on another page -- warned
+  about from the loaded config), where a read goes (`/api/v1/analytics`,
+  `/ws/analytics`, ONVIF metadata, the log, recordings), and the reads
+  themselves as they arrive (`mj-plates.js`). The camera publishes a plate
+  once per vehicle and takes it back two seconds later, so the panel keeps a
+  list rather than showing the latest event, and says the list covers only
+  the time the page has been open. The analytics overlay draws a plate's
+  number on its vehicle's box.
+- **The Plates tab of the raw editor** (below): a person drawing a rectangle
+  on a raw frame to set exposure for plates and to try a read in the browser.
+  It tunes a camera for plates; it reads nothing on its own.
+
 ## The plate reader is fetched, and `webui_lpr_base` names a mirror
 
 `lpr-loader.js` is pinned to `lpr-wasm` v0.1.0 by its commit and behaves like `raw-loader.js`
