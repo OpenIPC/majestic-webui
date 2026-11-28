@@ -39,7 +39,7 @@ function makeEnv(o) {
 	}
 	const win = {
 		isSecureContext: o.secure === true,
-		location: { protocol: 'http:', host: '192.168.1.10' },
+		location: { protocol: 'http:', host: '192.0.2.10' },
 		open(url, name, features) { env.opened.push({ url, name, features }); return o.blocked ? null : popup; },
 		addEventListener(t, f) { (env.listeners[t] = env.listeners[t] || []).push(f); },
 		removeEventListener(t, f) { env.listeners[t] = (env.listeners[t] || []).filter((x) => x !== f); },
@@ -92,7 +92,7 @@ function onlyThatWindow() {
 	env.open();
 	env.from({ t: 'hello' }, { origin: 'https://evil.example' });
 	env.from({ t: 'hello' }, { source: {} });
-	env.from({ t: 'open' }, { origin: 'http://192.168.1.10' });
+	env.from({ t: 'open', sid: 1 }, { origin: 'http://192.0.2.10' });
 	check('a stranger\'s hello gets no answer', env.posts('camera').length === 0);
 	check('a stranger\'s open opens no socket', env.sockets.length === 0);
 	env.from({ t: 'hello' }, { data: { ns: 'other', t: 'hello' } });
@@ -103,45 +103,76 @@ function onlyThatWindow() {
 	check('and only the talk origin may read it', c[0].target === ORIGIN);
 }
 
+const AUDIO_OFFER = 'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\n' +
+	'm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\n';
+const frame = (req, data) => JSON.stringify({ req, data });
+
 function carriesTextFrames() {
 	group('the socket carries the window\'s signalling, text only, both ways');
 	const env = makeEnv();
 	env.open();
-	env.from({ t: 'open' });
+	env.from({ t: 'open', sid: 1 });
 	check('one socket, for the stream asked', env.sockets.length === 1 &&
 		/\/ws\/webrtc\?stream=1$/.test(env.sockets[0].url), env.sockets[0] && env.sockets[0].url);
 	const ws = env.sockets[0];
-	env.from({ t: 'send', data: '{"req":"offer"}' });
+	env.from({ t: 'send', data: frame('offer', AUDIO_OFFER) });
 	check('nothing sent before the socket is up', ws.sent.length === 0);
 	ws.up();
-	check('the window hears it is up', env.posts('up').length === 1);
-	env.from({ t: 'send', data: '{"req":"offer","data":"v=0"}' });
+	check('the window hears it is up, with its session', env.posts('up').length === 1 && env.posts('up')[0].m.sid === 1);
+	env.from({ t: 'send', data: frame('offer', AUDIO_OFFER) });
+	env.from({ t: 'send', data: frame('candidate', 'candidate:1 1 udp 2130706431 192.0.2.20 5000 typ host') });
 	env.from({ t: 'send', data: { req: 'offer' } });
 	env.from({ t: 'send', data: 'x'.repeat(256 * 1024 + 1) });
-	check('a text frame goes to the camera; an object and an oversize one do not',
-		ws.sent.length === 1 && ws.sent[0] === '{"req":"offer","data":"v=0"}', ws.sent.length);
+	check('the offer and the candidate go to the camera; an object and an oversize one do not',
+		ws.sent.length === 2, ws.sent.length);
 	ws.say('{"reply":"answer","data":"v=0"}');
 	ws.say(new Uint8Array(4));
 	const r = env.posts('recv');
-	check('the camera\'s text reaches the window; binary does not', r.length === 1 && r[0].m.data === '{"reply":"answer","data":"v=0"}');
+	check('the camera\'s text reaches the window, with its session; binary does not',
+		r.length === 1 && r[0].m.data === '{"reply":"answer","data":"v=0"}' && r[0].m.sid === 1);
+}
+
+function onlyWhatTalkNeeds() {
+	group('the window can ask the camera for Talk and nothing more');
+	const env = makeEnv();
+	env.open();
+	env.from({ t: 'open', sid: 1 });
+	const ws = env.sockets[0];
+	ws.up();
+	const video = AUDIO_OFFER + 'm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:1\r\na=recvonly\r\n';
+	const data = AUDIO_OFFER + 'm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:1\r\n';
+	const videoOnly = AUDIO_OFFER.replace('m=audio 9 UDP/TLS/RTP/SAVPF 111', 'm=video 9 UDP/TLS/RTP/SAVPF 96');
+	for (const [what, d] of [['an offer with video', frame('offer', video)], ['an offer with a data channel', frame('offer', data)],
+		['a video-only offer', frame('offer', videoOnly)], ['another request', frame('idr', '')],
+		['a request with no data', JSON.stringify({ req: 'candidate' })], ['not JSON', 'offer']]) {
+		env.from({ t: 'send', data: d });
+		check(what + ' never reaches the camera', ws.sent.length === 0, ws.sent.join(' | ').slice(0, 80));
+	}
+	env.from({ t: 'send', data: frame('offer', AUDIO_OFFER) });
+	check('an audio-only offer does', ws.sent.length === 1);
+	env.from({ t: 'open' });
+	check('an open with no session number opens nothing', env.sockets.length === 1);
 }
 
 function aFreshSocket() {
 	group('a second open replaces the socket, and the old one says nothing');
 	const env = makeEnv();
 	env.open();
-	env.from({ t: 'open' });
+	env.from({ t: 'open', sid: 1 });
 	const old = env.sockets[0];
 	old.up();
-	env.from({ t: 'open' });
+	env.from({ t: 'open', sid: 2 });
 	check('the old socket is closed', old.closedBy === true);
 	check('a new one opened', env.sockets.length === 2);
 	old.drop();
 	old.say('{"reply":"candidate"}');
 	check('the old one\'s close and words do not reach the window',
 		env.posts('down').length === 0 && env.posts('recv').length === 0);
+	env.sockets[1].up();
+	check('the new one speaks for its own session', env.posts('up').slice(-1)[0].m.sid === 2);
 	env.sockets[1].drop();
-	check('the current one\'s close does', env.posts('down').length === 1);
+	check('the current one\'s close does, with its session',
+		env.posts('down').length === 1 && env.posts('down')[0].m.sid === 2);
 }
 
 function states() {
@@ -153,14 +184,14 @@ function states() {
 	env.from({ t: 'state', s: 'on' });
 	env.from({ t: 'state', s: 'bogus' });
 	check('asking is the window\'s own, live and on are passed', env.mic.join('|') === 'window|window|live|on', env.mic.join('|'));
-	env.from({ t: 'open' });
+	env.from({ t: 'open', sid: 1 });
 	env.sockets[0].up();
 	env.from({ t: 'state', s: 'off', why: 'permission refused' });
 	check('off, with the window\'s reason', env.mic[env.mic.length - 1] === 'off:permission refused');
 	check('the socket is closed', env.sockets[0].closedBy === true);
 	check('the window is not told to stop (it stopped)', env.posts('stop').length === 0);
 	check('not active', s.active() === false);
-	env.from({ t: 'open' });
+	env.from({ t: 'open', sid: 1 });
 	check('a late message opens nothing', env.sockets.length === 1);
 	check('no listener left', !(env.listeners.message || []).length && !(env.listeners.pagehide || []).length);
 }
@@ -169,7 +200,7 @@ function closedWindow() {
 	group('a window the person closed is noticed, and its socket closed');
 	const env = makeEnv();
 	const s = env.open();
-	env.from({ t: 'open' });
+	env.from({ t: 'open', sid: 1 });
 	env.sockets[0].up();
 	env.tick();
 	check('still running while open', s.active() === true);
@@ -186,7 +217,7 @@ function stopAndLeave() {
 		group('Talk off, or leaving the page, stops and closes the window (' + how + ')');
 		const env = makeEnv();
 		const s = env.open();
-		env.from({ t: 'open' });
+		env.from({ t: 'open', sid: 1 });
 		env.sockets[0].up();
 		if (how === 'stop') s.stop(); else for (const f of env.listeners.pagehide.slice()) f({});
 		check('the window is told to stop', env.posts('stop').length === 1);
@@ -205,7 +236,7 @@ function availability() {
 	check('no WebRTC, no window', makeEnv({ rtc: false }).R.available() === false);
 }
 
-for (const t of [blocked, opensTheWindow, onlyThatWindow, carriesTextFrames, aFreshSocket, states,
+for (const t of [blocked, opensTheWindow, onlyThatWindow, carriesTextFrames, onlyWhatTalkNeeds, aFreshSocket, states,
 	closedWindow, stopAndLeave, availability]) {
 	t();
 }

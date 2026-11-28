@@ -388,6 +388,10 @@ fake binary for the stepped backends, then remove `/tmp/webui/sysinfo.txt`.
   camera. Rules on this side:
   - It is opened in the Talk button's own change event, or the browser blocks it.
   - It is heard only from that window at that origin.
+  - It forwards only what Talk needs: an offer with a single audio section, and
+    candidates. The window is hosted, not shipped, and a top-level page cannot
+    be pinned by hash, so this gate is what keeps a changed window from asking
+    the camera for its picture.
   - It is ended when the window closes, when Talk is turned off and when the page is left.
   - It never ticks Listening: the window plays nothing.
   - Its session belongs to the page, not the player, so a swap leaves it running.
