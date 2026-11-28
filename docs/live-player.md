@@ -375,6 +375,32 @@ fake binary for the stepped backends, then remove `/tmp/webui/sysinfo.txt`.
   run. `tests/update-endings.test.js` pins all of it, including the case that must
   never regress: a socket that dies mid-flash still gets the full watch and keeps
   "do not power off".
+- **Talk on plain HTTP goes through a window of its own (#762).**
+  `getUserMedia` exists only in a secure context, and no transport changes
+  that, so on an `http://` camera the Talk button opens a popup at
+  `https://talk.share.openipc.cloud/` instead (`preview-talk-relay.js`). The
+  page is in the OpenIPC/website repository, `service/internal/sharerelay/static/talk.js`,
+  served by the share service under the share domain's existing name and
+  certificate. A popup is a top-level window, so it is a secure context whatever
+  opened it. It holds the microphone and a sound-only WebRTC session with the
+  camera. This page only forwards that session's text frames between the window
+  and a `/ws/webrtc` socket of its own, and the audio goes straight to the
+  camera. Rules on this side:
+  - It is opened in the Talk button's own change event, or the browser blocks it.
+  - It is heard only from that window at that origin.
+  - It is ended when the window closes, when Talk is turned off and when the page is left.
+  - It never ticks Listening: the window plays nothing.
+  - Its session belongs to the page, not the player, so a swap leaves it running.
+
+  The window keeps the audio on the local network. It gets no STUN or TURN
+  servers and keeps only private, link-local, CGNAT and ULA candidates, and the
+  camera does not connect toward the browser on its own. It also watches
+  Chrome's local-network permission: measured with Chrome's WebRTC check forced
+  on, a session waiting on that prompt never resumes after a grant, so a grant
+  starts a fresh one. On a camera with no Internet, the window's own service
+  worker serves the last copy it fetched. The camera sees an ordinary sound-only
+  session, so the window's session plus the picture's takes two of the camera's
+  sessions.
 - **Encrypted recordings are opened in the page, and the crypto is ours.** A
   sealed clip is Common Encryption fragmented MP4, and handed to a browser
   untouched none of it errors — MediaSource takes the init segment, takes the
