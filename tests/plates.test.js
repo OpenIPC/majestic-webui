@@ -68,6 +68,40 @@ group('the list is capped');
 	check('keeping the newest', s.reads()[0].text === 'A004AA77' && s.reads()[2].text === 'A002AA77');
 }
 
+group('each glyph keeps its own confidence, and the weakest one is found');
+{
+	const s = P.store();
+	s.offer(plate('A123BC77', { chars: [99, 98, 100, 61, 97, 99, 100, 100], read: 12 }), 1000);
+	const r = s.reads()[0];
+	check('one per glyph', r.chars.length === 8 && r.chars[3] === 61);
+	check('the read is numbered', r.seq === 12);
+	check('the least sure glyph', P.weakest(r) === 61);
+	s.offer(plate('Ж1234ЛП', { chars: [90, 91, 92, 93, 94, 95, 96, 97, 98], read: 13 }), 2000);
+	check('glyphs, not bytes: a Cyrillic plate gets seven',
+		s.reads()[0].chars.length === 7);
+	s.offer(plate('X001XX799', { chars: ['x', -5, 300] }), 3000);
+	check('a value that is not a percentage counts as unsure, not as sure',
+		s.reads()[0].chars.join() === '0,0,0');
+	check('a read with no per-glyph confidence has no weakest', P.weakest({ chars: [] }) === null);
+}
+
+group('the camera\'s history and the live socket make one list');
+{
+	const s = P.store();
+	check('history is taken', s.history({ reads: [
+		{ seq: 7, t: 5000, text: 'X001XX799', conf: 97, chars: [99, 99, 99, 99, 99, 99, 99, 99, 99], vehicle: 3, images: true },
+		{ seq: 6, t: 1000, text: 'A123BC77', conf: 90, chars: [], vehicle: 0, images: false },
+	] }) === true);
+	check('newest first', s.reads()[0].seq === 7 && s.reads()[1].seq === 6);
+	check('pictures as the camera says', s.reads()[0].images === true && s.reads()[1].images === false);
+	check('the same read arriving live is not listed twice',
+		s.offer(plate('X001XX799', { read: 7 }), 5200) === false);
+	check('a new live read goes on top', s.offer(plate('B222BB22', { read: 8 }), 9000) === true &&
+		s.reads()[0].seq === 8);
+	check('a live read does not know about pictures', s.reads()[0].images === null);
+	check('a document that is not one is ignored', s.history({}) === false && s.history(null) === false);
+}
+
 group('what plate reading is missing');
 {
 	check('nothing, with detection on and vehicles asked for', P.missing({
