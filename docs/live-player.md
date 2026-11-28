@@ -34,6 +34,31 @@ does **not** share that markup — its live tab is built client-side by
   module directly, because the tests drive those gates from a stub. **MJPEG is
   the Live page's floor, not a rung**: `onExhausted` is where each caller
   decides, and the settings preview shows an alert instead.
+- **The software rung and the MJPEG floor get their sound from beside the
+  picture** (`preview-sound.js`, #760). Neither carries audio, so on an H.265
+  camera, in any browser without a hardware HEVC decoder (Chrome on a Linux
+  desktop, Firefox), the sound control used to go the moment the software
+  picture took the stage. Now the Live page wraps either player in
+  `MajesticSound.beside()`, which opens a sound-only WebRTC session (the
+  `audioOnly` mode, one audio section and no video, so the codec that defeated
+  the picture is never negotiated). It needs only `RTCPeerConnection` and the
+  `ws://` socket, so **Listen works on plain HTTP**. Talk rides the same session
+  where the page is HTTPS. On HTTP the browser exposes no `navigator.mediaDevices`,
+  here as on every transport. Rules:
+  - the session exists only while Listen or Talk is on;
+  - nothing opens before the picture's first `playing`, because a staged trial
+    already has Listen on while the outgoing player still sounds;
+  - the session's states never reach the page's `onState` (they would walk the
+    chain); a `fallback`/`busy` from it is "no audio" and the microphone off;
+  - the camera's accept of Talk ticks Listen on the page, so the wrapper counts it
+    as listening, or Talk off would close a session the control still shows
+    playing.
+
+  The other route, sound from the software rung's own socket, was measured and
+  left: majestic muxes Opus into the same moof as a second `traf`, so the worker
+  could split it and the page could play it against the canvas clock. That would
+  be one session, sync exact, and no UDP. It needs a hevc-wasm release and an Opus
+  player, and it can only listen.
 - **The walk is one copy, `preview-chain.js`** — it used to be written in both
   consumers and the same fault fixed once in each. `decide()` is the pure walk;
   `make()` owns the retry timer and a budget refilled **only** by frames a live

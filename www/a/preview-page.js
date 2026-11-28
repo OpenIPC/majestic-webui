@@ -1082,7 +1082,9 @@
 	// Whether to offer the audio control at all: the camera has to have audio
 	// configured and this transport has to be able to carry it. MSE can only
 	// when the browser decodes a codec majestic can produce, so the answer
-	// changes with the transport and is asked again on every attach.
+	// changes with the transport and is asked again on every attach. The
+	// software picture and the MJPEG floor answer through preview-sound.js:
+	// yes wherever the browser has WebRTC, HTTP included.
 	function syncAudioCtl() {
 		if (!audioCtl) return;
 		audioCtl.hidden = !(audioConfigured && player && player.audioSupported());
@@ -1192,15 +1194,25 @@
 		// proved itself, which blanks the picture for anyone who was listening
 		// — the flicker this whole change removes, reintroduced at the last
 		// step.
-		open: (kind, el, id, onState) => MajesticVideoImpl(kind).attach(
-			el, Object.assign(
+		open: (kind, el, id, onState) => {
+			const opts = Object.assign(
 				// `stream` is the id on the wire (3*camera + subtype); the
 				// MJPEG rung wants the camera instead, because there is one
 				// MJPEG stream per camera and no subtype to choose between.
 				{ stream: wireStream(), camera: camera,
 					iceServers: () => ice,
 					audio: audioOn, volume: vol, audioOnly: audioOnly },
-				handlersFor(id, onState))),
+				handlersFor(id, onState));
+			const attach = (o) => MajesticVideoImpl(kind).attach(el, o);
+			// The software picture and the MJPEG floor carry no sound of
+			// their own; preview-sound.js gives them a sound-only session
+			// beside the picture, so the control stays (#760).
+			if ((kind === 'wasm' || kind === 'multipart') && !audioOnly &&
+				window.MajesticSound) {
+				return window.MajesticSound.beside(attach, opts);
+			}
+			return attach(opts);
+		},
 		onPromoted: (kind, proven) => {
 			// A different picture is taking the stage, so any tap invitation the
 			// last one raised belongs to a picture that is gone; take it down. The

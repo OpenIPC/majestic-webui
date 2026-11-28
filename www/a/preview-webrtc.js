@@ -53,6 +53,15 @@ window.MajesticWebRTC = (function () {
 	// path is a new session, as it always was.
 	const I = () => window.MajesticIce;
 
+	// Whether this browser will hand over a microphone at all: getUserMedia
+	// does not exist outside a secure context, so on a plain-HTTP camera this
+	// is false whatever the transport. One copy, because preview-sound.js asks
+	// it too, for a session it has not opened yet.
+	function micAvailable() {
+		return rtcOk && !!(navigator.mediaDevices &&
+			navigator.mediaDevices.getUserMedia);
+	}
+
 	function attach(video, opts) {
 		opts = opts || {};
 		const onStateOwn = opts.onState || function () {};
@@ -162,7 +171,10 @@ window.MajesticWebRTC = (function () {
 				gestureTimer = setTimeout(function () {
 					gestureTimer = null;
 					if (alive && !alive()) return;
-					if (!gestureArmed && v.muted && v.paused) { gestureArmed = true; onState('gesture'); }
+					// A sound-only session has no picture to park, but an
+					// unmuted one refused autoplay is just as stuck, and only
+					// the page can say so (#760).
+					if (!gestureArmed && (v.muted || audioOnly) && v.paused) { gestureArmed = true; onState('gesture'); }
 				}, GESTURE_ANNOUNCE_MS);
 			}
 		}
@@ -455,10 +467,7 @@ window.MajesticWebRTC = (function () {
 			wantMic = false;
 		}
 
-		function micSupported() {
-			return rtcOk && !!(navigator.mediaDevices &&
-				navigator.mediaDevices.getUserMedia);
-		}
+		function micSupported() { return micAvailable(); }
 
 		function setMic(on) {
 			on = !!on;
@@ -1022,5 +1031,5 @@ window.MajesticWebRTC = (function () {
 		};
 	}
 
-	return { attach: attach, available: rtcOk };
+	return { attach: attach, available: rtcOk, micAvailable: micAvailable };
 })();

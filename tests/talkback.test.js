@@ -421,6 +421,37 @@ async function gestureAndResumedStates() {
 		states.filter((s) => s === 'resumed').length === 1, states.join(','));
 }
 
+async function soundOnlyRefusedIsAnnounced() {
+	group('a sound-only session refused autoplay is announced too, though it is unmuted (#760)');
+	// The session that carries sound beside a picture with none
+	// (preview-sound.js) plays unmuted. Refused, it was retried on the next tap
+	// but never announced, since only a muted element was: the page went on
+	// saying Listening over silence.
+	const env = makeEnv();
+	const states = [];
+	const handlers = {};
+	const video = {
+		muted: true, volume: 1, srcObject: null, paused: true,
+		play() { return Promise.reject(Object.assign(new Error('refused'), { name: 'NotAllowedError' })); },
+		addEventListener(ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); },
+		removeEventListener(ev, fn) { handlers[ev] = (handlers[ev] || []).filter((f) => f !== fn); },
+		fire(ev) { (handlers[ev] || []).slice().forEach((f) => f({ target: this })); },
+	};
+	env.MajesticWebRTC.attach(video, { audioOnly: true, audio: true, onState: (s) => states.push(s) });
+	await tick();
+	env.pcs[0].ontrack({ streams: [{}], track: { kind: 'audio' } });
+	await tick(50);
+	check('unmuted, because the viewer is listening', video.muted === false);
+	check('a gesture retry was armed', (env.docHandlers.pointerdown || []).length === 1,
+		'arms=' + (env.docHandlers.pointerdown || []).length);
+	await tick(700);
+	check('the page was told the sound is waiting for a tap', states.filter((s) => s === 'gesture').length === 1,
+		states.join(','));
+	video.paused = false;
+	video.fire('playing');
+	check('and told once it plays', states.filter((s) => s === 'resumed').length === 1, states.join(','));
+}
+
 async function pausedTimerClearedOnDestroy() {
 	group('the paused-state timer is cleared on destroy, arming nothing later (#317)');
 	const env = makeEnv();
@@ -474,7 +505,7 @@ async function playsBeforeDebounceNoFlash() {
 (async () => {
 	for (const t of [reentrancy, cameraTakesMicButSendsNothing, destroyedDuringPrompt, cameraDeclines,
 		trackEndsOnItsOwn, destroyStopsMic, insecureContext, refused, playRetriesOnGesture,
-		playResolvesButStaysPaused, playbackStartsArmsNothing, gestureAndResumedStates,
+		playResolvesButStaysPaused, playbackStartsArmsNothing, gestureAndResumedStates, soundOnlyRefusedIsAnnounced,
 		playsBeforeDebounceNoFlash, pausedTimerClearedOnDestroy]) {
 		await t();
 	}
