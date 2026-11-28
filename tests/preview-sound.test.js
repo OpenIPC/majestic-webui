@@ -35,6 +35,8 @@ function makeEnv(o) {
 				destroy() { this.destroyed = true; },
 			};
 			env.sessions.push(s);
+			// No RTCPeerConnection, say: the player gives up inside attach().
+			if (o.failFirst && env.sessions.length === 1) opts.onState('fallback', 'RTCPeerConnection failed');
 			return s;
 		},
 	};
@@ -255,7 +257,53 @@ function supportAnswers() {
 	check('preview-webrtc.js not loaded: no sound offered', p.audioSupported() === false);
 }
 
-for (const t of [nothingBeforePlaying, listenOpensAndCloses, talkAlone, talkOffNobodyListening,
+function failsInsideAttach() {
+	group('a session that fails inside attach() is heard, and Listen can try again');
+	const env = makeEnv({ failFirst: true });
+	const p = env.open({ audio: true });
+	env.play();
+	check('reported as no audio', env.page.audio.length === 1 && env.page.audio[0] === null,
+		JSON.stringify(env.page.audio));
+	check('the failed session destroyed', env.sessions[0].destroyed === true);
+	check('its element removed', env.sessions[0].el.removed === true);
+	p.setAudio(true);
+	check('Listen on again opens a fresh one', live(env).length === 1 && env.sessions.length === 2);
+}
+
+function autoplayReachesThePage() {
+	group('sound the browser refused to start is the page\'s to announce');
+	const env = makeEnv();
+	env.open({ audio: true });
+	env.play();
+	const s = env.sessions[0];
+	s.opts.onState('gesture');
+	s.opts.onState('resumed');
+	check('the page heard gesture then resumed',
+		env.page.states.join(',') === 'playing,gesture,resumed', env.page.states.join(','));
+	check('the session stays', live(env).length === 1);
+}
+
+function declinedAudioCloses() {
+	group('a camera that declines the audio closes the session, unless Talk holds it');
+	let env = makeEnv();
+	let p = env.open({ audio: true });
+	env.play();
+	env.sessions[0].opts.onAudio(null);
+	check('the page told', env.page.audio.length === 1 && env.page.audio[0] === null);
+	check('the session closed', live(env).length === 0);
+	p.setAudio(true);
+	check('Listen on again tries afresh', live(env).length === 1 && env.sessions.length === 2);
+	env = makeEnv();
+	p = env.open({ audio: true });
+	env.play();
+	p.setMic(true);
+	env.sessions[0].opts.onAudio(null);
+	check('with Talk on, the session stays', live(env).length === 1);
+	p.setMic(false);
+	check('and closes when Talk ends, nobody listening', live(env).length === 0);
+}
+
+for (const t of [failsInsideAttach, autoplayReachesThePage, declinedAudioCloses, nothingBeforePlaying, listenOpensAndCloses, talkAlone, talkOffNobodyListening,
 	talkBeforePlaying, companionFailure, pictureAudioSwallowed, streamAndDestroy,
 	lateCallbacksIgnored, supportAnswers]) {
 	t();

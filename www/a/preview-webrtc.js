@@ -171,7 +171,10 @@ window.MajesticWebRTC = (function () {
 				gestureTimer = setTimeout(function () {
 					gestureTimer = null;
 					if (alive && !alive()) return;
-					if (!gestureArmed && v.muted && v.paused) { gestureArmed = true; onState('gesture'); }
+					// A sound-only session has no picture to park, but an
+					// unmuted one refused autoplay is just as stuck, and only
+					// the page can say so (#760).
+					if (!gestureArmed && (v.muted || audioOnly) && v.paused) { gestureArmed = true; onState('gesture'); }
 				}, GESTURE_ANNOUNCE_MS);
 			}
 		}

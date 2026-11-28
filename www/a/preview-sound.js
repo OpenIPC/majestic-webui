@@ -27,11 +27,17 @@
 //    viewer's Listen already on, while the player it is replacing is still on
 //    stage and still sounding; opening at attach would play the two together.
 //    'playing' is what promotes a trial, and the outgoing player goes then.
-//  * Speaking for the picture. The companion's states never reach the page's
-//    onState -- they would drive the fallback chain, and a sound session that
-//    failed says nothing about a picture that is playing. A companion that
-//    gives up ('fallback', 'busy') is reported as what it is: no audio, and
-//    the microphone off.
+//  * Speaking for the picture. The companion's session states never reach
+//    the page's onState -- they would drive the fallback chain, and a sound
+//    session that failed says nothing about a picture that is playing. A
+//    companion that gives up ('fallback', 'busy') is reported as what it is:
+//    no audio, and the microphone off. The exception is the autoplay pair,
+//    'gesture' and 'resumed': they describe no session, only that sound the
+//    browser refused to start is waiting for a tap, and the page's tap
+//    invitation is the one place that can say so.
+//  * Holding a session the camera declined. When it answers without audio,
+//    the page unticks Listen, and so does this. The session closes unless
+//    Talk still holds it.
 //
 // Not done: sound from the software picture's own socket. majestic muxes Opus
 // into the same fragments (a second traf in each moof), so the decoder worker
@@ -79,6 +85,7 @@ window.MajesticSound = (function () {
 		// out.
 		function companionState(mine, state, why) {
 			if (mine !== sound) return;
+			if (state === 'gesture' || state === 'resumed') { pageState(state); return; }
 			if (state !== 'fallback' && state !== 'busy') return;
 			const hadMic = talk;
 			listen = false;
@@ -95,15 +102,31 @@ window.MajesticSound = (function () {
 			el = document.createElement('audio');
 			el.hidden = true;
 			try { document.body.appendChild(el); } catch (e) {}
-			let mine = null;
+			// attach() can fail before it returns -- no RTCPeerConnection, a
+			// transceiver refused -- and say so in the same call. Until the
+			// handle exists, what it says is kept and heard once it does.
+			let mine = null, early = null;
+			const heard = (s, why) => {
+				if (mine === null) { if (s === 'fallback' || s === 'busy') early = [s, why]; return; }
+				companionState(mine, s, why);
+			};
 			mine = R.attach(el, {
 				stream: stream,
 				iceServers: opts.iceServers,
 				audioOnly: true,
 				audio: listen,
 				volume: volume,
-				onState: (s, why) => companionState(mine, s, why),
-				onAudio: (codec) => { if (mine === sound) onAudio(codec); },
+				onState: heard,
+				onAudio: (codec) => {
+					if (mine !== sound) return;
+					// The camera declined the audio: the page unticks Listen,
+					// and so does this. The session stays only for Talk.
+					if (codec === null) {
+						listen = false;
+						if (!talk) close();
+					}
+					onAudio(codec);
+				},
 				onMic: (state, why) => {
 					if (mine !== sound) return;
 					// Accepted, so the camera's audio comes with it and the
@@ -122,6 +145,7 @@ window.MajesticSound = (function () {
 				},
 			});
 			sound = mine;
+			if (early) { companionState(mine, early[0], early[1]); return; }
 			// Talk asked for before the picture had played: asked now.
 			if (talk) mine.setMic(true);
 		}
