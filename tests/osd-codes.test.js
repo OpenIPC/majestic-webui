@@ -65,6 +65,16 @@ check('the tokens are named', same(C.unknownCodes('%{temp} %{meter}', OLD), ['%{
 check('%{meter} passes where the camera has it', same(C.unknownCodes('%{meter} %{temp}', METER), ['%{temp}']));
 check('it says the line is cut', /disappears/.test(C.unknownEffect(OLD)));
 
+group('a camera that reads plates');
+// majestic's help on a build with plate reading names both codes
+const PLATES = C.dialect({ hint: 'strftime, e.g. %d.%m.%Y %H:%M:%S, plus readings such as %{temp}.',
+	help: '%{plate} is the last licence plate read and its time, %{plate:2} the one before; ' +
+		'%{plates} at the start of a line draws the last 8 as a board, %{plates:8:30m} only those under 30 minutes old.' });
+check('names the plate codes', PLATES.names.indexOf('plate') >= 0 && PLATES.names.indexOf('plates') >= 0);
+check('a board with a count and an age is known', C.unknownCodes('%{plates:8:30m} Gate 2', PLATES).length === 0);
+check('a read counted back is known', C.unknownCodes('Before: %{plate:2}', PLATES).length === 0);
+check('a camera without plate reading flags them', C.unknownCodes('%{plates}', NEW).length === 1);
+
 group('the template as pieces');
 const KNOWN = [
 	{ id: 'time', fmt: '%H:%M' }, { id: 'time', fmt: '%H:%M:%S' },
