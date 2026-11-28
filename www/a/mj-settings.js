@@ -10635,8 +10635,16 @@
 		box.appendChild(head);
 		const list = el('div', 'mj-plates-box');
 		box.appendChild(list);
-		const live = P.mount(list);
-		if (live) state.liveCleanup.push(() => live.destroy());
+		// Pictures of a read are kept only while lpr.debug is on; a live read
+		// is asked for them then, and the list is redrawn when a save turns
+		// it on or off.
+		const live = P.mount(list, {
+			pictures: () => !!(state.config.lpr && state.config.lpr.debug === true),
+		});
+		if (live) {
+			state.liveCleanup.push(() => live.destroy());
+			state.liveSync.push(() => live.repaint());
+		}
 		return box;
 	}
 
